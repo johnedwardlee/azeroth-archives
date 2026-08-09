@@ -36,7 +36,28 @@ jobs:
             throw "Tag $env:GITHUB_REF_NAME does not match package version $expectedTag."
           }
 
-      - name: Build and publish Windows release
+      - name: Build Windows release
         run: pnpm release:win
+
+      - name: Publish GitHub release
+        shell: pwsh
+        run: |
+          $package = Get-Content package.json | ConvertFrom-Json
+          $tag = $env:GITHUB_REF_NAME
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $package.version --generate-notes
+          }
+
+          $releaseAssets = @(
+            (Get-Item "release/Azeroth-Archives-Setup-$($package.version).exe").FullName
+            (Get-Item "release/Azeroth-Archives-Setup-$($package.version).exe.blockmap").FullName
+            (Get-Item "release/latest.yml").FullName
+          )
+          & gh release upload $tag $releaseAssets --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub release asset upload failed."
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
