@@ -12,9 +12,11 @@
     "dev:desktop": "cross-env AZEROTH_DEV_URL=http://localhost:5173 wait-on http://localhost:5173 && electron .",
     "build": "tsc --noEmit && vite build",
     "dist": "pnpm run build && electron-builder --win nsis",
+    "release:win": "pnpm run build && electron-builder --win nsis --publish always",
     "test": "tsc --noEmit && vite build"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.30.0",
     "react": "19.2.6",
@@ -49,7 +51,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -59,6 +63,14 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Azeroth Archives"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "johnedwardlee",
+        "repo": "azeroth-archives",
+        "releaseType": "release"
+      }
+    ]
   }
 }

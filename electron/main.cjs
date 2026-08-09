@@ -1,6 +1,25 @@
 const { app, BrowserWindow, dialog, ipcMain, session } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+
+const UPDATE_HOSTS = new Set(["api.github.com", "github.com"]);
+
+function isAllowedNetworkRequest(requestUrl) {
+  const devUrl = process.env.AZEROTH_DEV_URL;
+  if (devUrl && requestUrl.startsWith(devUrl)) return true;
+
+  try {
+    const url = new URL(requestUrl);
+    return (
+      app.isPackaged &&
+      url.protocol === "https:" &&
+      (UPDATE_HOSTS.has(url.hostname) || url.hostname.endsWith(".githubusercontent.com"))
+    );
+  } catch {
+    return false;
+  }
+}
 
 const emptyStore = () => ({ version: 1, characters: [], packs: [] });
 const dataPath = () => path.join(app.getPath("userData"), "azeroth-archives-data.json");
@@ -101,15 +120,51 @@ function createWindow() {
   else window.loadFile(path.join(__dirname, "..", "dist-renderer", "index.html"));
 }
 
+function configureAutoUpdater() {
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("error", (error) => {
+    console.error("Automatic update failed:", error);
+  });
+
+  autoUpdater.on("update-downloaded", async (updateInfo) => {
+    const options = {
+      type: "info",
+      title: "Update ready",
+      message: `Azeroth Archives ${updateInfo.version} is ready to install.`,
+      detail: "Restart the app now to finish installing the update.",
+      buttons: ["Restart and install", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    };
+    const owner = BrowserWindow.getFocusedWindow();
+    const result = owner
+      ? await dialog.showMessageBox(owner, options)
+      : await dialog.showMessageBox(options);
+
+    if (result.response === 0) autoUpdater.quitAndInstall(false, true);
+  });
+
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((error) => {
+      console.error("Unable to check for updates:", error);
+    });
+  }, 10_000);
+}
+
 app.whenReady().then(() => {
   session.defaultSession.webRequest.onBeforeRequest(
     { urls: ["http://*/*", "https://*/*"] },
     (details, callback) => {
-      const devUrl = process.env.AZEROTH_DEV_URL;
-      callback({ cancel: !devUrl || !details.url.startsWith(devUrl) });
+      callback({ cancel: !isAllowedNetworkRequest(details.url) });
     },
   );
   createWindow();
+  configureAutoUpdater();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
