@@ -55,6 +55,11 @@
   },
   "$defs": {
     "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "aliases": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
     "ability": { "enum": ["strength", "agility", "stamina", "intellect", "spirit", "charisma"] },
     "feature": {
       "type": "object",
@@ -63,6 +68,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
+        "aliases": { "$ref": "#/$defs/aliases" },
         "description": { "type": "string", "minLength": 1 },
         "source": { "type": "string" }
       }
@@ -74,6 +80,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
+        "aliases": { "$ref": "#/$defs/aliases" },
         "speed": { "type": "integer", "minimum": 0 },
         "abilityBonuses": {
           "type": "object",
@@ -90,6 +97,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
+        "aliases": { "$ref": "#/$defs/aliases" },
         "hitDie": { "enum": [4, 6, 8, 10, 12] },
         "primaryAbility": { "$ref": "#/$defs/ability" },
         "description": { "type": "string" },
@@ -113,6 +121,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
+        "aliases": { "$ref": "#/$defs/aliases" },
         "description": { "type": "string" },
         "levelFeatures": {
           "type": "object",
@@ -128,6 +137,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
+        "aliases": { "$ref": "#/$defs/aliases" },
         "skills": { "type": "array", "items": { "type": "string" } },
         "feature": { "$ref": "#/$defs/feature" },
         "abilityOptions": { "type": "array", "items": { "$ref": "#/$defs/ability" } },
@@ -143,6 +153,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
+        "aliases": { "$ref": "#/$defs/aliases" },
         "category": { "type": "string", "minLength": 1 },
         "prerequisite": { "type": "string" },
         "description": { "type": "string", "minLength": 1 },
@@ -156,6 +167,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
+        "aliases": { "$ref": "#/$defs/aliases" },
         "category": { "type": "string", "minLength": 1 },
         "description": { "type": "string" },
         "cost": { "type": "string" },
@@ -174,6 +186,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
+        "aliases": { "$ref": "#/$defs/aliases" },
         "level": { "type": "integer", "minimum": 0, "maximum": 9 },
         "school": { "type": "string", "minLength": 1 },
         "classes": { "type": "array", "items": { "type": "string" } },
@@ -193,6 +206,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
+        "aliases": { "$ref": "#/$defs/aliases" },
         "challengeRating": { "type": "string" },
         "description": { "type": "string", "minLength": 1 },
         "source": { "type": "string" }
@@ -205,6 +219,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
+        "aliases": { "$ref": "#/$defs/aliases" },
         "category": { "type": "string", "minLength": 1 },
         "description": { "type": "string", "minLength": 1 },
         "source": { "type": "string" }

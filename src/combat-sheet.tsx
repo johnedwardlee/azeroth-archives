@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Dices, Plus, Swords, Trash2 } from "lucide-react";
+import { DescriptionPicker } from "./description-picker";
 import {
   ABILITY_LABELS,
   abilityModifier,
@@ -177,7 +178,7 @@ export function CombatManager({
       <section className="panel attacks-panel">
         <div className="section-heading"><div><span className="eyebrow">Combat actions</span><h2>Attacks</h2></div><button className="button button-outline" onClick={addCustomAttack}><Plus size={14} />Custom</button></div>
         <div className="weapon-import-row">
-          <select value={weaponId} onChange={(event) => setWeaponId(event.target.value)}><option value="">Add a carried weapon</option>{carriedWeapons.map((weapon) => <option key={weapon.id} value={weapon.id}>{weapon.name} · {weapon.damage} {weapon.damageType}</option>)}</select>
+          <DescriptionPicker ariaLabel="Carried weapons" value={weaponId} placeholder="Add a carried weapon" onChange={setWeaponId} options={carriedWeapons.map((weapon) => ({ value: weapon.id, label: weapon.name, meta: `${weapon.damage} ${weapon.damageType}${weapon.mastery ? ` · ${weapon.mastery}` : ""}`, description: [weapon.description, weapon.properties?.length ? `Properties: ${weapon.properties.join(", ")}` : ""].filter(Boolean).join("\n\n") }))} />
           <button className="button button-primary" disabled={!weaponId} onClick={addWeapon}><Swords size={14} />Add attack</button>
         </div>
         <div className="attack-list">

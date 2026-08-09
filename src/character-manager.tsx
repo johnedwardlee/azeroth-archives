@@ -2,7 +2,6 @@
 
 import {
   BookOpen,
-  ChevronDown,
   Copy,
   Download,
   FileDown,
@@ -26,13 +25,19 @@ import {
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { FeatManager, InventoryManager, SessionTracker, SpellbookManager } from "./living-sheet";
 import { CombatManager, SKILLS } from "./combat-sheet";
+import { DescriptionPicker } from "./description-picker";
+import bundledWarcraftPackJson from "../content-packs/warcraft5e-campaign.w5e?raw";
 import {
   ABILITY_LABELS,
   abilityModifier,
   proficiencyForLevel,
   type AbilityKey,
+  type AncestryDefinition,
+  type BackgroundDefinition,
   type CharacterData,
+  type ClassDefinition,
   type ContentPack,
+  type RulesFeature,
 } from "../lib/types";
 
 type Tab = "overview" | "features" | "combat" | "spells" | "equipment" | "notes";
@@ -40,6 +45,12 @@ type OfflineStore = { version: 1; characters: CharacterData[]; packs: ContentPac
 
 const abilityKeys = Object.keys(ABILITY_LABELS) as AbilityKey[];
 const browserStorageKey = "azeroth-archives-offline-data";
+const bundledWarcraftPack = JSON.parse(bundledWarcraftPackJson) as ContentPack;
+const bundledPackId = bundledWarcraftPack.pack.id;
+
+function withBundledPack(packs: ContentPack[]) {
+  return [bundledWarcraftPack, ...packs.filter((pack) => pack.pack.id !== bundledPackId)];
+}
 
 function readBrowserStore(): OfflineStore {
   try {
@@ -138,6 +149,30 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "?";
 }
 
+function featureIdentity(feature: RulesFeature) {
+  return feature.id ? `id:${feature.id}` : `name:${feature.name}`;
+}
+
+function ancestryDescription(ancestry: AncestryDefinition) {
+  return ancestry.traits.map((trait) => `${trait.name}\n${trait.description}`).join("\n\n");
+}
+
+function classDescription(definition: ClassDefinition) {
+  const details = `Hit Die: d${definition.hitDie}\nPrimary ability: ${ABILITY_LABELS[definition.primaryAbility]}`;
+  return [details, definition.description].filter(Boolean).join("\n\n");
+}
+
+function backgroundDescription(background: BackgroundDefinition) {
+  return [
+    background.skills.length ? `Skills: ${background.skills.join(", ")}` : "",
+    background.abilityOptions?.length ? `Abilities: ${background.abilityOptions.map((ability) => ABILITY_LABELS[ability]).join(", ")}` : "",
+    background.featId ? `Feat: ${background.featId.replaceAll("-", " ")}` : "",
+    background.toolProficiencies?.length ? `Tools: ${background.toolProficiencies.join(", ")}` : "",
+    background.equipment ? `Equipment: ${background.equipment}` : "",
+    background.feature?.description,
+  ].filter(Boolean).join("\n\n");
+}
+
 export function CharacterManager() {
   const [characters, setCharacters] = useState<CharacterData[]>([]);
   const [character, setCharacter] = useState<CharacterData>(newCharacter);
@@ -179,9 +214,17 @@ export function CharacterManager() {
     () => character.features.map((feature) => feature.id ? featureCatalogById.get(feature.id) ?? feature : feature),
     [character.features, featureCatalogById],
   );
+  const selectedAncestry = useMemo(
+    () => ancestries.find((item) => item.name === character.ancestry),
+    [ancestries, character.ancestry],
+  );
   const selectedClass = useMemo(
     () => classes.find((item) => item.name === character.className),
     [classes, character.className],
+  );
+  const selectedBackground = useMemo(
+    () => backgrounds.find((item) => item.name === character.background),
+    [backgrounds, character.background],
   );
   const subclasses = selectedClass?.subclasses ?? [];
   const visibleCharacters = characters.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()));
@@ -189,6 +232,16 @@ export function CharacterManager() {
   const xpProgress = Math.min(100, Math.round((character.experience / nextLevelXp) * 100));
   const plannedLevel = Math.min(20, character.level + 1);
   const selectedSubclass = selectedClass?.subclasses?.find((item) => item.name === character.subclassName);
+  const activeFeatureOrigins = useMemo(() => {
+    const origins = new Map<string, string>();
+    const record = (features: RulesFeature[], label: string) => features.forEach((feature) => origins.set(featureIdentity(feature), label));
+    if (selectedAncestry) record(selectedAncestry.traits, `${selectedAncestry.name} ancestry`);
+    if (selectedClass) record(Object.values(selectedClass.levelFeatures).flat(), `${selectedClass.name} class`);
+    if (selectedSubclass) record(Object.values(selectedSubclass.levelFeatures).flat(), `${selectedSubclass.name} subclass`);
+    if (selectedBackground?.feature) record([selectedBackground.feature], `${selectedBackground.name} background`);
+    return origins;
+  }, [selectedAncestry, selectedBackground, selectedClass, selectedSubclass]);
+  const featureOrigin = (feature: RulesFeature) => activeFeatureOrigins.get(featureIdentity(feature));
   const plannedClassFeatures = selectedClass?.levelFeatures[String(plannedLevel)] ?? [];
   const plannedSubclassFeatures = selectedSubclass?.levelFeatures[String(plannedLevel)] ?? [];
   const plannedFeatures = [...plannedClassFeatures, ...plannedSubclassFeatures];
@@ -200,7 +253,7 @@ export function CharacterManager() {
       const loadedCharacters = store.characters.map((item) => normalizeCharacter(item));
       setCharacters(loadedCharacters);
       if (loadedCharacters[0]) setCharacter(loadedCharacters[0]);
-      setCustomPacks(store.packs);
+      setCustomPacks(withBundledPack(store.packs));
       setStatus(store.characters.length ? "Saved on this device" : "Create your first hero");
     }).catch(() => setStatus("Could not read local character data"));
   }, []);
@@ -444,6 +497,10 @@ export function CharacterManager() {
       if (!(["1.0", "2.0"] as const).includes(pack.schemaVersion) || !pack.pack?.id || !pack.pack?.name || !pack.pack?.version) {
         throw new Error("Missing required pack details");
       }
+      if (pack.pack.id === bundledPackId) {
+        setStatus("The Warcraft campaign pack is included with the app and updates automatically");
+        return;
+      }
       if (window.azerothDesktop) {
         await window.azerothDesktop.savePack(pack);
       } else {
@@ -460,6 +517,10 @@ export function CharacterManager() {
   }
 
   async function removePack(id: string) {
+    if (id === bundledPackId) {
+      setStatus("The Warcraft campaign pack is included with the app and updates automatically");
+      return;
+    }
     if (window.azerothDesktop) {
       await window.azerothDesktop.deletePack(id);
     } else {
@@ -504,7 +565,8 @@ export function CharacterManager() {
     doc.setFontSize(11); doc.setTextColor(...green); doc.text("FEATURES & TRAITS", 42, 338);
     let y = 358;
     resolvedFeatures.slice(0, 8).forEach((feature) => {
-      doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...ink); doc.text(feature.name, 42, y);
+      const origin = featureOrigin(feature);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...ink); doc.text(origin ? `${feature.name} — ${origin}` : feature.name, 42, y);
       doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(80, 83, 78);
       const lines = doc.splitTextToSize(feature.description, 500) as string[];
       doc.text(lines, 42, y + 13); y += 24 + lines.length * 9;
@@ -633,12 +695,12 @@ export function CharacterManager() {
             <label className="eyebrow" htmlFor="character-name">Character name</label>
             <input id="character-name" className="name-input" value={character.name} onChange={(event) => patchCharacter({ name: event.target.value })} />
             <div className="identity-selects">
-              <label><span>Ancestry</span><select value={character.ancestry} onChange={(event) => applyAncestry(event.target.value)}><option value="">Choose ancestry</option>{ancestries.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label>
+              <DescriptionPicker className="identity-picker" ariaLabel="Ancestry" value={character.ancestry} placeholder="Choose ancestry" onChange={applyAncestry} options={ancestries.map((item) => ({ value: item.name, label: item.name, meta: `${item.speed} ft. speed · ${item.traits.length} traits`, description: ancestryDescription(item) }))} />
               <i />
-              <label><span>Class</span><select value={character.className} onChange={(event) => applyClass(event.target.value)}><option value="">Choose class</option>{classes.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label>
+              <DescriptionPicker className="identity-picker" ariaLabel="Class" value={character.className} placeholder="Choose class" onChange={applyClass} options={classes.map((item) => ({ value: item.name, label: item.name, meta: `d${item.hitDie} Hit Die · ${ABILITY_LABELS[item.primaryAbility]}`, description: classDescription(item) }))} />
               <i />
-              {!!subclasses.length && <><label><span>Subclass</span><select value={character.subclassName ?? ""} onChange={(event) => applySubclass(event.target.value)}><option value="">Choose subclass</option>{subclasses.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label><i /></>}
-              <label><span>Background</span><select value={character.background} onChange={(event) => applyBackground(event.target.value)}><option value="">Choose background</option>{backgrounds.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label>
+              {!!subclasses.length && <><DescriptionPicker className="identity-picker" ariaLabel="Subclass" value={character.subclassName ?? ""} placeholder="Choose subclass" onChange={applySubclass} options={subclasses.map((item) => ({ value: item.name, label: item.name, meta: `${selectedClass?.name ?? "Class"} specialization`, description: item.description || Object.values(item.levelFeatures).flat().map((feature) => `${feature.name}: ${feature.description}`).join("\n\n") }))} /><i /></>}
+              <DescriptionPicker className="identity-picker" ariaLabel="Background" value={character.background} placeholder="Choose background" onChange={applyBackground} options={backgrounds.map((item) => ({ value: item.name, label: item.name, meta: [item.skills.join(", "), item.featId?.replaceAll("-", " ")].filter(Boolean).join(" · "), description: backgroundDescription(item) }))} />
             </div>
           </div>
           <div className="level-card">
@@ -681,7 +743,7 @@ export function CharacterManager() {
                 <label><span>Experience points</span><input type="number" min="0" value={character.experience} onChange={(event) => patchCharacter({ experience: Math.max(0, Number(event.target.value)) })} /></label>
               </div>
               <div className="feature-preview">
-                <div><span className="eyebrow">Recently gained</span><h3>{resolvedFeatures.at(-1)?.name ?? "Ready for adventure"}</h3><p>{resolvedFeatures.at(-1)?.description ?? "Add features through your ancestry, class, or an imported content pack."}</p></div>
+                <div><span className="eyebrow">Recently gained</span><h3>{resolvedFeatures.at(-1)?.name ?? "Ready for adventure"}</h3>{resolvedFeatures.at(-1) && featureOrigin(resolvedFeatures.at(-1)!) && <small className="feature-origin">Granted by {featureOrigin(resolvedFeatures.at(-1)!)}</small>}<p>{resolvedFeatures.at(-1)?.description ?? "Add features through your ancestry, class, or an imported content pack."}</p></div>
                 <button className="text-button" onClick={() => setTab("features")}>View all features <span>→</span></button>
               </div>
             </section>
@@ -695,7 +757,7 @@ export function CharacterManager() {
           <section className="panel wide-panel">
             <div className="section-heading"><div><span className="eyebrow">Rules reference</span><h2>Features & traits</h2></div><span className="count-chip">{character.features.length}</span></div>
             <div className="feature-list">
-              {resolvedFeatures.map((feature, index) => <article key={`${feature.name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><div><h3>{feature.name}</h3><p>{feature.description}</p></div></article>)}
+              {resolvedFeatures.map((feature, index) => <article key={`${feature.name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><div><div className="feature-title-row"><h3>{feature.name}</h3>{featureOrigin(feature) && <small className="feature-origin">{featureOrigin(feature)}</small>}</div><p>{feature.description}</p></div></article>)}
               {!character.features.length && <div className="empty-state">No features yet. Choose an ancestry and class or import a content pack.</div>}
             </div>
           </section>
@@ -741,7 +803,7 @@ export function CharacterManager() {
           </div>
           <div className="level-up-features">
             <span className="eyebrow">Features gained</span>
-            {plannedFeatures.map((feature) => <article key={feature.id ?? feature.name}><strong>{feature.name}</strong><p>{feature.description}</p></article>)}
+            {plannedFeatures.map((feature) => <article key={feature.id ?? feature.name}><div className="level-up-feature-title"><strong>{feature.name}</strong>{featureOrigin(feature) && <small className="feature-origin">{featureOrigin(feature)}</small>}</div><p>{feature.description}</p></article>)}
             {!plannedFeatures.length && !needsSubclass && <p className="level-up-empty">No automatic class features are listed for this level. You can still adjust abilities, feats, and spells after advancing.</p>}
             {needsSubclass && <p className="level-up-warning">Choose a subclass in the character header before advancing; this level grants a subclass feature.</p>}
           </div>
@@ -755,14 +817,16 @@ export function CharacterManager() {
       <div className={`drawer-scrim ${showLibrary || showRoster ? "visible" : ""}`} onClick={() => { setShowLibrary(false); setShowRoster(false); }} />
       <aside className={`library-drawer ${showLibrary ? "is-open" : ""}`} aria-hidden={!showLibrary}>
         <div className="drawer-heading"><div><span className="eyebrow">Rules collection</span><h2>Content library</h2></div><button className="icon-button" onClick={() => setShowLibrary(false)} aria-label="Close library"><X size={19} /></button></div>
-        <p className="drawer-intro">Import structured rules extracted from your Warcraft 5E PDFs. Everything stays on this computer, and new options appear immediately.</p>
+        <p className="drawer-intro">The approved Warcraft campaign rules are included with the app. Import additional structured rules from your PDFs when the GM approves them; everything stays on this computer.</p>
         <button className="button button-primary drawer-import" onClick={() => fileInput.current?.click()}><Upload size={16} />Import content file</button>
         <div className="pack-list">
           {content.map((pack, index) => (
             <article className="pack-card" key={pack.pack.id}>
               <div className={`pack-glyph pack-tone-${index % 3}`}><LibraryBig size={20} /></div>
               <div><strong>{pack.pack.name}</strong><span>Version {pack.pack.version} · Schema {pack.schemaVersion}</span><small>{(pack.ancestries?.length ?? 0)} ancestries · {(pack.classes?.length ?? 0)} classes · {(pack.backgrounds?.length ?? 0)} backgrounds · {(pack.feats?.length ?? 0)} feats · {(pack.spells?.length ?? 0)} spells</small></div>
-              <button className="icon-button danger" aria-label={`Remove ${pack.pack.name}`} onClick={() => removePack(pack.pack.id)}><Trash2 size={15} /></button>
+              {pack.pack.id === bundledPackId
+                ? <span className="pack-bundled-label">Included</span>
+                : <button className="icon-button danger" aria-label={`Remove ${pack.pack.name}`} onClick={() => removePack(pack.pack.id)}><Trash2 size={15} /></button>}
             </article>
           ))}
           {!content.length && <div className="empty-state compact">No content packs imported. Import a .w5e file to add character options.</div>}

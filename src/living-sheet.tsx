@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Heart, Plus, Search, Sparkles, Trash2 } from "lucide-react";
+import { DescriptionPicker } from "./description-picker";
 import type {
   CharacterData,
   EquipmentDefinition,
@@ -31,6 +32,15 @@ const CONDITIONS = [
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, Number.isFinite(value) ? value : minimum));
+}
+
+function equipmentDescription(item: EquipmentDefinition) {
+  return [
+    item.description,
+    item.damage ? `Damage: ${item.damage}${item.damageType ? ` ${item.damageType}` : ""}` : "",
+    item.properties?.length ? `Properties: ${item.properties.join(", ")}` : "",
+    item.mastery ? `Mastery: ${item.mastery}` : "",
+  ].filter(Boolean).join("\n\n");
 }
 
 export function SessionTracker({ character, patchCharacter }: { character: CharacterData; patchCharacter: PatchCharacter }) {
@@ -136,7 +146,7 @@ export function FeatManager({ catalog, character, patchCharacter }: { catalog: F
   return (
     <section className="panel wide-panel tracker-panel">
       <div className="section-heading"><div><span className="eyebrow">Character choices</span><h2>Feats</h2></div><span className="count-chip">{character.feats.length}</span></div>
-      <div className="catalog-add-row"><select aria-label="Available feats" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Choose an available feat</option>{available.map((feat) => <option key={feat.id} value={feat.id}>{feat.name} · {feat.category}</option>)}</select><button className="button button-primary" disabled={!selectedId} onClick={addFeat}><Plus size={15} />Add feat</button></div>
+      <div className="catalog-add-row"><DescriptionPicker ariaLabel="Available feats" value={selectedId} placeholder="Choose an available feat" onChange={setSelectedId} options={available.map((feat) => ({ value: feat.id, label: feat.name, meta: [feat.category, feat.prerequisite].filter(Boolean).join(" · "), description: feat.description }))} /><button className="button button-primary" disabled={!selectedId} onClick={addFeat}><Plus size={15} />Add feat</button></div>
       <div className="tracker-card-list">
         {visibleFeats.map((feat) => <article key={feat.id}><div><span>{feat.category}</span><h3>{feat.name}</h3>{feat.prerequisite && <small>{feat.prerequisite}</small>}<p>{feat.description}</p></div><button className="icon-button danger" aria-label={`Remove ${feat.name}`} onClick={() => patchCharacter({ feats: character.feats.filter((item) => item.id !== feat.id) })}><Trash2 size={14} /></button></article>)}
         {!character.feats.length && <div className="empty-state compact">No feats selected yet.</div>}
@@ -184,7 +194,7 @@ export function SpellbookManager({ catalog, character, patchCharacter }: { catal
 
       <section className="panel spell-list-panel">
         <div className="section-heading"><div><span className="eyebrow">Known magic</span><h2>Spellbook</h2></div><span className="count-chip">{character.spells.length}</span></div>
-        <div className="catalog-add-row spell-add"><select aria-label="Available spells" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Choose a spell</option>{available.map((spell) => <option key={spell.id} value={spell.id}>{spell.level ? `Level ${spell.level}` : "Cantrip"} · {spell.name}</option>)}</select><button className="button button-primary" disabled={!selectedId} onClick={addSpell}><Plus size={15} />Learn</button><label className="inline-check"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />All classes</label></div>
+        <div className="catalog-add-row spell-add"><DescriptionPicker ariaLabel="Available spells" value={selectedId} placeholder="Choose a spell" onChange={setSelectedId} options={available.map((spell) => ({ value: spell.id, label: spell.name, meta: `${spell.level ? `Level ${spell.level}` : "Cantrip"} · ${spell.school} · ${spell.classes.join(", ")}`, description: `${spell.castingTime} · ${spell.range} · ${spell.duration}\n\n${spell.description}` }))} /><button className="button button-primary" disabled={!selectedId} onClick={addSpell}><Plus size={15} />Learn</button><label className="inline-check"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />All classes</label></div>
         <label className="catalog-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search known spells" /></label>
         <div className="spell-card-list">{visibleSpells.map((spell) => <article key={spell.id} className={spell.prepared ? "prepared" : ""}><div className="spell-card-top"><div><span>{spell.level ? `Level ${spell.level} ${spell.school}` : `${spell.school} cantrip`}</span><h3>{spell.name}</h3></div><label><input type="checkbox" checked={spell.prepared} onChange={(event) => patchCharacter({ spells: character.spells.map((item) => item.id === spell.id ? { ...item, prepared: event.target.checked } : item) })} />Prepared</label><button className="icon-button danger" aria-label={`Forget ${spell.name}`} onClick={() => patchCharacter({ spells: character.spells.filter((item) => item.id !== spell.id) })}><Trash2 size={14} /></button></div><div className="spell-meta"><span>{spell.castingTime}</span><span>{spell.range}</span><span>{spell.duration}</span></div><p>{spell.description}</p></article>)}</div>
         {!visibleSpells.length && <div className="empty-state compact">No spells here yet. Learn one from the imported content library.</div>}
@@ -247,7 +257,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
 
       <section className="panel inventory-panel">
         <div className="section-heading"><div><span className="eyebrow">Possessions</span><h2>Equipment & inventory</h2></div><span className="count-chip">{character.inventory.length}</span></div>
-        <div className="catalog-add-row"><select aria-label="Available equipment" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Choose imported equipment</option>{catalog.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.category}</option>)}</select><button className="button button-primary" disabled={!selectedId} onClick={addCatalogItem}><Plus size={15} />Add</button></div>
+        <div className="catalog-add-row"><DescriptionPicker ariaLabel="Available equipment" value={selectedId} placeholder="Choose imported equipment" onChange={setSelectedId} options={catalog.map((item) => ({ value: item.id, label: item.name, meta: [item.category, item.cost, item.weight].filter(Boolean).join(" · "), description: equipmentDescription(item) }))} /><button className="button button-primary" disabled={!selectedId} onClick={addCatalogItem}><Plus size={15} />Add</button></div>
         <div className="custom-item-row"><input value={customName} onChange={(event) => setCustomName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addCustomItem(); }} placeholder="Add a custom item" /><button onClick={addCustomItem}><Plus size={15} /></button></div>
         <div className="inventory-list">{visibleInventory.map((item) => <article key={item.id} className={item.equipped ? "equipped" : ""}><label className="equip-check"><input type="checkbox" checked={item.equipped} onChange={(event) => updateItem(item.id, { equipped: event.target.checked })} /><span>Equipped</span></label><div className="inventory-name"><h3>{item.name}</h3><span>{item.category}{item.cost ? ` · ${item.cost}` : ""}{item.weight ? ` · ${item.weight}` : ""}</span></div><label className="quantity-field">Qty <input aria-label={`${item.name} quantity`} type="number" min="0" value={item.quantity} onChange={(event) => updateItem(item.id, { quantity: Math.max(0, Number(event.target.value)) })} /></label><input className="item-notes" aria-label={`${item.name} notes`} value={item.notes} onChange={(event) => updateItem(item.id, { notes: event.target.value })} placeholder="Notes" /><button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => patchCharacter({ inventory: character.inventory.filter((value) => value.id !== item.id) })}><Trash2 size={14} /></button></article>)}</div>
         {!character.inventory.length && <div className="empty-state compact">Your inventory is empty.</div>}

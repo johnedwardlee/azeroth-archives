@@ -3,6 +3,7 @@ export type AbilityKey = "strength" | "agility" | "stamina" | "intellect" | "spi
 export type RulesFeature = {
   id?: string;
   name: string;
+  aliases?: string[];
   description: string;
   source?: string;
 };
@@ -10,6 +11,7 @@ export type RulesFeature = {
 export type AncestryDefinition = {
   id: string;
   name: string;
+  aliases?: string[];
   speed: number;
   abilityBonuses?: Partial<Record<AbilityKey, number>>;
   traits: RulesFeature[];
@@ -18,6 +20,7 @@ export type AncestryDefinition = {
 export type ClassDefinition = {
   id: string;
   name: string;
+  aliases?: string[];
   hitDie: number;
   primaryAbility: AbilityKey;
   levelFeatures: Record<string, RulesFeature[]>;
@@ -29,6 +32,7 @@ export type ClassDefinition = {
 export type SubclassDefinition = {
   id: string;
   name: string;
+  aliases?: string[];
   levelFeatures: Record<string, RulesFeature[]>;
   description?: string;
 };
@@ -36,6 +40,7 @@ export type SubclassDefinition = {
 export type BackgroundDefinition = {
   id: string;
   name: string;
+  aliases?: string[];
   skills: string[];
   feature?: RulesFeature;
   abilityOptions?: AbilityKey[];
@@ -47,6 +52,7 @@ export type BackgroundDefinition = {
 export type FeatDefinition = {
   id: string;
   name: string;
+  aliases?: string[];
   category: string;
   prerequisite?: string;
   description: string;
@@ -56,6 +62,7 @@ export type FeatDefinition = {
 export type EquipmentDefinition = {
   id: string;
   name: string;
+  aliases?: string[];
   category: string;
   description?: string;
   cost?: string;
@@ -70,6 +77,7 @@ export type EquipmentDefinition = {
 export type SpellDefinition = {
   id: string;
   name: string;
+  aliases?: string[];
   level: number;
   school: string;
   classes: string[];
@@ -85,6 +93,7 @@ export type SpellDefinition = {
 export type CreatureDefinition = {
   id: string;
   name: string;
+  aliases?: string[];
   challengeRating?: string;
   description: string;
   source?: string;
@@ -93,6 +102,7 @@ export type CreatureDefinition = {
 export type RuleDefinition = {
   id: string;
   name: string;
+  aliases?: string[];
   category: string;
   description: string;
   source?: string;
