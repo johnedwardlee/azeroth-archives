@@ -59,5 +59,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "GitHub release asset upload failed."
           }
+
+          gh release edit $tag --title $package.version --draft=false --prerelease=false
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub release publication failed."
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
