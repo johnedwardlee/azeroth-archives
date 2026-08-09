@@ -27,6 +27,7 @@ import { FeatManager, InventoryManager, SessionTracker, SpellbookManager } from 
 import { CombatManager, SKILLS } from "./combat-sheet";
 import { DescriptionPicker } from "./description-picker";
 import bundledWarcraftPackJson from "../content-packs/warcraft5e-campaign.w5e?raw";
+import packageMetadata from "../package.json";
 import {
   ABILITY_LABELS,
   abilityModifier,
@@ -643,7 +644,10 @@ export function CharacterManager() {
       <header className="topbar">
         <button className="icon-button mobile-only" aria-label="Open roster" onClick={() => setShowRoster(true)}><Menu size={20} /></button>
         <div className="brand-mark" aria-hidden="true">A</div>
-        <div className="brand-copy"><strong>Azeroth Archives</strong><span>Offline Warcraft 5E character manager</span></div>
+        <div className="brand-copy">
+          <div className="brand-title-row"><strong>Azeroth Archives</strong><small className="app-version">v{packageMetadata.version}</small></div>
+          <span>Offline Warcraft 5E character manager</span>
+        </div>
         <div className="topbar-actions">
           <button className="button button-quiet" onClick={() => setShowLibrary(true)}><LibraryBig size={16} /><span>Content library</span><b>{content.length}</b></button>
           <button className="button button-outline" onClick={exportPdf}><Download size={16} /><span>Export PDF</span></button>
