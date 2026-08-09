@@ -1,0 +1,127 @@
+{
+  "schemaVersion": "2.0",
+  "pack": {
+    "id": "example-schema-two",
+    "name": "Schema 2 Example",
+    "version": "1.0.0",
+    "description": "A compact example of the extended content format.",
+    "source": "Example material"
+  },
+  "ancestries": [
+    {
+      "id": "example-ancestry",
+      "name": "Example Ancestry",
+      "speed": 30,
+      "traits": [
+        {
+          "id": "example-trait",
+          "name": "Example Trait",
+          "description": "Replace this with the complete trait rule.",
+          "source": "Source PDF, p. 12"
+        }
+      ]
+    }
+  ],
+  "classes": [
+    {
+      "id": "example-class",
+      "name": "Example Class",
+      "hitDie": 8,
+      "primaryAbility": "spirit",
+      "levelFeatures": {
+        "1": [
+          {
+            "id": "example-class-first-feature",
+            "name": "First Feature",
+            "description": "Replace this with the complete class feature rule.",
+            "source": "Source PDF, p. 24"
+          }
+        ]
+      },
+      "subclasses": [
+        {
+          "id": "example-subclass",
+          "name": "Example Subclass",
+          "levelFeatures": {
+            "3": [
+              {
+                "id": "example-subclass-feature",
+                "name": "Subclass Feature",
+                "description": "Replace this with the complete subclass feature rule.",
+                "source": "Source PDF, p. 30"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "backgrounds": [
+    {
+      "id": "example-background",
+      "name": "Example Background",
+      "skills": ["History", "Survival"],
+      "abilityOptions": ["intellect", "spirit", "charisma"],
+      "featId": "example-feat",
+      "toolProficiencies": ["Example Tools"],
+      "equipment": "Example Tools, Traveler's Clothes, and 15 GP"
+    }
+  ],
+  "feats": [
+    {
+      "id": "example-feat",
+      "name": "Example Feat",
+      "category": "Origin",
+      "description": "Replace this with the complete feat rule.",
+      "source": "Source PDF, p. 40"
+    }
+  ],
+  "equipment": [
+    {
+      "id": "example-weapon",
+      "name": "Example Weapon",
+      "category": "Martial Melee Weapon",
+      "damage": "1d8",
+      "damageType": "Slashing",
+      "properties": ["Versatile (1d10)"],
+      "mastery": "Sap",
+      "cost": "15 GP",
+      "weight": "3 lb.",
+      "source": "Source PDF, p. 50"
+    }
+  ],
+  "spells": [
+    {
+      "id": "example-spell",
+      "name": "Example Spell",
+      "level": 1,
+      "school": "Evocation",
+      "classes": ["Mage"],
+      "ritual": false,
+      "castingTime": "Action",
+      "range": "60 feet",
+      "components": "V, S",
+      "duration": "Instantaneous",
+      "description": "Replace this with the complete spell rule.",
+      "source": "Source PDF, p. 60"
+    }
+  ],
+  "creatures": [
+    {
+      "id": "example-companion",
+      "name": "Example Companion",
+      "challengeRating": "1/4",
+      "description": "Replace this with the complete stat block.",
+      "source": "Source PDF, p. 70"
+    }
+  ],
+  "rules": [
+    {
+      "id": "example-rule",
+      "name": "Example Rule",
+      "category": "Rules Glossary",
+      "description": "Replace this with the complete referenced rule.",
+      "source": "Source PDF, p. 80"
+    }
+  ]
+}

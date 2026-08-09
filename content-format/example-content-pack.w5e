@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0",
+  "pack": {
+    "id": "example-eastern-kingdoms",
+    "name": "Eastern Kingdoms Example",
+    "version": "1.0.0",
+    "description": "A minimal example showing the import format.",
+    "source": "Example material"
+  },
+  "ancestries": [
+    {
+      "id": "example-ancestry",
+      "name": "Example Ancestry",
+      "speed": 30,
+      "abilityBonuses": { "spirit": 1 },
+      "traits": [
+        {
+          "name": "Example Trait",
+          "description": "Replace this text with the rule extracted from the source PDF.",
+          "source": "Source PDF, p. 12"
+        }
+      ]
+    }
+  ],
+  "classes": [
+    {
+      "id": "example-class",
+      "name": "Example Class",
+      "hitDie": 8,
+      "primaryAbility": "spirit",
+      "levelFeatures": {
+        "1": [
+          {
+            "name": "First Feature",
+            "description": "Replace this with the class feature's complete rules text.",
+            "source": "Source PDF, p. 24"
+          }
+        ]
+      }
+    }
+  ],
+  "backgrounds": [
+    {
+      "id": "example-background",
+      "name": "Example Background",
+      "skills": ["History", "Survival"]
+    }
+  ]
+}
