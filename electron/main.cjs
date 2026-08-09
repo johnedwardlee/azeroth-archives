@@ -97,6 +97,19 @@ ipcMain.handle("dialog:save-pdf", async (_event, filename, bytes) => {
   return result.filePath;
 });
 
+ipcMain.handle("dialog:save-json", async (_event, filename, contents) => {
+  if (typeof filename !== "string" || !filename.trim()) throw new Error("A backup filename is required.");
+  if (typeof contents !== "string") throw new Error("Backup contents must be text.");
+  const result = await dialog.showSaveDialog({
+    title: "Save character backup",
+    defaultPath: path.join(app.getPath("documents"), filename),
+    filters: [{ name: "Azeroth Archives character", extensions: ["json"] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  await fs.writeFile(result.filePath, contents, "utf8");
+  return result.filePath;
+});
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440,

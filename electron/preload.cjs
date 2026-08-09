@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld("azerothDesktop", {
   savePack: (pack) => ipcRenderer.invoke("storage:save-pack", pack),
   deletePack: (id) => ipcRenderer.invoke("storage:delete-pack", id),
   savePdf: (filename, bytes) => ipcRenderer.invoke("dialog:save-pdf", filename, bytes),
+  saveJson: (filename, contents) => ipcRenderer.invoke("dialog:save-json", filename, contents),
 });

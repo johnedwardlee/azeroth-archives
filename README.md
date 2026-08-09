@@ -4,11 +4,13 @@ An entirely offline Warcraft 5E character manager for Windows.
 
 ## Living character sheet
 
-Version 0.4 adds persistent tools intended for use throughout a play session:
+Version 0.5 adds safer character management, guided level-ups, and a fixed app frame around the persistent tools used throughout a play session:
 
 - Damage, healing, temporary HP, death saves, hit dice, inspiration, conditions, and long rests
 - Saving-throw and skill proficiency tracking, including expertise, passive Perception, initiative, and normal/advantage/disadvantage d20 rolls
 - A persistent attack workspace with custom attacks and one-click attacks created from carried weapons
+- Debounced autosave for existing characters, plus duplicate, delete, export, and import actions in the roster
+- A level-up review that previews new features, checks subclass requirements, and allows an editable hit-point increase
 - Feat selection from imported schema-2 content
 - Known and prepared spells with editable spell-slot usage
 - Imported and custom equipment, quantities, equipped state, item notes, weight, and currency

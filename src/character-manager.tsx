@@ -3,7 +3,9 @@
 import {
   BookOpen,
   ChevronDown,
+  Copy,
   Download,
+  FileDown,
   FileJson,
   Heart,
   HardDrive,
@@ -146,7 +148,15 @@ export function CharacterManager() {
   const [saving, setSaving] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showRoster, setShowRoster] = useState(false);
+  const [menuCharacterId, setMenuCharacterId] = useState<string | null>(null);
+  const [showLevelUp, setShowLevelUp] = useState(false);
+  const [levelUpHpGain, setLevelUpHpGain] = useState(1);
+  const [deleteTarget, setDeleteTarget] = useState<CharacterData | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const characterFileInput = useRef<HTMLInputElement>(null);
+  const characterRef = useRef(character);
+  const deletedCharacterIds = useRef(new Set<string>());
+  characterRef.current = character;
 
   const content = customPacks;
   const ancestries = useMemo(() => uniqueById(content.flatMap((pack) => pack.ancestries ?? [])), [content]);
@@ -177,6 +187,12 @@ export function CharacterManager() {
   const visibleCharacters = characters.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()));
   const nextLevelXp = character.level * 1000;
   const xpProgress = Math.min(100, Math.round((character.experience / nextLevelXp) * 100));
+  const plannedLevel = Math.min(20, character.level + 1);
+  const selectedSubclass = selectedClass?.subclasses?.find((item) => item.name === character.subclassName);
+  const plannedClassFeatures = selectedClass?.levelFeatures[String(plannedLevel)] ?? [];
+  const plannedSubclassFeatures = selectedSubclass?.levelFeatures[String(plannedLevel)] ?? [];
+  const plannedFeatures = [...plannedClassFeatures, ...plannedSubclassFeatures];
+  const needsSubclass = !selectedSubclass && Boolean(selectedClass?.subclasses?.some((item) => (item.levelFeatures[String(plannedLevel)] ?? []).length));
 
   useEffect(() => {
     const load = window.azerothDesktop?.load() ?? Promise.resolve(readBrowserStore());
@@ -188,6 +204,30 @@ export function CharacterManager() {
       setStatus(store.characters.length ? "Saved on this device" : "Create your first hero");
     }).catch(() => setStatus("Could not read local character data"));
   }, []);
+
+  useEffect(() => {
+    if (character.id === "draft") return;
+    setCharacters((current) => current.map((item) => item.id === character.id ? character : item));
+  }, [character]);
+
+  useEffect(() => {
+    if (character.id === "draft" || status !== "Unsaved changes") return;
+    const payload = character;
+    const timer = window.setTimeout(() => {
+      persistCharacter(payload).then(async (saved) => {
+        if (deletedCharacterIds.current.has(saved.id)) {
+          if (window.azerothDesktop) await window.azerothDesktop.deleteCharacter(saved.id);
+          return;
+        }
+        setCharacters((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+        if (characterRef.current.id === payload.id && characterRef.current.updatedAt === payload.updatedAt) {
+          setCharacter(saved);
+          setStatus("Autosaved on this device");
+        }
+      }).catch(() => setStatus("Autosave failed — use Save character"));
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [character, status]);
 
   function patchCharacter(patch: Partial<CharacterData>) {
     setCharacter((current) => ({ ...current, ...patch, updatedAt: new Date().toISOString() }));
@@ -261,20 +301,21 @@ export function CharacterManager() {
     });
   }
 
+  async function persistCharacter(payload: CharacterData) {
+    if (window.azerothDesktop) return window.azerothDesktop.saveCharacter(payload);
+    const saved = { ...payload, updatedAt: new Date().toISOString() };
+    const store = readBrowserStore();
+    store.characters = [saved, ...store.characters.filter((item) => item.id !== saved.id)];
+    writeBrowserStore(store);
+    return saved;
+  }
+
   async function saveCharacter() {
     setSaving(true);
     setStatus("Saving…");
     const payload = { ...character, id: character.id === "draft" ? crypto.randomUUID() : character.id };
     try {
-      let saved: CharacterData;
-      if (window.azerothDesktop) {
-        saved = await window.azerothDesktop.saveCharacter(payload);
-      } else {
-        saved = { ...payload, updatedAt: new Date().toISOString() };
-        const store = readBrowserStore();
-        store.characters = [saved, ...store.characters.filter((item) => item.id !== saved.id)];
-        writeBrowserStore(store);
-      }
+      const saved = await persistCharacter(payload);
       setCharacter(saved);
       setCharacters((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
       setStatus("Saved on this device");
@@ -285,43 +326,113 @@ export function CharacterManager() {
     }
   }
 
-  async function deleteCharacter() {
-    if (character.id === "draft") {
+  function deleteCharacter(target: CharacterData) {
+    setMenuCharacterId(null);
+    setDeleteTarget(target);
+  }
+
+  async function confirmDeleteCharacter() {
+    const target = deleteTarget;
+    if (!target) return;
+    setDeleteTarget(null);
+    if (target.id === "draft") {
       setCharacter(newCharacter());
       return;
     }
+    deletedCharacterIds.current.add(target.id);
     if (window.azerothDesktop) {
-      await window.azerothDesktop.deleteCharacter(character.id);
+      await window.azerothDesktop.deleteCharacter(target.id);
     } else {
       const store = readBrowserStore();
-      store.characters = store.characters.filter((item) => item.id !== character.id);
+      store.characters = store.characters.filter((item) => item.id !== target.id);
       writeBrowserStore(store);
     }
-    const remaining = characters.filter((item) => item.id !== character.id);
+    const remaining = characters.filter((item) => item.id !== target.id);
     setCharacters(remaining);
-    setCharacter(remaining[0] ?? newCharacter());
+    if (character.id === target.id) setCharacter(remaining[0] ?? newCharacter());
     setStatus("Character removed");
   }
 
+  async function duplicateCharacter(source: CharacterData) {
+    const now = new Date().toISOString();
+    const duplicate = normalizeCharacter({
+      ...source,
+      id: crypto.randomUUID(),
+      name: `${source.name} Copy`,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const saved = await persistCharacter(duplicate);
+    setCharacters((current) => [saved, ...current]);
+    setCharacter(saved);
+    setMenuCharacterId(null);
+    setShowRoster(false);
+    setStatus("Character duplicated");
+  }
+
+  async function exportCharacter(source: CharacterData) {
+    const backup = JSON.stringify({ format: "azeroth-archives-character", version: 1, character: source }, null, 2);
+    const safeName = source.name.trim().replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "character";
+    const filename = `${safeName}.azeroth-character.json`;
+    if (window.azerothDesktop) {
+      const destination = await window.azerothDesktop.saveJson(filename, backup);
+      setStatus(destination ? "Character backup saved" : "Backup export canceled");
+    } else {
+      const anchor = document.createElement("a");
+      anchor.href = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(anchor.href);
+      setStatus("Character backup downloaded");
+    }
+    setMenuCharacterId(null);
+  }
+
+  async function importCharacter(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text()) as { format?: string; character?: Partial<CharacterData> } & Partial<CharacterData>;
+      const source = parsed.character ?? parsed;
+      if (typeof source.name !== "string" || !source.name.trim() || !source.abilities || typeof source.abilities !== "object") throw new Error("Invalid character");
+      const now = new Date().toISOString();
+      const imported = normalizeCharacter({ ...source, id: crypto.randomUUID(), createdAt: now, updatedAt: now });
+      const saved = await persistCharacter(imported);
+      setCharacters((current) => [saved, ...current]);
+      setCharacter(saved);
+      setShowRoster(false);
+      setStatus("Character imported as a new copy");
+    } catch {
+      setStatus("That file is not a valid character backup");
+    }
+  }
+
   function levelUp() {
-    if (character.level >= 20) return;
+    if (character.level >= 20 || !selectedClass) {
+      if (!selectedClass) setStatus("Choose a class before leveling up");
+      return;
+    }
+    const staminaBonus = abilityModifier(character.abilities.stamina);
+    setLevelUpHpGain(Math.max(1, Math.floor(selectedClass.hitDie / 2) + 1 + staminaBonus));
+    setShowLevelUp(true);
+  }
+
+  function confirmLevelUp() {
+    if (character.level >= 20 || !selectedClass || needsSubclass) return;
     const nextLevel = character.level + 1;
-    const selectedClass = classes.find((item) => item.name === character.className);
-    const selectedSubclass = selectedClass?.subclasses?.find((item) => item.name === character.subclassName);
-    const staminaBonus = Math.max(0, abilityModifier(character.abilities.stamina));
-    const hpGain = Math.max(1, Math.floor((selectedClass?.hitDie ?? 8) / 2) + 1 + staminaBonus);
     const newFeatures = selectedClass?.levelFeatures[String(nextLevel)] ?? [];
     const newSubclassFeatures = selectedSubclass?.levelFeatures[String(nextLevel)] ?? [];
     patchCharacter({
       level: nextLevel,
       experience: 0,
-      maxHp: character.maxHp + hpGain,
-      currentHp: character.currentHp + hpGain,
+      maxHp: character.maxHp + levelUpHpGain,
+      currentHp: character.currentHp + levelUpHpGain,
       proficiencyBonus: proficiencyForLevel(nextLevel),
       hitDiceTotal: nextLevel,
       features: [...character.features, ...[...newFeatures, ...newSubclassFeatures].filter((feature) => !character.features.some((existing) => existing.name === feature.name))],
     });
-    setStatus(`Level ${nextLevel} ready to save`);
+    setShowLevelUp(false);
   }
 
   async function importPack(event: ChangeEvent<HTMLInputElement>) {
@@ -466,6 +577,7 @@ export function CharacterManager() {
   return (
     <main className="app-shell">
       <input ref={fileInput} className="sr-only" type="file" accept=".json,.w5e,application/json" onChange={importPack} />
+      <input ref={characterFileInput} className="sr-only" type="file" accept=".json,application/json" onChange={importCharacter} />
       <header className="topbar">
         <button className="icon-button mobile-only" aria-label="Open roster" onClick={() => setShowRoster(true)}><Menu size={20} /></button>
         <div className="brand-mark" aria-hidden="true">A</div>
@@ -484,19 +596,33 @@ export function CharacterManager() {
         <label className="search-field"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a character" /></label>
         <div className="character-list">
           {visibleCharacters.map((item, index) => (
-            <button key={item.id} className={`character-row ${item.id === character.id ? "active" : ""}`} onClick={() => { setCharacter(item); setShowRoster(false); }}>
-              <span className={`mini-portrait tone-${index % 4}`}>{initials(item.name)}</span>
-              <span><strong>{item.name}</strong><small>Level {item.level} {item.className}</small></span>
-              <MoreHorizontal size={16} />
-            </button>
+            <div key={item.id} className={`character-row ${item.id === character.id ? "active" : ""}`}>
+              <button className="character-row-select" onClick={() => { setCharacter(item); setMenuCharacterId(null); setShowRoster(false); }}>
+                <span className={`mini-portrait tone-${index % 4}`}>{initials(item.name)}</span>
+                <span><strong>{item.name}</strong><small>Level {item.level} {item.className}</small></span>
+              </button>
+              <button className="character-row-more" aria-label={`Actions for ${item.name}`} aria-expanded={menuCharacterId === item.id} onClick={() => setMenuCharacterId((current) => current === item.id ? null : item.id)}><MoreHorizontal size={16} /></button>
+              {menuCharacterId === item.id && <div className="character-actions" role="menu">
+                <button onClick={() => duplicateCharacter(item)}><Copy size={13} />Duplicate</button>
+                <button onClick={() => exportCharacter(item)}><FileDown size={13} />Export backup</button>
+                <button className="danger" onClick={() => deleteCharacter(item)}><Trash2 size={13} />Delete</button>
+              </div>}
+            </div>
           ))}
           {!visibleCharacters.length && <div className="empty-roster"><Swords size={24} /><p>No saved heroes yet.</p><span>Your first character will appear here after saving.</span></div>}
         </div>
-        <button className="import-card" onClick={() => fileInput.current?.click()}>
-          <span className="import-icon"><FileJson size={20} /></span>
-          <span><strong>Import custom content</strong><small>Add local .json or .w5e files</small></span>
-          <Upload size={16} />
-        </button>
+        <div className="roster-imports">
+          <button className="import-card" onClick={() => characterFileInput.current?.click()}>
+            <span className="import-icon"><FileDown size={20} /></span>
+            <span><strong>Import character</strong><small>Restore a character backup</small></span>
+            <Upload size={16} />
+          </button>
+          <button className="import-card" onClick={() => fileInput.current?.click()}>
+            <span className="import-icon"><FileJson size={20} /></span>
+            <span><strong>Import custom content</strong><small>Add local .json or .w5e files</small></span>
+            <Upload size={16} />
+          </button>
+        </div>
         <div className="sync-status"><span className={status.includes("not") || status.includes("Could") ? "status-dot warning" : "status-dot"} />{status}</div>
       </aside>
 
@@ -589,6 +715,42 @@ export function CharacterManager() {
           </section>
         )}
       </section>
+
+      {deleteTarget && <div className="modal-scrim" onMouseDown={() => setDeleteTarget(null)}>
+        <section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-character-title" onMouseDown={(event) => event.stopPropagation()}>
+          <span className="eyebrow">Remove character</span>
+          <h2 id="delete-character-title">Delete {deleteTarget.name}?</h2>
+          <p>This removes the character from this device. Export a backup first if you may need to restore it later.</p>
+          <div className="level-up-actions">
+            <button className="button button-outline" onClick={() => setDeleteTarget(null)}>Cancel</button>
+            <button className="button button-danger" onClick={confirmDeleteCharacter}><Trash2 size={15} />Delete character</button>
+          </div>
+        </section>
+      </div>}
+
+      {showLevelUp && <div className="modal-scrim" onMouseDown={() => setShowLevelUp(false)}>
+        <section className="level-up-dialog" role="dialog" aria-modal="true" aria-labelledby="level-up-title" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="drawer-heading">
+            <div><span className="eyebrow">Character advancement</span><h2 id="level-up-title">Review level {plannedLevel}</h2></div>
+            <button className="icon-button" onClick={() => setShowLevelUp(false)} aria-label="Cancel level up"><X size={18} /></button>
+          </div>
+          <div className="level-up-summary">
+            <div><span>Class</span><strong>{character.className}</strong></div>
+            <div><span>Proficiency</span><strong>+{proficiencyForLevel(plannedLevel)}</strong></div>
+            <label><span>Hit points gained</span><input type="number" min="1" max="99" value={levelUpHpGain} onChange={(event) => setLevelUpHpGain(Math.max(1, Math.min(99, Number(event.target.value) || 1)))} /></label>
+          </div>
+          <div className="level-up-features">
+            <span className="eyebrow">Features gained</span>
+            {plannedFeatures.map((feature) => <article key={feature.id ?? feature.name}><strong>{feature.name}</strong><p>{feature.description}</p></article>)}
+            {!plannedFeatures.length && !needsSubclass && <p className="level-up-empty">No automatic class features are listed for this level. You can still adjust abilities, feats, and spells after advancing.</p>}
+            {needsSubclass && <p className="level-up-warning">Choose a subclass in the character header before advancing; this level grants a subclass feature.</p>}
+          </div>
+          <div className="level-up-actions">
+            <button className="button button-outline" onClick={() => setShowLevelUp(false)}>Cancel</button>
+            <button className="button button-primary" disabled={needsSubclass} onClick={confirmLevelUp}><Sparkles size={15} />Apply level {plannedLevel}</button>
+          </div>
+        </section>
+      </div>}
 
       <div className={`drawer-scrim ${showLibrary || showRoster ? "visible" : ""}`} onClick={() => { setShowLibrary(false); setShowRoster(false); }} />
       <aside className={`library-drawer ${showLibrary ? "is-open" : ""}`} aria-hidden={!showLibrary}>
