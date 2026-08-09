@@ -22,8 +22,8 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { coreContent } from "../lib/default-content";
 import { FeatManager, InventoryManager, SessionTracker, SpellbookManager } from "./living-sheet";
+import { CombatManager, SKILLS } from "./combat-sheet";
 import {
   ABILITY_LABELS,
   abilityModifier,
@@ -33,7 +33,7 @@ import {
   type ContentPack,
 } from "../lib/types";
 
-type Tab = "overview" | "features" | "spells" | "equipment" | "notes";
+type Tab = "overview" | "features" | "combat" | "spells" | "equipment" | "notes";
 type OfflineStore = { version: 1; characters: CharacterData[]; packs: ContentPack[] };
 
 const abilityKeys = Object.keys(ABILITY_LABELS) as AbilityKey[];
@@ -62,10 +62,10 @@ function newCharacter(): CharacterData {
     id: "draft",
     name: "New Hero",
     playerName: "",
-    ancestry: "Human",
-    className: "Warrior",
+    ancestry: "",
+    className: "",
     subclassName: "",
-    background: "Soldier",
+    background: "",
     level: 1,
     experience: 0,
     currentHp: 12,
@@ -75,10 +75,11 @@ function newCharacter(): CharacterData {
     speed: 30,
     proficiencyBonus: 2,
     abilities: { strength: 15, agility: 12, stamina: 14, intellect: 10, spirit: 11, charisma: 13 },
-    features: [
-      ...(coreContent.ancestries?.[0].traits ?? []),
-      ...(coreContent.classes?.[0].levelFeatures["1"] ?? []),
-    ],
+    savingThrowProficiencies: [],
+    skillProficiencies: [],
+    skillExpertise: [],
+    attacks: [],
+    features: [],
     feats: [],
     spells: [],
     spellSlots: {},
@@ -104,6 +105,10 @@ function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
     ...value,
     subclassName: value.subclassName ?? "",
     temporaryHp: Math.max(0, Number(value.temporaryHp ?? 0)),
+    savingThrowProficiencies: Array.isArray(value.savingThrowProficiencies) ? value.savingThrowProficiencies : [],
+    skillProficiencies: Array.isArray(value.skillProficiencies) ? value.skillProficiencies : [],
+    skillExpertise: Array.isArray(value.skillExpertise) ? value.skillExpertise : [],
+    attacks: Array.isArray(value.attacks) ? value.attacks : [],
     feats: Array.isArray(value.feats) ? value.feats : [],
     spells: Array.isArray(value.spells) ? value.spells : [],
     spellSlots: value.spellSlots && typeof value.spellSlots === "object" ? value.spellSlots : {},
@@ -143,13 +148,27 @@ export function CharacterManager() {
   const [showRoster, setShowRoster] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const content = useMemo(() => [coreContent, ...customPacks], [customPacks]);
+  const content = customPacks;
   const ancestries = useMemo(() => uniqueById(content.flatMap((pack) => pack.ancestries ?? [])), [content]);
   const classes = useMemo(() => uniqueById(content.flatMap((pack) => pack.classes ?? [])), [content]);
   const backgrounds = useMemo(() => uniqueById(content.flatMap((pack) => pack.backgrounds ?? [])), [content]);
   const feats = useMemo(() => uniqueById(content.flatMap((pack) => pack.feats ?? [])), [content]);
   const equipment = useMemo(() => uniqueById(content.flatMap((pack) => pack.equipment ?? [])), [content]);
   const spells = useMemo(() => uniqueById(content.flatMap((pack) => pack.spells ?? [])), [content]);
+  const featureCatalogById = useMemo(() => new Map(
+    [
+      ...ancestries.flatMap((item) => item.traits),
+      ...classes.flatMap((item) => [
+        ...Object.values(item.levelFeatures).flat(),
+        ...(item.subclasses ?? []).flatMap((subclass) => Object.values(subclass.levelFeatures).flat()),
+      ]),
+      ...backgrounds.flatMap((item) => item.feature ? [item.feature] : []),
+    ].filter((feature) => feature.id).map((feature) => [feature.id!, feature]),
+  ), [ancestries, classes, backgrounds]);
+  const resolvedFeatures = useMemo(
+    () => character.features.map((feature) => feature.id ? featureCatalogById.get(feature.id) ?? feature : feature),
+    [character.features, featureCatalogById],
+  );
   const selectedClass = useMemo(
     () => classes.find((item) => item.name === character.className),
     [classes, character.className],
@@ -198,6 +217,7 @@ export function CharacterManager() {
     patchCharacter({
       className: name,
       subclassName: "",
+      savingThrowProficiencies: selectedClass?.savingThrowProficiencies ?? character.savingThrowProficiencies,
       features: [
         ...character.features.filter((feature) => !classFeatureNames.has(feature.name) && !subclassFeatureNames.has(feature.name)),
         ...Object.entries(selectedClass?.levelFeatures ?? {})
@@ -223,9 +243,17 @@ export function CharacterManager() {
 
   function applyBackground(name: string) {
     const selectedBackground = backgrounds.find((item) => item.name === name);
+    const previousBackground = backgrounds.find((item) => item.name === character.background);
     const backgroundFeatureNames = new Set(backgrounds.flatMap((item) => item.feature ? [item.feature.name] : []));
+    const previousBackgroundSkills = new Set(previousBackground?.skills ?? []);
+    const skillProficiencies = [
+      ...character.skillProficiencies.filter((skill) => !previousBackgroundSkills.has(skill)),
+      ...(selectedBackground?.skills ?? []),
+    ];
     patchCharacter({
       background: name,
+      skillProficiencies: [...new Set(skillProficiencies)],
+      skillExpertise: character.skillExpertise.filter((skill) => skillProficiencies.includes(skill)),
       features: [
         ...character.features.filter((feature) => !backgroundFeatureNames.has(feature.name)),
         ...(selectedBackground?.feature ? [selectedBackground.feature] : []),
@@ -364,7 +392,7 @@ export function CharacterManager() {
 
     doc.setFontSize(11); doc.setTextColor(...green); doc.text("FEATURES & TRAITS", 42, 338);
     let y = 358;
-    character.features.slice(0, 8).forEach((feature) => {
+    resolvedFeatures.slice(0, 8).forEach((feature) => {
       doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...ink); doc.text(feature.name, 42, y);
       doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(80, 83, 78);
       const lines = doc.splitTextToSize(feature.description, 500) as string[];
@@ -404,6 +432,21 @@ export function CharacterManager() {
       });
       livingY += 6;
     };
+    addLivingSection("SAVING THROWS", abilityKeys.map((ability) => {
+      const proficient = character.savingThrowProficiencies.includes(ability);
+      const modifier = abilityModifier(character.abilities[ability]) + (proficient ? character.proficiencyBonus : 0);
+      return { name: `${proficient ? "Proficient · " : ""}${ABILITY_LABELS[ability]}`, detail: `${modifier >= 0 ? "+" : ""}${modifier}` };
+    }));
+    addLivingSection("SKILLS", SKILLS.map((skill) => {
+      const expertise = character.skillExpertise.includes(skill.name);
+      const proficient = character.skillProficiencies.includes(skill.name);
+      const modifier = abilityModifier(character.abilities[skill.ability]) + character.proficiencyBonus * (expertise ? 2 : proficient ? 1 : 0);
+      return { name: `${expertise ? "Expertise · " : proficient ? "Proficient · " : ""}${skill.name}`, detail: `${ABILITY_LABELS[skill.ability]} ${modifier >= 0 ? "+" : ""}${modifier}` };
+    }));
+    addLivingSection("ATTACKS", character.attacks.map((attack) => {
+      const modifier = abilityModifier(character.abilities[attack.ability]) + (attack.proficient ? character.proficiencyBonus : 0) + attack.bonus;
+      return { name: attack.name, detail: `Attack ${modifier >= 0 ? "+" : ""}${modifier} · ${attack.damage || "—"} ${attack.damageType}${attack.notes ? ` · ${attack.notes}` : ""}` };
+    }));
     addLivingSection("FEATS", character.feats.map((feat) => ({ name: feat.name, detail: `${feat.category}${feat.prerequisite ? ` · ${feat.prerequisite}` : ""}\n${feat.description}` })));
     addLivingSection("SPELLBOOK", character.spells.map((spell) => ({ name: `${spell.prepared ? "Prepared · " : ""}${spell.name}`, detail: `${spell.level ? `Level ${spell.level}` : "Cantrip"} ${spell.school} · ${spell.castingTime} · ${spell.range} · ${spell.duration}` })));
     addLivingSection("EQUIPMENT", character.inventory.map((item) => ({ name: `${item.equipped ? "Equipped · " : ""}${item.quantity}× ${item.name}`, detail: [item.category, item.weight, item.cost, item.notes].filter(Boolean).join(" · ") })));
@@ -464,12 +507,12 @@ export function CharacterManager() {
             <label className="eyebrow" htmlFor="character-name">Character name</label>
             <input id="character-name" className="name-input" value={character.name} onChange={(event) => patchCharacter({ name: event.target.value })} />
             <div className="identity-selects">
-              <label><span>Ancestry</span><select value={character.ancestry} onChange={(event) => applyAncestry(event.target.value)}>{ancestries.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label>
+              <label><span>Ancestry</span><select value={character.ancestry} onChange={(event) => applyAncestry(event.target.value)}><option value="">Choose ancestry</option>{ancestries.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label>
               <i />
-              <label><span>Class</span><select value={character.className} onChange={(event) => applyClass(event.target.value)}>{classes.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label>
+              <label><span>Class</span><select value={character.className} onChange={(event) => applyClass(event.target.value)}><option value="">Choose class</option>{classes.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label>
               <i />
               {!!subclasses.length && <><label><span>Subclass</span><select value={character.subclassName ?? ""} onChange={(event) => applySubclass(event.target.value)}><option value="">Choose subclass</option>{subclasses.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label><i /></>}
-              <label><span>Background</span><select value={character.background} onChange={(event) => applyBackground(event.target.value)}>{backgrounds.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label>
+              <label><span>Background</span><select value={character.background} onChange={(event) => applyBackground(event.target.value)}><option value="">Choose background</option>{backgrounds.map((item) => <option key={item.id}>{item.name}</option>)}</select><ChevronDown size={14} /></label>
             </div>
           </div>
           <div className="level-card">
@@ -481,7 +524,7 @@ export function CharacterManager() {
         </div>
 
         <nav className="tabs" aria-label="Character sections">
-          {(["overview", "features", "spells", "equipment", "notes"] as Tab[]).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "spells" && character.spells.length ? ` ${character.spells.length}` : ""}{item === "equipment" && character.inventory.length ? ` ${character.inventory.length}` : ""}</button>)}
+          {(["overview", "features", "combat", "spells", "equipment", "notes"] as Tab[]).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "combat" && character.attacks.length ? ` ${character.attacks.length}` : ""}{item === "spells" && character.spells.length ? ` ${character.spells.length}` : ""}{item === "equipment" && character.inventory.length ? ` ${character.inventory.length}` : ""}</button>)}
         </nav>
 
         {tab === "overview" && (
@@ -512,7 +555,7 @@ export function CharacterManager() {
                 <label><span>Experience points</span><input type="number" min="0" value={character.experience} onChange={(event) => patchCharacter({ experience: Math.max(0, Number(event.target.value)) })} /></label>
               </div>
               <div className="feature-preview">
-                <div><span className="eyebrow">Recently gained</span><h3>{character.features.at(-1)?.name ?? "Ready for adventure"}</h3><p>{character.features.at(-1)?.description ?? "Add features through your ancestry, class, or an imported content pack."}</p></div>
+                <div><span className="eyebrow">Recently gained</span><h3>{resolvedFeatures.at(-1)?.name ?? "Ready for adventure"}</h3><p>{resolvedFeatures.at(-1)?.description ?? "Add features through your ancestry, class, or an imported content pack."}</p></div>
                 <button className="text-button" onClick={() => setTab("features")}>View all features <span>→</span></button>
               </div>
             </section>
@@ -526,12 +569,14 @@ export function CharacterManager() {
           <section className="panel wide-panel">
             <div className="section-heading"><div><span className="eyebrow">Rules reference</span><h2>Features & traits</h2></div><span className="count-chip">{character.features.length}</span></div>
             <div className="feature-list">
-              {character.features.map((feature, index) => <article key={`${feature.name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><div><h3>{feature.name}</h3><p>{feature.description}</p></div></article>)}
+              {resolvedFeatures.map((feature, index) => <article key={`${feature.name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><div><h3>{feature.name}</h3><p>{feature.description}</p></div></article>)}
               {!character.features.length && <div className="empty-state">No features yet. Choose an ancestry and class or import a content pack.</div>}
             </div>
           </section>
           </div>
         )}
+
+        {tab === "combat" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 
         {tab === "spells" && <SpellbookManager catalog={spells} character={character} patchCharacter={patchCharacter} />}
 
@@ -555,10 +600,10 @@ export function CharacterManager() {
             <article className="pack-card" key={pack.pack.id}>
               <div className={`pack-glyph pack-tone-${index % 3}`}><LibraryBig size={20} /></div>
               <div><strong>{pack.pack.name}</strong><span>Version {pack.pack.version} · Schema {pack.schemaVersion}</span><small>{(pack.ancestries?.length ?? 0)} ancestries · {(pack.classes?.length ?? 0)} classes · {(pack.backgrounds?.length ?? 0)} backgrounds · {(pack.feats?.length ?? 0)} feats · {(pack.spells?.length ?? 0)} spells</small></div>
-              {index > 0 && <button className="icon-button danger" aria-label={`Remove ${pack.pack.name}`} onClick={() => removePack(pack.pack.id)}><Trash2 size={15} /></button>}
-              {index === 0 && <span className="core-chip">Core</span>}
+              <button className="icon-button danger" aria-label={`Remove ${pack.pack.name}`} onClick={() => removePack(pack.pack.id)}><Trash2 size={15} /></button>
             </article>
           ))}
+          {!content.length && <div className="empty-state compact">No content packs imported. Import a .w5e file to add character options.</div>}
         </div>
         <div className="codex-tip"><FileJson size={22} /><div><strong>Built for Codex</strong><p>Give Codex a source PDF and the included content schema. It can turn the rules into an import-ready file.</p></div></div>
       </aside>

@@ -4,13 +4,15 @@ An entirely offline Warcraft 5E character manager for Windows.
 
 ## Living character sheet
 
-Version 0.3 adds persistent tools intended for use throughout a play session:
+Version 0.4 adds persistent tools intended for use throughout a play session:
 
 - Damage, healing, temporary HP, death saves, hit dice, inspiration, conditions, and long rests
+- Saving-throw and skill proficiency tracking, including expertise, passive Perception, initiative, and normal/advantage/disadvantage d20 rolls
+- A persistent attack workspace with custom attacks and one-click attacks created from carried weapons
 - Feat selection from imported schema-2 content
 - Known and prepared spells with editable spell-slot usage
 - Imported and custom equipment, quantities, equipped state, item notes, weight, and currency
-- Multi-page PDF export containing the character's tracked feats, spells, equipment, and conditions
+- Multi-page PDF export containing the character's tracked saving throws, skills, attacks, feats, spells, equipment, and conditions
 
 Existing character saves are upgraded in memory with safe defaults and keep their original identity, statistics, features, and notes.
 
@@ -30,6 +32,8 @@ The Windows installer is written to `release/`.
 ## Custom content
 
 The `content-format/` directory contains the backward-compatible JSON schema, an example `.w5e` pack, and a prompt Codex can use when extracting rules from PDFs.
+
+The app ships without a built-in rules pack. Import at least one `.w5e` pack through the Content Library to add ancestries, classes, backgrounds, feats, equipment, and spells.
 
 Schema 1.0 supports ancestries, classes, and backgrounds. Schema 2.0 additionally supports subclasses, feats, equipment, spells, creatures, and page-referenced rules. Both versions can be imported.
 

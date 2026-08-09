@@ -122,7 +122,9 @@ export function SessionTracker({ character, patchCharacter }: { character: Chara
 
 export function FeatManager({ catalog, character, patchCharacter }: { catalog: FeatDefinition[]; character: CharacterData; patchCharacter: PatchCharacter }) {
   const [selectedId, setSelectedId] = useState("");
+  const catalogById = useMemo(() => new Map(catalog.map((feat) => [feat.id, feat])), [catalog]);
   const available = catalog.filter((feat) => !character.feats.some((item) => item.id === feat.id));
+  const visibleFeats = character.feats.map((feat) => catalogById.get(feat.id) ?? feat);
 
   function addFeat() {
     const feat = catalog.find((item) => item.id === selectedId);
@@ -136,7 +138,7 @@ export function FeatManager({ catalog, character, patchCharacter }: { catalog: F
       <div className="section-heading"><div><span className="eyebrow">Character choices</span><h2>Feats</h2></div><span className="count-chip">{character.feats.length}</span></div>
       <div className="catalog-add-row"><select aria-label="Available feats" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Choose an available feat</option>{available.map((feat) => <option key={feat.id} value={feat.id}>{feat.name} · {feat.category}</option>)}</select><button className="button button-primary" disabled={!selectedId} onClick={addFeat}><Plus size={15} />Add feat</button></div>
       <div className="tracker-card-list">
-        {character.feats.map((feat) => <article key={feat.id}><div><span>{feat.category}</span><h3>{feat.name}</h3>{feat.prerequisite && <small>{feat.prerequisite}</small>}<p>{feat.description}</p></div><button className="icon-button danger" aria-label={`Remove ${feat.name}`} onClick={() => patchCharacter({ feats: character.feats.filter((item) => item.id !== feat.id) })}><Trash2 size={14} /></button></article>)}
+        {visibleFeats.map((feat) => <article key={feat.id}><div><span>{feat.category}</span><h3>{feat.name}</h3>{feat.prerequisite && <small>{feat.prerequisite}</small>}<p>{feat.description}</p></div><button className="icon-button danger" aria-label={`Remove ${feat.name}`} onClick={() => patchCharacter({ feats: character.feats.filter((item) => item.id !== feat.id) })}><Trash2 size={14} /></button></article>)}
         {!character.feats.length && <div className="empty-state compact">No feats selected yet.</div>}
       </div>
     </section>
@@ -147,9 +149,17 @@ export function SpellbookManager({ catalog, character, patchCharacter }: { catal
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const catalogById = useMemo(() => new Map(catalog.map((spell) => [spell.id, spell])), [catalog]);
   const classCatalog = useMemo(() => catalog.filter((spell) => showAll || spell.classes.some((name) => name.toLowerCase() === character.className.toLowerCase())), [catalog, showAll, character.className]);
-  const available = classCatalog.filter((spell) => !character.spells.some((known) => known.id === spell.id));
-  const visibleSpells = character.spells.filter((spell) => spell.name.toLowerCase().includes(query.toLowerCase()));
+  const available = classCatalog
+    .filter((spell) => !character.spells.some((known) => known.id === spell.id))
+    .sort((left, right) => left.level - right.level || left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  const visibleSpells = character.spells
+    .map((spell) => {
+      const currentDefinition = catalogById.get(spell.id);
+      return currentDefinition ? { ...spell, ...currentDefinition, prepared: spell.prepared } : spell;
+    })
+    .filter((spell) => spell.name.toLowerCase().includes(query.toLowerCase()));
 
   function addSpell() {
     const spell = catalog.find((item) => item.id === selectedId);
@@ -186,7 +196,22 @@ export function SpellbookManager({ catalog, character, patchCharacter }: { catal
 export function InventoryManager({ catalog, character, patchCharacter }: { catalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter }) {
   const [selectedId, setSelectedId] = useState("");
   const [customName, setCustomName] = useState("");
-  const totalWeight = character.inventory.reduce((total, item) => total + (Number.parseFloat(item.weight ?? "0") || 0) * item.quantity, 0);
+  const catalogById = useMemo(() => new Map(catalog.map((item) => [item.id, item])), [catalog]);
+  const visibleInventory = character.inventory.map((item) => {
+    const definition = item.contentId ? catalogById.get(item.contentId) : undefined;
+    const hasGeneratedNotes = /consult the linked source|Reference entry/i.test(item.notes);
+    return definition
+      ? {
+          ...item,
+          name: definition.name,
+          category: definition.category,
+          cost: definition.cost,
+          weight: definition.weight,
+          notes: hasGeneratedNotes ? definition.description ?? "" : item.notes,
+        }
+      : item;
+  });
+  const totalWeight = visibleInventory.reduce((total, item) => total + (Number.parseFloat(item.weight ?? "0") || 0) * item.quantity, 0);
 
   function addCatalogItem() {
     const definition = catalog.find((item) => item.id === selectedId);
@@ -224,7 +249,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
         <div className="section-heading"><div><span className="eyebrow">Possessions</span><h2>Equipment & inventory</h2></div><span className="count-chip">{character.inventory.length}</span></div>
         <div className="catalog-add-row"><select aria-label="Available equipment" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Choose imported equipment</option>{catalog.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.category}</option>)}</select><button className="button button-primary" disabled={!selectedId} onClick={addCatalogItem}><Plus size={15} />Add</button></div>
         <div className="custom-item-row"><input value={customName} onChange={(event) => setCustomName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addCustomItem(); }} placeholder="Add a custom item" /><button onClick={addCustomItem}><Plus size={15} /></button></div>
-        <div className="inventory-list">{character.inventory.map((item) => <article key={item.id} className={item.equipped ? "equipped" : ""}><label className="equip-check"><input type="checkbox" checked={item.equipped} onChange={(event) => updateItem(item.id, { equipped: event.target.checked })} /><span>Equipped</span></label><div className="inventory-name"><h3>{item.name}</h3><span>{item.category}{item.cost ? ` · ${item.cost}` : ""}{item.weight ? ` · ${item.weight}` : ""}</span></div><label className="quantity-field">Qty <input aria-label={`${item.name} quantity`} type="number" min="0" value={item.quantity} onChange={(event) => updateItem(item.id, { quantity: Math.max(0, Number(event.target.value)) })} /></label><input className="item-notes" aria-label={`${item.name} notes`} value={item.notes} onChange={(event) => updateItem(item.id, { notes: event.target.value })} placeholder="Notes" /><button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => patchCharacter({ inventory: character.inventory.filter((value) => value.id !== item.id) })}><Trash2 size={14} /></button></article>)}</div>
+        <div className="inventory-list">{visibleInventory.map((item) => <article key={item.id} className={item.equipped ? "equipped" : ""}><label className="equip-check"><input type="checkbox" checked={item.equipped} onChange={(event) => updateItem(item.id, { equipped: event.target.checked })} /><span>Equipped</span></label><div className="inventory-name"><h3>{item.name}</h3><span>{item.category}{item.cost ? ` · ${item.cost}` : ""}{item.weight ? ` · ${item.weight}` : ""}</span></div><label className="quantity-field">Qty <input aria-label={`${item.name} quantity`} type="number" min="0" value={item.quantity} onChange={(event) => updateItem(item.id, { quantity: Math.max(0, Number(event.target.value)) })} /></label><input className="item-notes" aria-label={`${item.name} notes`} value={item.notes} onChange={(event) => updateItem(item.id, { notes: event.target.value })} placeholder="Notes" /><button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => patchCharacter({ inventory: character.inventory.filter((value) => value.id !== item.id) })}><Trash2 size={14} /></button></article>)}</div>
         {!character.inventory.length && <div className="empty-state compact">Your inventory is empty.</div>}
       </section>
     </div>

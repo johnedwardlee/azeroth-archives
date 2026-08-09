@@ -93,6 +93,11 @@
         "hitDie": { "enum": [4, 6, 8, 10, 12] },
         "primaryAbility": { "$ref": "#/$defs/ability" },
         "description": { "type": "string" },
+        "savingThrowProficiencies": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ability" },
+          "uniqueItems": true
+        },
         "levelFeatures": {
           "type": "object",
           "propertyNames": { "pattern": "^(?:[1-9]|1[0-9]|20)$" },

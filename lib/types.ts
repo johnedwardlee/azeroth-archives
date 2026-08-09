@@ -22,6 +22,7 @@ export type ClassDefinition = {
   primaryAbility: AbilityKey;
   levelFeatures: Record<string, RulesFeature[]>;
   description?: string;
+  savingThrowProficiencies?: AbilityKey[];
   subclasses?: SubclassDefinition[];
 };
 
@@ -115,6 +116,18 @@ export type InventoryItem = {
   cost?: string;
 };
 
+export type CharacterAttack = {
+  id: string;
+  contentId?: string;
+  name: string;
+  ability: AbilityKey;
+  proficient: boolean;
+  bonus: number;
+  damage: string;
+  damageType: string;
+  notes: string;
+};
+
 export type SpellSlotState = {
   maximum: number;
   used: number;
@@ -162,6 +175,10 @@ export type CharacterData = {
   speed: number;
   proficiencyBonus: number;
   abilities: Record<AbilityKey, number>;
+  savingThrowProficiencies: AbilityKey[];
+  skillProficiencies: string[];
+  skillExpertise: string[];
+  attacks: CharacterAttack[];
   features: RulesFeature[];
   feats: TrackedFeat[];
   spells: TrackedSpell[];
