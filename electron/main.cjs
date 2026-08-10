@@ -116,7 +116,7 @@ function createWindow() {
     height: 920,
     minWidth: 920,
     minHeight: 680,
-    backgroundColor: "#f4f1e8",
+    backgroundColor: "#f2ead9",
     autoHideMenuBar: true,
     title: "Azeroth Archives",
     webPreferences: {

@@ -171,6 +171,7 @@ export type ContentPack = {
 export type CharacterData = {
   id: string;
   name: string;
+  portraitDataUrl?: string;
   playerName: string;
   ancestry: string;
   className: string;

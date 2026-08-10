@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Heart, Plus, Search, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, Heart, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 import { DescriptionPicker } from "./description-picker";
 import type {
   CharacterData,
@@ -206,10 +206,13 @@ export function SpellbookManager({ catalog, character, patchCharacter }: { catal
 export function InventoryManager({ catalog, character, patchCharacter }: { catalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter }) {
   const [selectedId, setSelectedId] = useState("");
   const [customName, setCustomName] = useState("");
+  const [expandedIds, setExpandedIds] = useState<string[]>([]);
   const catalogById = useMemo(() => new Map(catalog.map((item) => [item.id, item])), [catalog]);
   const visibleInventory = character.inventory.map((item) => {
     const definition = item.contentId ? catalogById.get(item.contentId) : undefined;
     const hasGeneratedNotes = /consult the linked source|Reference entry/i.test(item.notes);
+    const rulesDescription = definition ? equipmentDescription(definition) : "";
+    const notesContainImportedDescription = Boolean(definition) && (item.notes === definition?.description || item.notes === rulesDescription);
     return definition
       ? {
           ...item,
@@ -217,9 +220,10 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
           category: definition.category,
           cost: definition.cost,
           weight: definition.weight,
-          notes: hasGeneratedNotes ? definition.description ?? "" : item.notes,
+          notes: hasGeneratedNotes || notesContainImportedDescription ? "" : item.notes,
+          rulesDescription,
         }
-      : item;
+      : { ...item, rulesDescription: "" };
   });
   const totalWeight = visibleInventory.reduce((total, item) => total + (Number.parseFloat(item.weight ?? "0") || 0) * item.quantity, 0);
 
@@ -230,7 +234,9 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
     if (existing) {
       patchCharacter({ inventory: character.inventory.map((item) => item.id === existing.id ? { ...item, quantity: item.quantity + 1 } : item) });
     } else {
-      patchCharacter({ inventory: [...character.inventory, { id: crypto.randomUUID(), contentId: definition.id, name: definition.name, category: definition.category, quantity: 1, equipped: false, notes: definition.description ?? "", weight: definition.weight, cost: definition.cost }] });
+      const itemId = crypto.randomUUID();
+      patchCharacter({ inventory: [...character.inventory, { id: itemId, contentId: definition.id, name: definition.name, category: definition.category, quantity: 1, equipped: false, notes: "", weight: definition.weight, cost: definition.cost }] });
+      setExpandedIds((current) => [...current, itemId]);
     }
     setSelectedId("");
   }
@@ -247,6 +253,10 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
     patchCharacter({ inventory: character.inventory.map((item) => item.id === id ? { ...item, ...patch } : item) });
   }
 
+  function toggleItem(id: string) {
+    setExpandedIds((current) => current.includes(id) ? current.filter((itemId) => itemId !== id) : [...current, id]);
+  }
+
   return (
     <div className="living-tab-grid inventory-layout">
       <section className="panel currency-panel">
@@ -259,7 +269,25 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
         <div className="section-heading"><div><span className="eyebrow">Possessions</span><h2>Equipment & inventory</h2></div><span className="count-chip">{character.inventory.length}</span></div>
         <div className="catalog-add-row"><DescriptionPicker ariaLabel="Available equipment" value={selectedId} placeholder="Choose imported equipment" onChange={setSelectedId} options={catalog.map((item) => ({ value: item.id, label: item.name, meta: [item.category, item.cost, item.weight].filter(Boolean).join(" · "), description: equipmentDescription(item) }))} /><button className="button button-primary" disabled={!selectedId} onClick={addCatalogItem}><Plus size={15} />Add</button></div>
         <div className="custom-item-row"><input value={customName} onChange={(event) => setCustomName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addCustomItem(); }} placeholder="Add a custom item" /><button onClick={addCustomItem}><Plus size={15} /></button></div>
-        <div className="inventory-list">{visibleInventory.map((item) => <article key={item.id} className={item.equipped ? "equipped" : ""}><label className="equip-check"><input type="checkbox" checked={item.equipped} onChange={(event) => updateItem(item.id, { equipped: event.target.checked })} /><span>Equipped</span></label><div className="inventory-name"><h3>{item.name}</h3><span>{item.category}{item.cost ? ` · ${item.cost}` : ""}{item.weight ? ` · ${item.weight}` : ""}</span></div><label className="quantity-field">Qty <input aria-label={`${item.name} quantity`} type="number" min="0" value={item.quantity} onChange={(event) => updateItem(item.id, { quantity: Math.max(0, Number(event.target.value)) })} /></label><input className="item-notes" aria-label={`${item.name} notes`} value={item.notes} onChange={(event) => updateItem(item.id, { notes: event.target.value })} placeholder="Notes" /><button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => patchCharacter({ inventory: character.inventory.filter((value) => value.id !== item.id) })}><Trash2 size={14} /></button></article>)}</div>
+        <div className="inventory-list">
+          {visibleInventory.map((item) => {
+            const expanded = expandedIds.includes(item.id);
+            const preview = item.rulesDescription || item.notes || "No description or notes yet.";
+            return (
+              <article key={item.id} className={`${item.equipped ? "equipped " : ""}${expanded ? "expanded" : ""}`}>
+                <label className="equip-check"><input type="checkbox" checked={item.equipped} onChange={(event) => updateItem(item.id, { equipped: event.target.checked })} /><span>Equipped</span></label>
+                <div className="inventory-name"><h3>{item.name}</h3><span>{item.category}{item.cost ? ` · ${item.cost}` : ""}{item.weight ? ` · ${item.weight}` : ""}</span><p className="inventory-description-preview">{preview}</p></div>
+                <label className="quantity-field">Qty <input aria-label={`${item.name} quantity`} type="number" min="0" value={item.quantity} onChange={(event) => updateItem(item.id, { quantity: Math.max(0, Number(event.target.value)) })} /></label>
+                <button className="inventory-expand" aria-label={`${expanded ? "Hide" : "Show"} details for ${item.name}`} aria-expanded={expanded} onClick={() => toggleItem(item.id)}><span>{expanded ? "Hide" : "Details"}</span><ChevronDown size={15} /></button>
+                <button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => patchCharacter({ inventory: character.inventory.filter((value) => value.id !== item.id) })}><Trash2 size={14} /></button>
+                {expanded && <div className="inventory-details">
+                  {item.rulesDescription && <div className="inventory-rules"><span>Rules description</span><p>{item.rulesDescription}</p></div>}
+                  <label><span>Notes</span><textarea aria-label={`${item.name} notes`} value={item.notes} onChange={(event) => updateItem(item.id, { notes: event.target.value })} placeholder="Add personal notes, charges, or other details" rows={4} /></label>
+                </div>}
+              </article>
+            );
+          })}
+        </div>
         {!character.inventory.length && <div className="empty-state compact">Your inventory is empty.</div>}
       </section>
     </div>

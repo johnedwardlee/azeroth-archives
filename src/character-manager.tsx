@@ -70,6 +70,40 @@ function writeBrowserStore(store: OfflineStore) {
   localStorage.setItem(browserStorageKey, JSON.stringify(store));
 }
 
+function resizePortrait(file: File) {
+  if (!file.type.startsWith("image/")) return Promise.reject(new Error("Choose an image file"));
+  if (file.size > 15 * 1024 * 1024) return Promise.reject(new Error("Portrait images must be smaller than 15 MB"));
+
+  return new Promise<string>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+      const sourceX = (image.naturalWidth - sourceSize) / 2;
+      const sourceY = (image.naturalHeight - sourceSize) / 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = 512;
+      canvas.height = 512;
+      const context = canvas.getContext("2d");
+      if (!context || !sourceSize) {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("That image could not be read"));
+        return;
+      }
+      context.fillStyle = "#dce8f5";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(objectUrl);
+      resolve(canvas.toDataURL("image/jpeg", 0.88));
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("That image could not be read"));
+    };
+    image.src = objectUrl;
+  });
+}
+
 function newCharacter(): CharacterData {
   const now = new Date().toISOString();
   return {
@@ -117,6 +151,7 @@ function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
   return {
     ...defaults,
     ...value,
+    portraitDataUrl: typeof value.portraitDataUrl === "string" && value.portraitDataUrl.startsWith("data:image/") ? value.portraitDataUrl : undefined,
     subclassName: value.subclassName ?? "",
     temporaryHp: Math.max(0, Number(value.temporaryHp ?? 0)),
     savingThrowProficiencies: Array.isArray(value.savingThrowProficiencies) ? value.savingThrowProficiencies : [],
@@ -190,6 +225,7 @@ export function CharacterManager() {
   const [deleteTarget, setDeleteTarget] = useState<CharacterData | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const characterFileInput = useRef<HTMLInputElement>(null);
+  const portraitFileInput = useRef<HTMLInputElement>(null);
   const characterRef = useRef(character);
   const deletedCharacterIds = useRef(new Set<string>());
   characterRef.current = character;
@@ -286,6 +322,17 @@ export function CharacterManager() {
   function patchCharacter(patch: Partial<CharacterData>) {
     setCharacter((current) => ({ ...current, ...patch, updatedAt: new Date().toISOString() }));
     setStatus("Unsaved changes");
+  }
+
+  async function choosePortrait(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      patchCharacter({ portraitDataUrl: await resizePortrait(file) });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Portrait could not be added");
+    }
   }
 
   function updateAbility(key: AbilityKey, value: number) {
@@ -641,6 +688,7 @@ export function CharacterManager() {
     <main className="app-shell">
       <input ref={fileInput} className="sr-only" type="file" accept=".json,.w5e,application/json" onChange={importPack} />
       <input ref={characterFileInput} className="sr-only" type="file" accept=".json,application/json" onChange={importCharacter} />
+      <input ref={portraitFileInput} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={choosePortrait} />
       <header className="topbar">
         <button className="icon-button mobile-only" aria-label="Open roster" onClick={() => setShowRoster(true)}><Menu size={20} /></button>
         <div className="brand-mark" aria-hidden="true">A</div>
@@ -664,7 +712,7 @@ export function CharacterManager() {
           {visibleCharacters.map((item, index) => (
             <div key={item.id} className={`character-row ${item.id === character.id ? "active" : ""}`}>
               <button className="character-row-select" onClick={() => { setCharacter(item); setMenuCharacterId(null); setShowRoster(false); }}>
-                <span className={`mini-portrait tone-${index % 4}`}>{initials(item.name)}</span>
+                <span className={`mini-portrait tone-${index % 4}`}>{item.portraitDataUrl ? <img src={item.portraitDataUrl} alt="" /> : initials(item.name)}</span>
                 <span><strong>{item.name}</strong><small>Level {item.level} {item.className}</small></span>
               </button>
               <button className="character-row-more" aria-label={`Actions for ${item.name}`} aria-expanded={menuCharacterId === item.id} onClick={() => setMenuCharacterId((current) => current === item.id ? null : item.id)}><MoreHorizontal size={16} /></button>
@@ -694,7 +742,10 @@ export function CharacterManager() {
 
       <section className="workspace">
         <div className="character-hero">
-          <div className="portrait-large"><span>{initials(character.name)}</span><button aria-label="Change portrait"><Plus size={14} /></button></div>
+          <div className={`portrait-large ${character.portraitDataUrl ? "has-image" : ""}`}>
+            {character.portraitDataUrl ? <img src={character.portraitDataUrl} alt={`${character.name || "Character"} portrait`} /> : <span>{initials(character.name)}</span>}
+            <button aria-label={character.portraitDataUrl ? "Change portrait" : "Add portrait"} title={character.portraitDataUrl ? "Change portrait" : "Add portrait"} onClick={() => portraitFileInput.current?.click()}><Plus size={14} /></button>
+          </div>
           <div className="hero-identity">
             <label className="eyebrow" htmlFor="character-name">Character name</label>
             <input id="character-name" className="name-input" value={character.name} onChange={(event) => patchCharacter({ name: event.target.value })} />
