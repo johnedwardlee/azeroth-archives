@@ -29,6 +29,13 @@ import { DescriptionPicker } from "./description-picker";
 import bundledWarcraftPackJson from "../content-packs/warcraft5e-campaign.w5e?raw";
 import packageMetadata from "../package.json";
 import {
+  calculateArmorClass,
+  calculateEffectiveSpeed,
+  calculateEncumbrance,
+  conditionEffectText,
+  spellcastingAbilityForClass,
+} from "../lib/character-rules";
+import {
   ABILITY_LABELS,
   abilityModifier,
   proficiencyForLevel,
@@ -131,14 +138,17 @@ function newCharacter(): CharacterData {
     feats: [],
     spells: [],
     spellSlots: {},
+    concentratingSpellId: undefined,
     inventory: [],
     currency: { copper: 0, silver: 0, gold: 15 },
+    resources: [],
     inspiration: false,
     hitDiceTotal: 1,
     hitDiceUsed: 0,
     deathSaveSuccesses: 0,
     deathSaveFailures: 0,
     conditions: [],
+    exhaustionLevel: 0,
     notes: "",
     createdAt: now,
     updatedAt: now,
@@ -161,14 +171,28 @@ function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
     feats: Array.isArray(value.feats) ? value.feats : [],
     spells: Array.isArray(value.spells) ? value.spells : [],
     spellSlots: value.spellSlots && typeof value.spellSlots === "object" ? value.spellSlots : {},
+    concentratingSpellId: typeof value.concentratingSpellId === "string" ? value.concentratingSpellId : undefined,
     inventory: Array.isArray(value.inventory) ? value.inventory : [],
     currency: { ...defaults.currency, ...(value.currency ?? {}) },
+    resources: Array.isArray(value.resources)
+      ? value.resources.filter((resource) => resource && typeof resource.name === "string").map((resource) => {
+          const maximum = Math.max(0, Number(resource.maximum) || 0);
+          return {
+            id: typeof resource.id === "string" && resource.id ? resource.id : crypto.randomUUID(),
+            name: resource.name.trim() || "Class resource",
+            current: Math.max(0, Math.min(maximum, Number(resource.current) || 0)),
+            maximum,
+            recovery: (["short", "long", "manual"] as const).includes(resource.recovery) ? resource.recovery : "long",
+          };
+        })
+      : [],
     inspiration: Boolean(value.inspiration),
     hitDiceTotal: maximumHitDice,
     hitDiceUsed: Math.max(0, Math.min(maximumHitDice, Number(value.hitDiceUsed ?? 0))),
     deathSaveSuccesses: Math.max(0, Math.min(3, Number(value.deathSaveSuccesses ?? 0))),
     deathSaveFailures: Math.max(0, Math.min(3, Number(value.deathSaveFailures ?? 0))),
     conditions: Array.isArray(value.conditions) ? value.conditions : [],
+    exhaustionLevel: Math.max(0, Math.min(6, Number(value.exhaustionLevel ?? (value.conditions?.includes("Exhaustion") ? 1 : 0)))),
   };
 }
 
@@ -283,6 +307,10 @@ export function CharacterManager() {
   const plannedSubclassFeatures = selectedSubclass?.levelFeatures[String(plannedLevel)] ?? [];
   const plannedFeatures = [...plannedClassFeatures, ...plannedSubclassFeatures];
   const needsSubclass = !selectedSubclass && Boolean(selectedClass?.subclasses?.some((item) => (item.levelFeatures[String(plannedLevel)] ?? []).length));
+  const encumbrance = useMemo(() => calculateEncumbrance(character.inventory, character.abilities.strength), [character.inventory, character.abilities.strength]);
+  const effectiveArmor = useMemo(() => calculateArmorClass(character, equipment), [character, equipment]);
+  const effectiveSpeed = useMemo(() => calculateEffectiveSpeed(character, encumbrance), [character, encumbrance]);
+  const spellcastingAbility = spellcastingAbilityForClass(character.className, character.subclassName, selectedClass?.primaryAbility);
 
   useEffect(() => {
     const load = window.azerothDesktop?.load() ?? Promise.resolve(readBrowserStore());
@@ -594,7 +622,7 @@ export function CharacterManager() {
     doc.setFont("helvetica", "normal"); doc.setTextColor(225, 238, 231); doc.text(`Player: ${character.playerName || "—"}`, 570, 67, { align: "right" });
 
     const statY = 126;
-    [["ARMOR", character.armorClass], ["HIT POINTS", `${character.currentHp} / ${character.maxHp}${character.temporaryHp ? ` +${character.temporaryHp}` : ""}`], ["SPEED", `${character.speed} ft`], ["PROFICIENCY", `+${character.proficiencyBonus}`]].forEach(([label, value], index) => {
+    [["ARMOR", effectiveArmor.value], ["HIT POINTS", `${character.currentHp} / ${character.maxHp}${character.temporaryHp ? ` +${character.temporaryHp}` : ""}`], ["SPEED", `${effectiveSpeed.value} ft`], ["PROFICIENCY", `+${character.proficiencyBonus}`]].forEach(([label, value], index) => {
       const x = 42 + index * 132;
       doc.setDrawColor(219, 216, 205); doc.roundedRect(x, statY, 114, 54, 6, 6, "S");
       doc.setFontSize(8); doc.setTextColor(112, 112, 103); doc.text(String(label), x + 12, statY + 17);
@@ -671,7 +699,15 @@ export function CharacterManager() {
     addLivingSection("FEATS", character.feats.map((feat) => ({ name: feat.name, detail: `${feat.category}${feat.prerequisite ? ` · ${feat.prerequisite}` : ""}\n${feat.description}` })));
     addLivingSection("SPELLBOOK", character.spells.map((spell) => ({ name: `${spell.prepared ? "Prepared · " : ""}${spell.name}`, detail: `${spell.level ? `Level ${spell.level}` : "Cantrip"} ${spell.school} · ${spell.castingTime} · ${spell.range} · ${spell.duration}` })));
     addLivingSection("EQUIPMENT", character.inventory.map((item) => ({ name: `${item.equipped ? "Equipped · " : ""}${item.quantity}× ${item.name}`, detail: [item.category, item.weight, item.cost, item.notes].filter(Boolean).join(" · ") })));
-    if (character.conditions.length) addLivingSection("ACTIVE CONDITIONS", character.conditions.map((condition) => ({ name: condition, detail: "Active condition" })));
+    addLivingSection("CLASS RESOURCES", character.resources.map((resource) => ({ name: resource.name, detail: `${resource.current}/${resource.maximum} · ${resource.recovery === "short" ? "Short or Long Rest" : resource.recovery === "long" ? "Long Rest" : "Manual recovery"}` })));
+    addLivingSection("ENCUMBRANCE", [{ name: `${encumbrance.totalWeight}/${encumbrance.carryingCapacity} lb. · ${encumbrance.label}`, detail: encumbrance.penalty }]);
+    if (spellcastingAbility) {
+      const spellcastingModifier = abilityModifier(character.abilities[spellcastingAbility]);
+      const spellAttack = spellcastingModifier + character.proficiencyBonus;
+      const concentratingSpell = character.spells.find((spell) => spell.id === character.concentratingSpellId);
+      addLivingSection("SPELLCASTING", [{ name: ABILITY_LABELS[spellcastingAbility], detail: `Spell save DC ${8 + spellAttack} · Spell attack ${spellAttack >= 0 ? "+" : ""}${spellAttack}${concentratingSpell ? ` · Concentrating: ${concentratingSpell.name}` : ""}` }]);
+    }
+    if (character.conditions.length) addLivingSection("ACTIVE CONDITIONS", character.conditions.map((condition) => ({ name: condition === "Exhaustion" ? `Exhaustion ${character.exhaustionLevel}` : condition, detail: conditionEffectText(condition, character.exhaustionLevel) })));
     doc.setFontSize(7); doc.setTextColor(140, 140, 132); doc.text("Generated with Azeroth Archives", 42, 758);
     const filename = `${character.name.trim().replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "character"}.pdf`;
     if (window.azerothDesktop) {
@@ -776,8 +812,8 @@ export function CharacterManager() {
               <div className="section-heading"><div><span className="eyebrow">At a glance</span><h2>Combat & vitals</h2></div><Shield size={20} /></div>
               <div className="vital-grid">
                 <label><span><Heart size={15} />Hit points</span><div className="paired-input"><input type="number" value={character.currentHp} onChange={(event) => patchCharacter({ currentHp: Number(event.target.value) })} /><b>/</b><input type="number" value={character.maxHp} onChange={(event) => patchCharacter({ maxHp: Number(event.target.value) })} /></div><small>Current / Maximum</small></label>
-                <label><span><Shield size={15} />Armor class</span><input className="stat-input" type="number" value={character.armorClass} onChange={(event) => patchCharacter({ armorClass: Number(event.target.value) })} /><small>Defense</small></label>
-                <label><span><Zap size={15} />Speed</span><div className="unit-input"><input type="number" value={character.speed} onChange={(event) => patchCharacter({ speed: Number(event.target.value) })} /><b>ft</b></div><small>Walking</small></label>
+                <label><span><Shield size={15} />Armor class</span><input className="stat-input" type="number" value={effectiveArmor.value} readOnly={effectiveArmor.automatic} onChange={(event) => patchCharacter({ armorClass: Number(event.target.value) })} /><small>{effectiveArmor.source}</small></label>
+                <label><span><Zap size={15} />Effective speed</span><div className="unit-input"><input type="number" value={effectiveSpeed.value} readOnly={effectiveSpeed.effects.length > 0} onChange={(event) => patchCharacter({ speed: Number(event.target.value) })} /><b>ft</b></div><small>{effectiveSpeed.effects.length ? `Base ${character.speed} · ${effectiveSpeed.effects.join(" · ")}` : "Walking"}</small></label>
                 <label><span><Swords size={15} />Proficiency</span><div className="static-stat">+{character.proficiencyBonus}</div><small>Level based</small></label>
               </div>
             </section>
@@ -821,7 +857,7 @@ export function CharacterManager() {
 
         {tab === "combat" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 
-        {tab === "spells" && <SpellbookManager catalog={spells} character={character} patchCharacter={patchCharacter} />}
+        {tab === "spells" && <SpellbookManager catalog={spells} character={character} patchCharacter={patchCharacter} spellcastingAbility={spellcastingAbility} />}
 
         {tab === "equipment" && <InventoryManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 

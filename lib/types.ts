@@ -149,6 +149,16 @@ export type CurrencyState = {
   gold: number;
 };
 
+export type ResourceRecovery = "short" | "long" | "manual";
+
+export type CharacterResource = {
+  id: string;
+  name: string;
+  current: number;
+  maximum: number;
+  recovery: ResourceRecovery;
+};
+
 export type ContentPack = {
   schemaVersion: "1.0" | "2.0";
   pack: {
@@ -194,14 +204,17 @@ export type CharacterData = {
   feats: TrackedFeat[];
   spells: TrackedSpell[];
   spellSlots: Record<string, SpellSlotState>;
+  concentratingSpellId?: string;
   inventory: InventoryItem[];
   currency: CurrencyState;
+  resources: CharacterResource[];
   inspiration: boolean;
   hitDiceTotal: number;
   hitDiceUsed: number;
   deathSaveSuccesses: number;
   deathSaveFailures: number;
   conditions: string[];
+  exhaustionLevel: number;
   notes: string;
   createdAt: string;
   updatedAt: string;
