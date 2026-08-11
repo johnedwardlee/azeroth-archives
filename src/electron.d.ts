@@ -4,7 +4,7 @@ type DesktopStore = {
   version: 3;
   characters: CharacterData[];
   packs: ContentPack[];
-  recovery?: { restoredFrom: string };
+  recovery?: { restoredFrom?: string; migrationBackup?: string };
 };
 
 type UpdateStatus = {

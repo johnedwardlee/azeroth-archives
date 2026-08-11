@@ -27,7 +27,7 @@ Every published version remains available on GitHub as a rollback point. Back up
 
 Characters and imported packs are stored in `azeroth-archives-data.json` under the operating system's application-data folder. The Settings & Updates panel shows the exact path.
 
-The desktop app writes atomically and keeps up to ten rotating backups in the adjacent `backups` directory. If the primary file becomes unreadable, the app restores the newest valid automatic backup and reports that recovery in the roster status.
+The desktop app runs as a single instance, serializes local-data changes, writes atomically, and keeps up to ten rotating backups in the adjacent `backups` directory. If the primary file becomes unreadable, the app restores the newest valid automatic backup and reports that recovery in the roster status. Store-version upgrades create a dedicated pre-migration backup before changing the saved format.
 
 Use **Back up everything** before major campaign or application changes. A full backup includes every character and imported pack. Restoring a full backup replaces the current local library after an explicit confirmation. Individual characters can also be exported and imported as new copies.
 
@@ -47,11 +47,11 @@ pnpm release:win
 
 `pnpm test` runs the unit and migration suite, TypeScript validation, and the production renderer build. GitHub Actions repeats those checks, validates the bundled content schema, and audits the pack text on every push and pull request.
 
-The Windows installer is written to `release/`. Electron Builder automatically uses `CSC_LINK` and `CSC_KEY_PASSWORD` when a Windows code-signing certificate is available.
+The Windows installer is written to `release/`. It is distributed unsigned, so Windows may show a Microsoft Defender SmartScreen warning on first installation; select **More info** and then **Run anyway** to continue.
 
 ## Custom content and PDF extraction
 
-The `content-format/` directory contains the schema, example packs, and `CODEX-PROMPT.md` for extracting page-referenced material from PDFs. The recommended workflow is:
+The `content-format/` directory contains the schema, example packs, and `CODEX-PROMPT.md` for extracting page-referenced material from PDFs. Imported packs and restored libraries are checked against the complete schema before they are stored. The recommended workflow is:
 
 1. Extract and review source material under `content-source/<pack-id>/`.
 2. Convert it to a schema-2 `.w5e` file under `content-packs/`.

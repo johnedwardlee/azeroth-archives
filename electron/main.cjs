@@ -2,6 +2,8 @@ const { app, BrowserWindow, dialog, ipcMain, session, shell } = require("electro
 const { autoUpdater } = require("electron-updater");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { assertContentPack } = require("./content-validation.cjs");
+const { createStorage } = require("./storage.cjs");
 
 const UPDATE_HOSTS = new Set(["api.github.com", "github.com"]);
 let updateStatus = { state: "idle", version: null, percent: 0, message: "Updates are checked automatically." };
@@ -27,138 +29,24 @@ function isAllowedNetworkRequest(requestUrl) {
   }
 }
 
-const STORE_VERSION = 3;
-const BACKUP_LIMIT = 10;
-const BACKUP_INTERVAL_MS = 5 * 60 * 1000;
-const emptyStore = () => ({ version: STORE_VERSION, characters: [], packs: [] });
-const dataPath = () => path.join(app.getPath("userData"), "azeroth-archives-data.json");
-const backupPath = () => path.join(app.getPath("userData"), "backups");
-
-function normalizeStore(parsed) {
-  return {
-    version: STORE_VERSION,
-    characters: Array.isArray(parsed?.characters) ? parsed.characters : [],
-    packs: Array.isArray(parsed?.packs) ? parsed.packs : [],
-  };
-}
-
-async function availableBackups() {
-  try {
-    const names = await fs.readdir(backupPath());
-    return names.filter((name) => /^azeroth-archives-data-.*\.json$/i.test(name)).sort().reverse();
-  } catch (error) {
-    if (error?.code === "ENOENT") return [];
-    throw error;
-  }
-}
-
-async function recoverStore() {
-  for (const name of await availableBackups()) {
-    try {
-      const recovered = normalizeStore(JSON.parse(await fs.readFile(path.join(backupPath(), name), "utf8")));
-      await writeStore(recovered, false);
-      return { ...recovered, recovery: { restoredFrom: name } };
-    } catch {
-      // Continue to the next rotating backup.
-    }
-  }
-  return null;
-}
-
-async function readStore() {
-  try {
-    return normalizeStore(JSON.parse(await fs.readFile(dataPath(), "utf8")));
-  } catch (error) {
-    if (error?.code === "ENOENT") return emptyStore();
-    const recovered = await recoverStore();
-    if (recovered) return recovered;
-    throw new Error("Character data is unreadable and no valid automatic backup is available.", { cause: error });
-  }
-}
-
-async function createRotatingBackup(destination) {
-  try {
-    await fs.access(destination);
-  } catch (error) {
-    if (error?.code === "ENOENT") return;
-    throw error;
-  }
-  await fs.mkdir(backupPath(), { recursive: true });
-  const existing = await availableBackups();
-  if (existing[0]) {
-    const latest = await fs.stat(path.join(backupPath(), existing[0]));
-    if (Date.now() - latest.mtimeMs < BACKUP_INTERVAL_MS) return;
-  }
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  await fs.copyFile(destination, path.join(backupPath(), `azeroth-archives-data-${timestamp}.json`));
-  const backups = await availableBackups();
-  await Promise.all(backups.slice(BACKUP_LIMIT).map((name) => fs.unlink(path.join(backupPath(), name))));
-}
-
-async function writeStore(store, createBackup = true) {
-  const destination = dataPath();
-  await fs.mkdir(path.dirname(destination), { recursive: true });
-  if (createBackup) await createRotatingBackup(destination);
-  const temporary = `${destination}.tmp`;
-  await fs.writeFile(temporary, JSON.stringify(normalizeStore(store), null, 2), "utf8");
-  await fs.rename(temporary, destination);
-}
-
-function requireId(value, label) {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${label} id is required.`);
-  return value.trim();
-}
-
-ipcMain.handle("storage:load", () => readStore());
-
-ipcMain.handle("storage:save-character", async (_event, character) => {
-  requireId(character?.id, "Character");
-  if (typeof character?.name !== "string" || !character.name.trim()) throw new Error("Character name is required.");
-  const store = await readStore();
-  const saved = { ...character, name: character.name.trim(), updatedAt: new Date().toISOString() };
-  store.characters = [saved, ...store.characters.filter((item) => item.id !== saved.id)];
-  await writeStore(store);
-  return saved;
+const storage = createStorage({
+  getUserDataPath: () => app.getPath("userData"),
+  validatePack: assertContentPack,
 });
 
-ipcMain.handle("storage:delete-character", async (_event, id) => {
-  id = requireId(id, "Character");
-  const store = await readStore();
-  store.characters = store.characters.filter((item) => item.id !== id);
-  await writeStore(store);
-});
-
-ipcMain.handle("storage:save-pack", async (_event, pack) => {
-  const id = requireId(pack?.pack?.id, "Content pack");
-  if (!new Set(["1.0", "2.0"]).has(pack?.schemaVersion)) throw new Error("Unsupported content pack version.");
-  const store = await readStore();
-  store.packs = [pack, ...store.packs.filter((item) => item.pack.id !== id)];
-  await writeStore(store);
-  return pack;
-});
-
-ipcMain.handle("storage:delete-pack", async (_event, id) => {
-  id = requireId(id, "Content pack");
-  const store = await readStore();
-  store.packs = store.packs.filter((item) => item.pack.id !== id);
-  await writeStore(store);
-});
-
-ipcMain.handle("storage:replace", async (_event, replacement) => {
-  if (!replacement || !Array.isArray(replacement.characters) || !Array.isArray(replacement.packs)) {
-    throw new Error("The full backup does not contain valid characters and content packs.");
-  }
-  const store = normalizeStore(replacement);
-  await writeStore(store);
-  return store;
-});
+ipcMain.handle("storage:load", () => storage.load());
+ipcMain.handle("storage:save-character", (_event, character) => storage.saveCharacter(character));
+ipcMain.handle("storage:delete-character", (_event, id) => storage.deleteCharacter(id));
+ipcMain.handle("storage:save-pack", (_event, pack) => storage.savePack(pack));
+ipcMain.handle("storage:delete-pack", (_event, id) => storage.deletePack(id));
+ipcMain.handle("storage:replace", (_event, replacement) => storage.replaceStore(replacement));
 
 ipcMain.handle("app:info", () => ({
   version: app.getVersion(),
   platform: `${process.platform} ${process.arch}`,
   packaged: app.isPackaged,
-  dataPath: dataPath(),
-  backupPath: backupPath(),
+  dataPath: storage.dataPath(),
+  backupPath: storage.backupPath(),
 }));
 
 ipcMain.handle("app:open-data-folder", () => shell.openPath(app.getPath("userData")));
@@ -271,20 +159,34 @@ function configureAutoUpdater() {
   }, 10_000);
 }
 
-app.whenReady().then(() => {
-  session.defaultSession.webRequest.onBeforeRequest(
-    { urls: ["http://*/*", "https://*/*"] },
-    (details, callback) => {
-      callback({ cancel: !isAllowedNetworkRequest(details.url) });
-    },
-  );
-  createWindow();
-  configureAutoUpdater();
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  });
+
+  app.whenReady().then(() => {
+    session.defaultSession.webRequest.onBeforeRequest(
+      { urls: ["http://*/*", "https://*/*"] },
+      (details, callback) => {
+        callback({ cancel: !isAllowedNetworkRequest(details.url) });
+      },
+    );
+    createWindow();
+    configureAutoUpdater();
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
+}

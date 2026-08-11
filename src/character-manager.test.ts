@@ -48,4 +48,19 @@ describe("character save migrations", () => {
     expect(store.characters[0].schemaVersion).toBe(CURRENT_CHARACTER_SCHEMA_VERSION);
     expect(store.packs.map((pack) => pack.pack.id)).toEqual(["valid"]);
   });
+
+  it("rejects stores created by a newer application version", () => {
+    expect(() => migrateOfflineStore({ version: CURRENT_STORE_VERSION + 1, characters: [], packs: [] }))
+      .toThrow(/newer version/i);
+  });
+
+  it("drops content packs that fail the complete runtime schema", () => {
+    const store = migrateOfflineStore({
+      version: CURRENT_STORE_VERSION,
+      characters: [],
+      packs: [{ schemaVersion: "2.0", pack: { id: "bad-pack", name: "Bad", version: "1" }, ancestries: {} }],
+    });
+
+    expect(store.packs).toEqual([]);
+  });
 });

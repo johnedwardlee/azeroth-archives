@@ -16,5 +16,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "lib", "vite.config.ts"]
+  "include": ["src", "lib", "electron/**/*.test.ts", "vite.config.ts"]
 }

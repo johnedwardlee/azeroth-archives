@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1
+
+- Serialized desktop storage operations and limited the app to one active instance to prevent overlapping local-data writes.
+- Added complete runtime schema validation for content-pack imports and full-library restores.
+- Added explicit store migrations, pre-migration backups, and protection against opening newer save formats in older builds.
+- Added main-process integration tests for concurrent saves, backup recovery, migrations, and malformed data.
+- Strengthened release gates so tests and content audits must pass before publication.
+- Removed unused installer-signing configuration while retaining release checksums and documenting the unsigned SmartScreen flow.
+
 ## 1.0.0
 
 - Promoted the tested 1.0 release candidate to the first stable release.

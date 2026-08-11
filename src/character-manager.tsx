@@ -31,6 +31,7 @@ import { SettingsPanel } from "./settings-panel";
 import { DescriptionPicker } from "./description-picker";
 import bundledWarcraftPackJson from "../content-packs/warcraft5e-campaign.w5e?raw";
 import packageMetadata from "../package.json";
+import { assertContentPack, contentPackValidationError } from "../lib/content-validation";
 import {
   calculateArmorClass,
   calculateEffectiveSpeed,
@@ -63,7 +64,12 @@ import {
 type Tab = "overview" | "features" | "actions" | "combat" | "spells" | "equipment" | "notes";
 export const CURRENT_STORE_VERSION = 3 as const;
 export const CURRENT_CHARACTER_SCHEMA_VERSION = 3 as const;
-export type OfflineStore = { version: 3; characters: CharacterData[]; packs: ContentPack[]; recovery?: { restoredFrom: string } };
+export type OfflineStore = {
+  version: 3;
+  characters: CharacterData[];
+  packs: ContentPack[];
+  recovery?: { restoredFrom?: string; migrationBackup?: string };
+};
 
 const abilityKeys = Object.keys(ABILITY_LABELS) as AbilityKey[];
 const browserStorageKey = "azeroth-archives-offline-data";
@@ -277,15 +283,34 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
 }
 
 export function migrateOfflineStore(value: unknown): OfflineStore {
-  const parsed = value && typeof value === "object" ? value as { characters?: unknown; packs?: unknown; recovery?: unknown } : {};
-  const characters = Array.isArray(parsed.characters)
-    ? parsed.characters.filter((item): item is Partial<CharacterData> => Boolean(item) && typeof item === "object").map(normalizeCharacter)
+  const parsed = value && typeof value === "object"
+    ? value as { version?: unknown; characters?: unknown; packs?: unknown; recovery?: unknown }
+    : {};
+  const sourceVersion = Number.isInteger(parsed.version) ? Number(parsed.version) : 1;
+  if (sourceVersion > CURRENT_STORE_VERSION) throw new Error("This character library was created by a newer version of Azeroth Archives.");
+
+  let migrated = {
+    version: Math.max(1, sourceVersion),
+    characters: Array.isArray(parsed.characters) ? parsed.characters : [],
+    packs: Array.isArray(parsed.packs) ? parsed.packs : [],
+  };
+  if (migrated.version === 1) migrated = { ...migrated, version: 2, packs: Array.isArray(migrated.packs) ? migrated.packs : [] };
+  if (migrated.version === 2) migrated = { ...migrated, version: 3 };
+
+  const characters = Array.isArray(migrated.characters)
+    ? migrated.characters.filter((item): item is Partial<CharacterData> => Boolean(item) && typeof item === "object").map(normalizeCharacter)
     : [];
-  const packs = Array.isArray(parsed.packs)
-    ? parsed.packs.filter((pack): pack is ContentPack => Boolean(pack) && typeof pack === "object" && typeof (pack as ContentPack).pack?.id === "string")
+  const packs = Array.isArray(migrated.packs)
+    ? migrated.packs.filter((pack): pack is ContentPack => contentPackValidationError(pack) === null)
     : [];
-  const recovery = parsed.recovery && typeof parsed.recovery === "object" && typeof (parsed.recovery as { restoredFrom?: unknown }).restoredFrom === "string"
-    ? { restoredFrom: (parsed.recovery as { restoredFrom: string }).restoredFrom }
+  const recoverySource = parsed.recovery && typeof parsed.recovery === "object"
+    ? parsed.recovery as { restoredFrom?: unknown; migrationBackup?: unknown }
+    : undefined;
+  const recovery = recoverySource
+    ? {
+        ...(typeof recoverySource.restoredFrom === "string" ? { restoredFrom: recoverySource.restoredFrom } : {}),
+        ...(typeof recoverySource.migrationBackup === "string" ? { migrationBackup: recoverySource.migrationBackup } : {}),
+      }
     : undefined;
   return { version: CURRENT_STORE_VERSION, characters, packs, ...(recovery ? { recovery } : {}) };
 }
@@ -424,7 +449,9 @@ export function CharacterManager() {
       setCharacters(loadedCharacters);
       if (loadedCharacters[0]) setCharacter(loadedCharacters[0]);
       setCustomPacks(withBundledPack(store.packs));
-      setStatus(store.recovery ? `Recovered data from automatic backup ${store.recovery.restoredFrom}` : store.characters.length ? "Saved on this device" : "Create your first hero");
+      if (store.recovery?.restoredFrom) setStatus(`Recovered data from automatic backup ${store.recovery.restoredFrom}`);
+      else if (store.recovery?.migrationBackup) setStatus(`Character data updated safely; backup saved as ${store.recovery.migrationBackup}`);
+      else setStatus(store.characters.length ? "Saved on this device" : "Create your first hero");
     }).catch(() => setStatus("Could not read local character data"));
   }, []);
 
@@ -697,6 +724,7 @@ export function CharacterManager() {
       if (parsed.format !== "azeroth-archives-full-backup" || !parsed.store || typeof parsed.store !== "object") throw new Error("Invalid full backup");
       const source = parsed.store as { characters?: unknown; packs?: unknown };
       if (!Array.isArray(source.characters) || !Array.isArray(source.packs)) throw new Error("Invalid full backup contents");
+      source.packs.forEach(assertContentPack);
       const restored = migrateOfflineStore(source);
       if (!window.confirm(`Restore ${restored.characters.length} character${restored.characters.length === 1 ? "" : "s"} and ${restored.packs.length} imported content pack${restored.packs.length === 1 ? "" : "s"}? This replaces the current local library.`)) {
         setStatus("Full backup restore canceled");
@@ -827,10 +855,8 @@ export function CharacterManager() {
     event.target.value = "";
     if (!file) return;
     try {
-      const pack = JSON.parse(await file.text()) as ContentPack;
-      if (!(["1.0", "2.0"] as const).includes(pack.schemaVersion) || !pack.pack?.id || !pack.pack?.name || !pack.pack?.version) {
-        throw new Error("Missing required pack details");
-      }
+      const pack: unknown = JSON.parse(await file.text());
+      assertContentPack(pack);
       if (pack.pack.id === bundledPackId) {
         setStatus("The Warcraft campaign pack is included with the app and updates automatically");
         return;

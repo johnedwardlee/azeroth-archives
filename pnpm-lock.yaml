@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       electron-updater:
         specifier: ^6.8.9
         version: 6.8.9(supports-color@8.1.1)
@@ -36,9 +39,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.0.2
         version: 6.0.5(vite@8.2.1(@types/node@22.20.1)(jiti@2.7.0))
-      ajv:
-        specifier: ^8.20.0
-        version: 8.20.0
       concurrently:
         specifier: ^9.2.1
         version: 9.2.4
