@@ -35,6 +35,8 @@ import {
   isEquipmentProficient,
   resolveIncomingDamage,
   rollDiceFormula,
+  spellListsGrantedByFeats,
+  spellMatchesLists,
   syncEffectConditions,
 } from "../lib/character-rules";
 
@@ -358,7 +360,8 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
   const [spellRollResult, setSpellRollResult] = useState("");
   const catalogById = useMemo(() => new Map(catalog.map((spell) => [spell.id, spell])), [catalog]);
   const characterClasses = useMemo(() => new Set(character.classLevels.map((entry) => entry.className.toLowerCase())), [character.classLevels]);
-  const classCatalog = useMemo(() => catalog.filter((spell) => showAll || spell.classes.some((name) => characterClasses.has(name.toLowerCase()))), [catalog, showAll, characterClasses]);
+  const featSpellLists = useMemo(() => spellListsGrantedByFeats(character.feats), [character.feats]);
+  const classCatalog = useMemo(() => catalog.filter((spell) => showAll || spell.classes.some((name) => characterClasses.has(name.toLowerCase())) || spellMatchesLists(spell, featSpellLists)), [catalog, showAll, characterClasses, featSpellLists]);
   const available = classCatalog
     .filter((spell) => !character.spells.some((known) => known.id === spell.id))
     .sort((left, right) => left.level - right.level || left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
@@ -481,6 +484,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
         {lastCast && <div className="cast-feedback" role="status">{lastCast}<button aria-label="Dismiss casting message" onClick={() => setLastCast("")}>×</button></div>}
         {spellRollResult && <div className="cast-feedback spell-roll-feedback" role="status">{spellRollResult}<button aria-label="Dismiss spell roll" onClick={() => setSpellRollResult("")}>×</button></div>}
         <div className={`catalog-add-row spell-add${selectedOwnerOptions.length > 1 ? " has-owner" : ""}`}><DescriptionPicker ariaLabel="Available spells" value={selectedId} placeholder="Choose a spell" onChange={chooseSpell} options={available.map((spell) => ({ value: spell.id, label: spell.name, meta: `${spell.level ? `Level ${spell.level}` : "Cantrip"} · ${spell.school} · ${spell.classes.join(", ")}`, description: `${spell.castingTime} · ${spell.range} · ${spell.duration}\n\n${spell.description}` }))} />{selectedOwnerOptions.length > 1 && <select aria-label="Spellcasting class" value={selectedOwner} onChange={(event) => setSelectedOwner(event.target.value)}>{selectedOwnerOptions.map((profile) => <option key={profile.className} value={profile.className}>{profile.className}</option>)}</select>}<button className="button button-primary" disabled={!selectedId} onClick={addSpell}><Plus size={15} />Learn</button><label className="inline-check"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />All classes</label></div>
+        {!!featSpellLists.length && <p className="spellcasting-note">Feat spell access included: {featSpellLists.join(", ")}.</p>}
         <label className="catalog-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search known spells" /></label>
         <div className="spell-card-list">{visibleSpells.map((spell) => {
           const slotLevels = availableSlotLevels(spell);

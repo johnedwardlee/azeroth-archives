@@ -37,6 +37,38 @@ export function featAbilityIncrease(feat?: FeatDefinition) {
   return options.length ? { options, maximum: maximum === 30 ? 30 : 20 } : null;
 }
 
+function normalizedSpellListName(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\b(?:rules?|spell)\s+list\b/g, "")
+    .trim();
+  const aliases: Record<string, string> = {
+    cleric: "priest",
+    druid: "nature",
+    fighter: "warrior",
+    ranger: "hunter",
+    wizard: "mage",
+  };
+  return aliases[normalized] ?? normalized;
+}
+
+export function spellListsGrantedByFeats(feats: Pick<FeatDefinition, "description">[]) {
+  const lists = feats.flatMap((feat) => Array.from(feat.description.matchAll(/from (?:the )?([^.;]+?) spell list\b/gi), (match) => match[1])
+    .flatMap((list) => list
+      .replace(/,\s*(?:or|and)\s+/gi, ",")
+      .replace(/\s+(?:or|and)\s+/gi, ",")
+      .split(",")
+      .map((name) => name.replace(/^(?:the|or|and)\s+/i, "").trim())
+      .filter(Boolean)));
+  return [...new Set(lists)];
+}
+
+export function spellMatchesLists(spell: Pick<SpellDefinition, "classes">, listNames: Iterable<string>) {
+  const allowed = new Set(Array.from(listNames, normalizedSpellListName));
+  return spell.classes.some((className) => allowed.has(normalizedSpellListName(className)));
+}
+
 export function isIncapacitated(character: Pick<CharacterData, "conditions">) {
   return character.conditions.some((condition) => incapacitatingConditions.has(condition.trim().toLowerCase()));
 }

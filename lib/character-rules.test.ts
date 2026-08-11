@@ -13,6 +13,8 @@ import {
   preparedSpellLimitForClasses,
   progressionSpellSlots,
   resolveIncomingDamage,
+  spellListsGrantedByFeats,
+  spellMatchesLists,
   syncEffectConditions,
 } from "./character-rules";
 import { newCharacter } from "../src/character-manager";
@@ -35,6 +37,16 @@ describe("living sheet rules", () => {
     expect(featAbilityIncrease({ id: "alert", name: "Alert", category: "General", description: "Ability Score Increase: Increase your Agility or Intellect score by 1, to a maximum of 20. More rules." }))
       .toEqual({ options: ["agility", "intellect"], maximum: 20 });
     expect(featAbilityIncrease({ id: "boon", name: "Boon", category: "Epic Boon", description: "Ability Score Increase: Increase one ability score of your choice by 1, to a maximum of 30." })?.options).toHaveLength(6);
+  });
+
+  it("makes Magic Initiate cantrips available to a Paladin with the Acolyte background feat", () => {
+    const feat = { description: "Two Cantrips: you learn two cantrips of your choice from the Priest, Nature, or Mage spell list." };
+    const lists = spellListsGrantedByFeats([feat]);
+    expect(lists).toEqual(["Priest", "Nature", "Mage"]);
+    expect(spellMatchesLists({ classes: ["Priest", "Cleric"] }, lists)).toBe(true);
+    expect(spellMatchesLists({ classes: ["Nature (Druid rules list)"] }, lists)).toBe(true);
+    expect(spellMatchesLists({ classes: ["Mage", "Wizard"] }, lists)).toBe(true);
+    expect(spellMatchesLists({ classes: ["Paladin"] }, lists)).toBe(false);
   });
 
   it("exposes only prepared leveled spells as actions and identifies incapacitation", () => {

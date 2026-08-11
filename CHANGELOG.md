@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- Fixed feat-granted spell lists so a Paladin with the Faithful Initiate background can select the cantrips and spells provided by Magic Initiate without enabling all class lists.
+
 ## 1.2.0
 
 - Added portable campaign profiles for starting level and XP, allowed content and ability methods, advancement policy, encumbrance, attunement, equipment options, and house rules.
