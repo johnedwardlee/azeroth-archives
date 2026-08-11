@@ -12,4 +12,10 @@ describe("content pack runtime validation", () => {
     expect(contentPackValidationError(pack)).toMatch(/ancestries/);
     expect(() => assertContentPack(pack)).toThrow();
   });
+
+  it("rejects invalid nested entries and unknown properties without code generation", () => {
+    const pack = { schemaVersion: "2.0", pack: { id: "test-pack", name: "Test Pack", version: "1.0.0" }, spells: [{ id: "Bad Id", name: "", level: 12, surprise: true }] };
+    expect(contentPackValidationError(pack)).toMatch(/spells\[0\]/);
+    expect(() => assertContentPack(pack)).toThrow();
+  });
 });

@@ -5,6 +5,8 @@ import {
   classTrainingFor,
   concentrationSave,
   featPrerequisiteIssues,
+  multiclassSpellSlots,
+  preparedSpellLimitForClasses,
   progressionSpellSlots,
   resolveIncomingDamage,
 } from "./character-rules";
@@ -73,5 +75,15 @@ describe("living sheet rules", () => {
         expect(Object.values(slots ?? {}).every((value) => Number.isInteger(value) && value >= 0)).toBe(true);
       }
     }
+  });
+
+  it("combines multiclass caster levels and prepared limits", () => {
+    const levels = [
+      { className: "Mage", level: 3 },
+      { className: "Paladin", level: 2 },
+      { className: "Warrior", subclassName: "Eldritch Knight", level: 3 },
+    ];
+    expect(multiclassSpellSlots(levels)).toEqual({ "1": 4, "2": 3, "3": 2 });
+    expect(preparedSpellLimitForClasses(levels)).toBeGreaterThan(0);
   });
 });

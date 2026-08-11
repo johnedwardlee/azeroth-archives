@@ -1,9 +1,10 @@
 import type { CharacterData, ContentPack } from "../lib/types";
 
 type DesktopStore = {
-  version: 3;
+  version: 4;
   characters: CharacterData[];
   packs: ContentPack[];
+  disabledPackIds: string[];
   recovery?: { restoredFrom?: string; migrationBackup?: string };
 };
 
@@ -22,9 +23,11 @@ declare global {
       deleteCharacter: (id: string) => Promise<void>;
       savePack: (pack: ContentPack) => Promise<ContentPack>;
       deletePack: (id: string) => Promise<void>;
+      setPackEnabled: (id: string, enabled: boolean) => Promise<{ id: string; enabled: boolean }>;
       replaceStore: (store: DesktopStore) => Promise<DesktopStore>;
       savePdf: (filename: string, bytes: number[]) => Promise<string | null>;
       saveJson: (filename: string, contents: string) => Promise<string | null>;
+      saveContentPack: (filename: string, contents: string) => Promise<string | null>;
       getAppInfo: () => Promise<{ version: string; platform: string; packaged: boolean; dataPath: string; backupPath: string }>;
       openDataFolder: () => Promise<string>;
       openReleaseNotes: () => Promise<void>;

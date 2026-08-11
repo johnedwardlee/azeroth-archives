@@ -10,6 +10,7 @@ import {
   type EquipmentDefinition,
   type FeatDefinition,
   type InventoryItem,
+  type HitDicePool,
   type SpellDefinition,
   type SpellSlotState,
 } from "../lib/types";
@@ -29,7 +30,7 @@ import {
   featPrerequisiteIssues,
   formatPounds,
   hasUnproficientArmor,
-  preparedSpellLimitFor,
+  preparedSpellLimitForClasses,
   isEquipmentProficient,
   resolveIncomingDamage,
   rollDiceFormula,
@@ -68,17 +69,19 @@ function equipmentDescription(item: EquipmentDefinition) {
   ].filter(Boolean).join("\n\n");
 }
 
-export function SessionTracker({ character, patchCharacter, hitDie }: { character: CharacterData; patchCharacter: PatchCharacter; hitDie: number }) {
+export function SessionTracker({ character, patchCharacter, hitDicePools }: { character: CharacterData; patchCharacter: PatchCharacter; hitDicePools: HitDicePool[] }) {
   const [hpAmount, setHpAmount] = useState(1);
   const [damageType, setDamageType] = useState("Bludgeoning");
   const [hpFeedback, setHpFeedback] = useState("");
   const [hitDiceToSpend, setHitDiceToSpend] = useState(1);
   const [hitDiceFeedback, setHitDiceFeedback] = useState("");
+  const [hitDieClass, setHitDieClass] = useState("");
   const [condition, setCondition] = useState("");
   const [effectName, setEffectName] = useState("");
   const [effectDuration, setEffectDuration] = useState<ActiveEffect["duration"]>("rounds");
   const [effectRemaining, setEffectRemaining] = useState(1);
   const [effectCondition, setEffectCondition] = useState("");
+  const selectedHitDicePool = hitDicePools.find((pool) => pool.className === hitDieClass) ?? hitDicePools[0] ?? { className: character.className, die: 8, total: character.hitDiceTotal, used: character.hitDiceUsed };
 
   function takeDamage() {
     const resolution = resolveIncomingDamage(hpAmount, damageType, character);
@@ -107,6 +110,7 @@ export function SessionTracker({ character, patchCharacter, hitDie }: { characte
       currentHp: character.maxHp,
       temporaryHp: 0,
       hitDiceUsed: 0,
+      hitDiceByClass: character.hitDiceByClass.map((pool) => ({ ...pool, used: 0 })),
       deathSaveSuccesses: 0,
       deathSaveFailures: 0,
       spellSlots: Object.fromEntries(
@@ -130,14 +134,14 @@ export function SessionTracker({ character, patchCharacter, hitDie }: { characte
   }
 
   function spendHitDice() {
-    const available = character.hitDiceTotal - character.hitDiceUsed;
+    const available = selectedHitDicePool.total - selectedHitDicePool.used;
     const count = Math.max(1, Math.min(available, hitDiceToSpend));
     if (available <= 0 || character.currentHp >= character.maxHp) return;
     const staminaHealing = abilityModifier(character.abilities.stamina) * count;
-    const result = rollDiceFormula(`${count}d${hitDie}`, false, staminaHealing);
+    const result = rollDiceFormula(`${count}d${selectedHitDicePool.die}`, false, staminaHealing);
     if (!result) return;
     const restored = Math.min(Math.max(0, result.total), character.maxHp - character.currentHp);
-    patchCharacter({ currentHp: character.currentHp + restored, hitDiceUsed: character.hitDiceUsed + count });
+    patchCharacter({ currentHp: character.currentHp + restored, hitDiceUsed: character.hitDiceUsed + count, hitDiceByClass: character.hitDiceByClass.map((pool) => pool.className === selectedHitDicePool.className ? { ...pool, used: pool.used + count } : pool) });
     setHitDiceFeedback(`Rolled ${result.rolls.join(" + ")}${staminaHealing ? ` ${staminaHealing >= 0 ? "+" : "−"} ${Math.abs(staminaHealing)} Stamina` : ""}; restored ${restored} HP.`);
   }
 
@@ -271,8 +275,9 @@ export function SessionTracker({ character, patchCharacter, hitDie }: { characte
 
         <div className="session-block">
           <span className="field-label">Hit dice</span>
-          <div className="resource-number"><strong>{character.hitDiceTotal - character.hitDiceUsed}</strong><span>/ {character.hitDiceTotal} d{hitDie} remaining</span></div>
-          <div className="hit-dice-spend"><label>Spend<input aria-label="Hit Dice to spend" type="number" min="1" max={Math.max(1, character.hitDiceTotal - character.hitDiceUsed)} value={hitDiceToSpend} onChange={(event) => setHitDiceToSpend(Math.max(1, Number(event.target.value) || 1))} /></label><button disabled={character.hitDiceUsed >= character.hitDiceTotal || character.currentHp >= character.maxHp} onClick={spendHitDice}>Roll healing</button></div>
+          <select aria-label="Hit Dice class" value={selectedHitDicePool.className} onChange={(event) => { setHitDieClass(event.target.value); setHitDiceToSpend(1); }}>{hitDicePools.map((pool) => <option key={pool.className} value={pool.className}>{pool.className}: d{pool.die} ({pool.total - pool.used}/{pool.total})</option>)}</select>
+          <div className="resource-number"><strong>{character.hitDiceTotal - character.hitDiceUsed}</strong><span>/ {character.hitDiceTotal} total remaining</span></div>
+          <div className="hit-dice-spend"><label>Spend<input aria-label="Hit Dice to spend" type="number" min="1" max={Math.max(1, selectedHitDicePool.total - selectedHitDicePool.used)} value={hitDiceToSpend} onChange={(event) => setHitDiceToSpend(Math.max(1, Number(event.target.value) || 1))} /></label><button disabled={selectedHitDicePool.used >= selectedHitDicePool.total || character.currentHp >= character.maxHp} onClick={spendHitDice}>Roll d{selectedHitDicePool.die}</button></div>
           {hitDiceFeedback && <p className="tracker-feedback">{hitDiceFeedback}</p>}
         </div>
 
@@ -341,7 +346,8 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
   const [castLevels, setCastLevels] = useState<Record<string, number>>({});
   const [spellRollResult, setSpellRollResult] = useState("");
   const catalogById = useMemo(() => new Map(catalog.map((spell) => [spell.id, spell])), [catalog]);
-  const classCatalog = useMemo(() => catalog.filter((spell) => showAll || spell.classes.some((name) => name.toLowerCase() === character.className.toLowerCase())), [catalog, showAll, character.className]);
+  const characterClasses = useMemo(() => new Set(character.classLevels.map((entry) => entry.className.toLowerCase())), [character.classLevels]);
+  const classCatalog = useMemo(() => catalog.filter((spell) => showAll || spell.classes.some((name) => characterClasses.has(name.toLowerCase()))), [catalog, showAll, characterClasses]);
   const available = classCatalog
     .filter((spell) => !character.spells.some((known) => known.id === spell.id))
     .sort((left, right) => left.level - right.level || left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
@@ -357,7 +363,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
   const spellcastingModifier = spellcastingAbility ? abilityModifier(character.abilities[spellcastingAbility]) : null;
   const spellAttackBonus = spellcastingModifier === null ? null : spellcastingModifier + character.proficiencyBonus;
   const spellSaveDc = spellAttackBonus === null ? null : 8 + spellAttackBonus;
-  const preparedLimit = preparedSpellLimitFor(character.className, character.subclassName ?? "", character.level);
+  const preparedLimit = preparedSpellLimitForClasses(character.classLevels);
   const preparedCount = character.spells.filter((spell) => spell.level > 0 && spell.prepared).length;
   const spellcastingBlocked = hasUnproficientArmor(character, equipmentCatalog);
 

@@ -1,7 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 const DEFAULT_BACKUP_LIMIT = 10;
 const DEFAULT_BACKUP_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -23,6 +23,7 @@ function migrateStore(value) {
     version: Math.max(1, sourceVersion),
     characters: Array.isArray(parsed.characters) ? parsed.characters : [],
     packs: Array.isArray(parsed.packs) ? parsed.packs : [],
+    disabledPackIds: Array.isArray(parsed.disabledPackIds) ? parsed.disabledPackIds.filter((id) => typeof id === "string") : [],
   };
 
   if (migrated.version === 1) {
@@ -30,6 +31,9 @@ function migrateStore(value) {
   }
   if (migrated.version === 2) {
     migrated = { ...migrated, version: 3 };
+  }
+  if (migrated.version === 3) {
+    migrated = { ...migrated, version: 4, disabledPackIds: [] };
   }
 
   return { store: migrated, sourceVersion, migrated: sourceVersion !== STORE_VERSION };
@@ -99,7 +103,7 @@ function createStorage({
   }
 
   function validateStore(store) {
-    if (!store || !Array.isArray(store.characters) || !Array.isArray(store.packs)) {
+    if (!store || !Array.isArray(store.characters) || !Array.isArray(store.packs) || !Array.isArray(store.disabledPackIds)) {
       throw new Error("The character library must contain character and content-pack lists.");
     }
     for (const pack of store.packs) validatePack(pack);
@@ -111,7 +115,7 @@ function createStorage({
     await fs.mkdir(path.dirname(destination), { recursive: true });
     if (createBackup) await createRotatingBackup(destination);
     const temporary = `${destination}.tmp`;
-    const normalized = validateStore({ version: STORE_VERSION, characters: store.characters, packs: store.packs });
+    const normalized = validateStore({ version: STORE_VERSION, characters: store.characters, packs: store.packs, disabledPackIds: store.disabledPackIds ?? [] });
     await fs.writeFile(temporary, JSON.stringify(normalized, null, 2), "utf8");
     await fs.rename(temporary, destination);
   }
@@ -144,7 +148,7 @@ function createStorage({
       }
       return result.store;
     } catch (error) {
-      if (error?.code === "ENOENT") return { version: STORE_VERSION, characters: [], packs: [] };
+      if (error?.code === "ENOENT") return { version: STORE_VERSION, characters: [], packs: [], disabledPackIds: [] };
       if (error?.code === "STORE_VERSION_TOO_NEW") throw error;
       const recovered = await recoverStore();
       if (recovered) return recovered;
@@ -183,7 +187,17 @@ function createStorage({
       id = requireId(id, "Content pack");
       const store = await readStoreUnlocked();
       store.packs = store.packs.filter((item) => item.pack.id !== id);
+      store.disabledPackIds = store.disabledPackIds.filter((item) => item !== id);
       await writeStoreUnlocked(store);
+    }),
+    setPackEnabled: (id, enabled) => enqueue(async () => {
+      id = requireId(id, "Content pack");
+      const store = await readStoreUnlocked();
+      store.disabledPackIds = enabled
+        ? store.disabledPackIds.filter((item) => item !== id)
+        : [...new Set([...store.disabledPackIds, id])];
+      await writeStoreUnlocked(store);
+      return { id, enabled: Boolean(enabled) };
     }),
     replaceStore: (replacement) => enqueue(async () => {
       const result = migrateStore(replacement);

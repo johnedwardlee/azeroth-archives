@@ -8,6 +8,10 @@ describe("character save migrations", () => {
     expect(character.level).toBe(1);
     expect(character.activeEffects).toEqual([]);
     expect(character.inventory).toEqual([]);
+    expect(character.classLevels).toEqual([]);
+    expect(character.advancementHistory).toEqual([]);
+    expect(character.companions).toEqual([]);
+    expect(character.journal).toEqual([]);
   });
 
   it("migrates a legacy character and clamps unsafe values", () => {
@@ -29,6 +33,7 @@ describe("character save migrations", () => {
     expect(character.abilities.agility).toBe(14);
     expect(character.hitDiceTotal).toBe(5);
     expect(character.hitDiceUsed).toBe(5);
+    expect(character.classLevels).toEqual([{ className: "Warrior", subclassName: "", level: 5 }]);
     expect(character.temporaryHp).toBe(0);
     expect(character.deathSaveSuccesses).toBe(3);
     expect(character.deathSaveFailures).toBe(0);
@@ -47,6 +52,7 @@ describe("character save migrations", () => {
     expect(store.characters).toHaveLength(1);
     expect(store.characters[0].schemaVersion).toBe(CURRENT_CHARACTER_SCHEMA_VERSION);
     expect(store.packs.map((pack) => pack.pack.id)).toEqual(["valid"]);
+    expect(store.disabledPackIds).toEqual([]);
   });
 
   it("rejects stores created by a newer application version", () => {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0
+
+- Added multiclass advancement with class-specific levels, combined spell slots and resources, and separate Hit Dice pools.
+- Added advancement history with one-step-at-a-time rollback of level statistics, features, feats, spells, and choices.
+- Added companion, summon, and transformation tracking with editable combat values and imported creature references.
+- Replaced the single notes page with a structured journal for sessions, quests, NPCs, locations, and lore while retaining a scratchpad.
+- Added the Content Pack Workshop for live preview, schema validation, JSON editing, cloning, enabling/disabling, and `.w5e` export.
+- Added save-store migration 4 for pack enabled state and character schema 4 for the new living-sheet records.
+- Removed renderer schema compiler code generation so content validation works under the desktop security policy.
+- Rebuilt PDF character sheets as a neutral Azeroth explorer's ledger with parchment, navy and brass framing, varied section icons, portrait support, a compact overview, and themed continuation pages.
+
 ## 1.0.1
 
 - Serialized desktop storage operations and limited the app to one active instance to prevent overlapping local-data writes.

@@ -99,6 +99,46 @@ export type CreatureDefinition = {
   source?: string;
 };
 
+export type CharacterClassLevel = {
+  className: string;
+  subclassName?: string;
+  level: number;
+};
+
+export type HitDicePool = { className: string; die: number; total: number; used: number };
+
+export type CompanionKind = "companion" | "summon" | "form";
+
+export type TrackedCompanion = {
+  id: string;
+  contentId?: string;
+  name: string;
+  kind: CompanionKind;
+  active: boolean;
+  currentHp: number;
+  maxHp: number;
+  armorClass: number;
+  speed: string;
+  challengeRating?: string;
+  description: string;
+  notes: string;
+  source?: string;
+};
+
+export type JournalEntryType = "session" | "quest" | "npc" | "location" | "lore";
+export type JournalEntryStatus = "active" | "completed" | "archived";
+
+export type JournalEntry = {
+  id: string;
+  type: JournalEntryType;
+  title: string;
+  details: string;
+  status: JournalEntryStatus;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type RuleDefinition = {
   id: string;
   name: string;
@@ -193,6 +233,41 @@ export type CharacterResource = {
   source?: string;
 };
 
+export type AdvancementSnapshot = {
+  level: number;
+  className: string;
+  subclassName?: string;
+  classLevels: CharacterClassLevel[];
+  experience: number;
+  currentHp: number;
+  maxHp: number;
+  proficiencyBonus: number;
+  hitDiceTotal: number;
+  hitDiceUsed: number;
+  hitDiceByClass: HitDicePool[];
+  abilities: Record<AbilityKey, number>;
+  skillProficiencies: string[];
+  skillExpertise: string[];
+  weaponMasteries: string[];
+  advancementChoices: AdvancementChoice[];
+  resources: CharacterResource[];
+  spellSlots: Record<string, SpellSlotState>;
+  feats: TrackedFeat[];
+  spells: TrackedSpell[];
+  features: RulesFeature[];
+};
+
+export type AdvancementHistoryEntry = {
+  id: string;
+  createdAt: string;
+  totalLevel: number;
+  className: string;
+  classLevel: number;
+  hpGain: number;
+  summary: string;
+  before: AdvancementSnapshot;
+};
+
 export type ContentPack = {
   schemaVersion: "1.0" | "2.0";
   pack: {
@@ -213,7 +288,7 @@ export type ContentPack = {
 };
 
 export type CharacterData = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   id: string;
   name: string;
   portraitDataUrl?: string;
@@ -221,6 +296,7 @@ export type CharacterData = {
   ancestry: string;
   className: string;
   subclassName?: string;
+  classLevels: CharacterClassLevel[];
   background: string;
   level: number;
   experience: number;
@@ -244,6 +320,7 @@ export type CharacterData = {
   weaponProficiencies: string[];
   weaponMasteries: string[];
   advancementChoices: AdvancementChoice[];
+  advancementHistory: AdvancementHistoryEntry[];
   abilityScoresConfirmed: boolean;
   startingEquipmentConfirmed: boolean;
   startingEquipmentChoice: "" | "A" | "B";
@@ -255,12 +332,14 @@ export type CharacterData = {
   spellSlots: Record<string, SpellSlotState>;
   concentratingSpellId?: string;
   activeEffects: ActiveEffect[];
+  companions: TrackedCompanion[];
   inventory: InventoryItem[];
   currency: CurrencyState;
   resources: CharacterResource[];
   inspiration: boolean;
   hitDiceTotal: number;
   hitDiceUsed: number;
+  hitDiceByClass: HitDicePool[];
   deathSaveSuccesses: number;
   deathSaveFailures: number;
   conditions: string[];
@@ -270,6 +349,7 @@ export type CharacterData = {
   damageImmunities: string[];
   conditionImmunities: string[];
   savingThrowBonuses: Partial<Record<AbilityKey, number>>;
+  journal: JournalEntry[];
   notes: string;
   createdAt: string;
   updatedAt: string;

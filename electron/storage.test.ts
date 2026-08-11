@@ -14,9 +14,10 @@ const { createStorage, STORE_VERSION } = require("./storage.cjs") as {
   }) => {
     dataPath: () => string;
     backupPath: () => string;
-    load: () => Promise<{ version: number; characters: Array<{ id: string; name: string }>; packs: unknown[]; recovery?: { restoredFrom?: string; migrationBackup?: string } }>;
+    load: () => Promise<{ version: number; characters: Array<{ id: string; name: string }>; packs: Array<{ pack: { id: string } }>; disabledPackIds: string[]; recovery?: { restoredFrom?: string; migrationBackup?: string } }>;
     saveCharacter: (character: { id: string; name: string }) => Promise<{ id: string; name: string }>;
     savePack: (pack: unknown) => Promise<unknown>;
+    setPackEnabled: (id: string, enabled: boolean) => Promise<unknown>;
     replaceStore: (store: unknown) => Promise<unknown>;
   };
 };
@@ -75,5 +76,15 @@ describe("desktop storage", () => {
 
     await writeFile(storage.dataPath(), JSON.stringify({ version: STORE_VERSION + 1, characters: [], packs: [] }), "utf8");
     await expect(storage.load()).rejects.toThrow(/newer version/i);
+  });
+
+  it("persists enabled state separately from custom pack contents", async () => {
+    const storage = await testStorage();
+    const pack = { schemaVersion: "2.0", pack: { id: "optional-pack", name: "Optional Pack", version: "1" } };
+    await storage.savePack(pack);
+    await storage.setPackEnabled("optional-pack", false);
+    expect((await storage.load()).disabledPackIds).toEqual(["optional-pack"]);
+    await storage.setPackEnabled("optional-pack", true);
+    expect((await storage.load()).disabledPackIds).toEqual([]);
   });
 });

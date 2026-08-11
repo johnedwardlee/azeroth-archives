@@ -39,6 +39,7 @@ ipcMain.handle("storage:save-character", (_event, character) => storage.saveChar
 ipcMain.handle("storage:delete-character", (_event, id) => storage.deleteCharacter(id));
 ipcMain.handle("storage:save-pack", (_event, pack) => storage.savePack(pack));
 ipcMain.handle("storage:delete-pack", (_event, id) => storage.deletePack(id));
+ipcMain.handle("storage:set-pack-enabled", (_event, id, enabled) => storage.setPackEnabled(id, enabled));
 ipcMain.handle("storage:replace", (_event, replacement) => storage.replaceStore(replacement));
 
 ipcMain.handle("app:info", () => ({
@@ -87,6 +88,19 @@ ipcMain.handle("dialog:save-json", async (_event, filename, contents) => {
     title: "Save character backup",
     defaultPath: path.join(app.getPath("documents"), filename),
     filters: [{ name: "Azeroth Archives character", extensions: ["json"] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  await fs.writeFile(result.filePath, contents, "utf8");
+  return result.filePath;
+});
+
+ipcMain.handle("dialog:save-content-pack", async (_event, filename, contents) => {
+  if (typeof filename !== "string" || !filename.trim()) throw new Error("A content-pack filename is required.");
+  if (typeof contents !== "string") throw new Error("Content-pack contents must be text.");
+  const result = await dialog.showSaveDialog({
+    title: "Save Warcraft 5E content pack",
+    defaultPath: path.join(app.getPath("documents"), filename),
+    filters: [{ name: "Warcraft 5E content pack", extensions: ["w5e"] }],
   });
   if (result.canceled || !result.filePath) return null;
   await fs.writeFile(result.filePath, contents, "utf8");

@@ -4,6 +4,7 @@ import {
   type AdvancementChoiceKind,
   type ActiveEffect,
   type CharacterAttack,
+  type CharacterClassLevel,
   type CharacterData,
   type CharacterResource,
   type EquipmentDefinition,
@@ -77,7 +78,7 @@ export function featPrerequisiteIssues(feat: FeatDefinition, character: Characte
     const match = prerequisite.match(new RegExp(`${label}\\s*(?:score\\s*)?(\\d+)\\+?`, "i"));
     if (match && character.abilities[ability] < Number(match[1])) issues.push(`Requires ${label} ${match[1]}.`);
   }
-  if (/spellcasting|ability to cast/i.test(prerequisite) && !spellcastingAbilityForClass(character.className, character.subclassName ?? "")) issues.push("Requires spellcasting.");
+  if (/spellcasting|ability to cast/i.test(prerequisite) && !character.classLevels.some((entry) => spellcastingAbilityForClass(entry.className, entry.subclassName ?? ""))) issues.push("Requires spellcasting.");
   if (/martial weapon/i.test(prerequisite) && !character.weaponProficiencies.some((entry) => /martial/i.test(entry))) issues.push("Requires Martial Weapon proficiency.");
   return issues;
 }
@@ -269,6 +270,36 @@ export function syncProgressionSpellSlots(current: Record<string, SpellSlotState
   }]));
 }
 
+function casterLevelFor(entry: CharacterClassLevel) {
+  const className = entry.className.trim().toLowerCase();
+  const subclassName = (entry.subclassName ?? "").trim().toLowerCase();
+  if (["bard", "priest", "sorcerer", "mage"].includes(className)) return entry.level;
+  if (["paladin", "hunter"].includes(className)) return Math.ceil(entry.level / 2);
+  if ((className === "warrior" && subclassName.includes("eldritch knight")) || (className === "rogue" && subclassName.includes("arcane trickster"))) {
+    return Math.floor(entry.level / 3);
+  }
+  return 0;
+}
+
+export function multiclassSpellSlots(classLevels: CharacterClassLevel[]) {
+  const casterLevel = Math.max(0, Math.min(20, classLevels.reduce((total, entry) => total + casterLevelFor(entry), 0)));
+  if (!casterLevel) return null;
+  return Object.fromEntries((fullCasterSlots[casterLevel] ?? []).map((maximum, index) => [String(index + 1), maximum]));
+}
+
+export function syncMulticlassSpellSlots(current: Record<string, SpellSlotState>, classLevels: CharacterClassLevel[]) {
+  if (classLevels.length <= 1) {
+    const entry = classLevels[0];
+    return entry ? syncProgressionSpellSlots(current, entry.className, entry.subclassName ?? "", entry.level) : null;
+  }
+  const progression = multiclassSpellSlots(classLevels);
+  if (!progression) return null;
+  return Object.fromEntries(Object.entries(progression).map(([slotLevel, maximum]) => [slotLevel, {
+    maximum,
+    used: Math.min(maximum, current[slotLevel]?.used ?? 0),
+  }]));
+}
+
 export function preparedSpellLimitFor(className: string, subclassName: string, level: number) {
   const normalizedClass = className.trim().toLowerCase();
   const normalizedSubclass = subclassName.trim().toLowerCase();
@@ -280,6 +311,13 @@ export function preparedSpellLimitFor(className: string, subclassName: string, l
     return Math.max(3, Math.ceil(safeLevel / 3) + 2);
   }
   return null;
+}
+
+export function preparedSpellLimitForClasses(classLevels: CharacterClassLevel[]) {
+  const limits = classLevels
+    .map((entry) => preparedSpellLimitFor(entry.className, entry.subclassName ?? "", entry.level))
+    .filter((value): value is number => value !== null);
+  return limits.length ? limits.reduce((total, value) => total + value, 0) : null;
 }
 
 function writtenCount(text: string, fallback = 1) {
@@ -440,8 +478,7 @@ function automaticResourcesFor(className: string, level: number, abilities: Char
   return templates.map((template) => ({ ...template, id: crypto.randomUUID(), current: template.maximum }));
 }
 
-export function syncAutomaticResources(resources: CharacterResource[], className: string, level: number, abilities: CharacterData["abilities"]) {
-  const templates = automaticResourcesFor(className, level, abilities);
+function syncResourceTemplates(resources: CharacterResource[], templates: CharacterResource[]) {
   const templateNames = new Set(templates.map((template) => template.name.toLowerCase()));
   const result = resources.filter((resource) => !resource.automatic || templateNames.has(resource.name.toLowerCase()));
   for (const template of templates) {
@@ -455,6 +492,22 @@ export function syncAutomaticResources(resources: CharacterResource[], className
     result[index] = { ...current, ...template, id: current.id, current: Math.min(template.maximum, current.current + gained) };
   }
   return result;
+}
+
+export function syncAutomaticResources(resources: CharacterResource[], className: string, level: number, abilities: CharacterData["abilities"]) {
+  return syncResourceTemplates(resources, automaticResourcesFor(className, level, abilities));
+}
+
+export function syncMulticlassResources(resources: CharacterResource[], classLevels: CharacterClassLevel[], abilities: CharacterData["abilities"]) {
+  const byName = new Map<string, CharacterResource>();
+  for (const entry of classLevels) {
+    for (const template of automaticResourcesFor(entry.className, entry.level, abilities)) {
+      const key = template.name.toLowerCase();
+      const existing = byName.get(key);
+      if (!existing || template.maximum > existing.maximum) byName.set(key, template);
+    }
+  }
+  return syncResourceTemplates(resources, [...byName.values()]);
 }
 
 export function extractDiceFormula(text: string) {
