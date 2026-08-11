@@ -105,6 +105,29 @@ export type CharacterClassLevel = {
   level: number;
 };
 
+export type AbilityScoreMethod = "standard-array" | "point-buy" | "rolled" | "manual";
+export type EncumbranceRule = "variant" | "standard" | "none";
+export type StartingEquipmentRule = "packages-or-gold" | "packages-only" | "gold-only";
+export type AppRole = "player" | "dm";
+
+export type CampaignProfile = {
+  schemaVersion: 1;
+  id: string;
+  name: string;
+  startingLevel: number;
+  startingExperience: number;
+  allowedPackIds: string[];
+  allowedAbilityMethods: AbilityScoreMethod[];
+  encumbranceRule: EncumbranceRule;
+  startingEquipmentRule: StartingEquipmentRule;
+  allowMulticlass: boolean;
+  allowOptionalFeats: boolean;
+  attunementLimit: number;
+  houseRules: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type HitDicePool = { className: string; die: number; total: number; used: number };
 
 export type CompanionKind = "companion" | "summon" | "form";
@@ -316,7 +339,7 @@ export type CharacterData = {
   proficiencyBonus: number;
   abilities: Record<AbilityKey, number>;
   baseAbilities: Record<AbilityKey, number>;
-  abilityScoreMethod: "standard-array" | "point-buy" | "rolled" | "manual";
+  abilityScoreMethod: AbilityScoreMethod;
   backgroundAbilityBonuses: Partial<Record<AbilityKey, number>>;
   savingThrowProficiencies: AbilityKey[];
   skillProficiencies: string[];
@@ -359,6 +382,10 @@ export type CharacterData = {
   savingThrowBonuses: Partial<Record<AbilityKey, number>>;
   journal: JournalEntry[];
   notes: string;
+  campaignProfileId?: string;
+  finalizedAt?: string;
+  readOnlyReview?: boolean;
+  reviewImportedAt?: string;
   createdAt: string;
   updatedAt: string;
 };

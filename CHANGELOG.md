@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0
+
+- Added portable campaign profiles for starting level and XP, allowed content and ability methods, advancement policy, encumbrance, attunement, equipment options, and house rules.
+- Added a first-launch Player or Dungeon Master onboarding flow with campaign-profile import and local-data guidance.
+- Added a character readiness preflight that separates blocking creation errors from GM-review warnings.
+- Added character finalization that protects ancestry, class, background, ability, training, and starting-equipment choices while leaving the living sheet and advancement available.
+- Added one-step DM review package export containing the character PDF, a validation report, and an importable read-only review copy.
+- Upgraded the local store to version 5 with campaign-profile, role, and onboarding migrations included in full backups.
+
 ## 1.1.1
 
 - Applied feat-granted ability increases during level-up and preserved them through advancement rollback.

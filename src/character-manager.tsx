@@ -8,6 +8,7 @@ import {
   FileJson,
   Heart,
   HardDrive,
+  Flag,
   LibraryBig,
   Menu,
   MoreHorizontal,
@@ -33,10 +34,15 @@ import { AdvancementPanel } from "./advancement-panel";
 import { CompanionManager } from "./companion-manager";
 import { JournalManager } from "./journal-manager";
 import { ContentPackWorkshop } from "./content-pack-workshop";
+import { CampaignPanel } from "./campaign-panel";
+import { Onboarding } from "./onboarding";
+import { ReadinessPanel } from "./readiness-panel";
 import { buildCharacterPdf, type CharacterPdfSection } from "./character-pdf";
 import bundledWarcraftPackJson from "../content-packs/warcraft5e-campaign.w5e?raw";
 import packageMetadata from "../package.json";
 import { assertContentPack, contentPackValidationError } from "../lib/content-validation";
+import { normalizeCampaignProfile, parseCampaignProfileFile, serializeCampaignProfile } from "../lib/campaign-profile";
+import { evaluateCharacterReadiness, readinessReportText } from "../lib/character-readiness";
 import {
   calculateArmorClass,
   calculateEffectiveSpeed,
@@ -64,7 +70,9 @@ import {
   type AdvancementChoice,
   type AncestryDefinition,
   type BackgroundDefinition,
+  type AppRole,
   type AdvancementSnapshot,
+  type CampaignProfile,
   type CharacterData,
   type CharacterClassLevel,
   type ClassDefinition,
@@ -74,13 +82,17 @@ import {
 } from "../lib/types";
 
 type Tab = "overview" | "features" | "actions" | "combat" | "spells" | "equipment" | "companions" | "notes";
-export const CURRENT_STORE_VERSION = 4 as const;
+export const CURRENT_STORE_VERSION = 5 as const;
 export const CURRENT_CHARACTER_SCHEMA_VERSION = 5 as const;
 export type OfflineStore = {
-  version: 4;
+  version: 5;
   characters: CharacterData[];
   packs: ContentPack[];
   disabledPackIds: string[];
+  campaignProfiles: CampaignProfile[];
+  activeCampaignProfileId?: string;
+  onboardingCompleted: boolean;
+  appRole: AppRole;
   recovery?: { restoredFrom?: string; migrationBackup?: string };
 };
 
@@ -97,12 +109,20 @@ function readBrowserStore(): OfflineStore {
   try {
     return migrateOfflineStore(JSON.parse(localStorage.getItem(browserStorageKey) ?? "null"));
   } catch {
-    return { version: CURRENT_STORE_VERSION, characters: [], packs: [], disabledPackIds: [] };
+    return { version: CURRENT_STORE_VERSION, characters: [], packs: [], disabledPackIds: [], campaignProfiles: [], onboardingCompleted: false, appRole: "player" };
   }
 }
 
 function writeBrowserStore(store: OfflineStore) {
   localStorage.setItem(browserStorageKey, JSON.stringify(store));
+}
+
+function downloadBlob(filename: string, blob: Blob) {
+  const anchor = document.createElement("a");
+  anchor.href = URL.createObjectURL(blob);
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(anchor.href);
 }
 
 function resizePortrait(file: File) {
@@ -204,6 +224,10 @@ export function newCharacter(): CharacterData {
     savingThrowBonuses: {},
     journal: [],
     notes: "",
+    campaignProfileId: undefined,
+    finalizedAt: undefined,
+    readOnlyReview: false,
+    reviewImportedAt: undefined,
     createdAt: now,
     updatedAt: now,
   };
@@ -430,6 +454,10 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
       updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : new Date().toISOString(),
     })) : [],
     notes: textValue(value.notes),
+    campaignProfileId: typeof value.campaignProfileId === "string" && value.campaignProfileId.trim() ? value.campaignProfileId.trim() : undefined,
+    finalizedAt: typeof value.finalizedAt === "string" && value.finalizedAt.trim() ? value.finalizedAt : undefined,
+    readOnlyReview: Boolean(value.readOnlyReview),
+    reviewImportedAt: typeof value.reviewImportedAt === "string" && value.reviewImportedAt.trim() ? value.reviewImportedAt : undefined,
     createdAt: textValue(value.createdAt, defaults.createdAt),
     updatedAt: textValue(value.updatedAt, defaults.updatedAt),
   };
@@ -458,7 +486,7 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
 
 export function migrateOfflineStore(value: unknown): OfflineStore {
   const parsed = value && typeof value === "object"
-    ? value as { version?: unknown; characters?: unknown; packs?: unknown; disabledPackIds?: unknown; recovery?: unknown }
+    ? value as { version?: unknown; characters?: unknown; packs?: unknown; disabledPackIds?: unknown; campaignProfiles?: unknown; activeCampaignProfileId?: unknown; onboardingCompleted?: unknown; appRole?: unknown; recovery?: unknown }
     : {};
   const sourceVersion = Number.isInteger(parsed.version) ? Number(parsed.version) : 1;
   if (sourceVersion > CURRENT_STORE_VERSION) throw new Error("This character library was created by a newer version of Azeroth Archives.");
@@ -468,10 +496,15 @@ export function migrateOfflineStore(value: unknown): OfflineStore {
     characters: Array.isArray(parsed.characters) ? parsed.characters : [],
     packs: Array.isArray(parsed.packs) ? parsed.packs : [],
     disabledPackIds: Array.isArray(parsed.disabledPackIds) ? parsed.disabledPackIds.filter((id): id is string => typeof id === "string") : [],
+    campaignProfiles: Array.isArray(parsed.campaignProfiles) ? parsed.campaignProfiles : [],
+    activeCampaignProfileId: typeof parsed.activeCampaignProfileId === "string" ? parsed.activeCampaignProfileId : undefined,
+    onboardingCompleted: typeof parsed.onboardingCompleted === "boolean" ? parsed.onboardingCompleted : false,
+    appRole: parsed.appRole === "dm" ? "dm" as const : "player" as const,
   };
   if (migrated.version === 1) migrated = { ...migrated, version: 2, packs: Array.isArray(migrated.packs) ? migrated.packs : [] };
   if (migrated.version === 2) migrated = { ...migrated, version: 3 };
   if (migrated.version === 3) migrated = { ...migrated, version: 4, disabledPackIds: [] };
+  if (migrated.version === 4) migrated = { ...migrated, version: 5, campaignProfiles: [], activeCampaignProfileId: undefined, onboardingCompleted: migrated.characters.length > 0, appRole: "player" as const };
 
   const characters = Array.isArray(migrated.characters)
     ? migrated.characters.filter((item): item is Partial<CharacterData> => Boolean(item) && typeof item === "object").map(normalizeCharacter)
@@ -479,6 +512,8 @@ export function migrateOfflineStore(value: unknown): OfflineStore {
   const packs = Array.isArray(migrated.packs)
     ? migrated.packs.filter((pack): pack is ContentPack => contentPackValidationError(pack) === null)
     : [];
+  const campaignProfiles = Array.isArray(migrated.campaignProfiles) ? migrated.campaignProfiles.map(normalizeCampaignProfile) : [];
+  const activeCampaignProfileId = campaignProfiles.some((profile) => profile.id === migrated.activeCampaignProfileId) ? migrated.activeCampaignProfileId : undefined;
   const recoverySource = parsed.recovery && typeof parsed.recovery === "object"
     ? parsed.recovery as { restoredFrom?: unknown; migrationBackup?: unknown }
     : undefined;
@@ -488,7 +523,7 @@ export function migrateOfflineStore(value: unknown): OfflineStore {
         ...(typeof recoverySource.migrationBackup === "string" ? { migrationBackup: recoverySource.migrationBackup } : {}),
       }
     : undefined;
-  return { version: CURRENT_STORE_VERSION, characters, packs, disabledPackIds: migrated.disabledPackIds, ...(recovery ? { recovery } : {}) };
+  return { version: CURRENT_STORE_VERSION, characters, packs, disabledPackIds: migrated.disabledPackIds, campaignProfiles, activeCampaignProfileId, onboardingCompleted: Boolean(migrated.onboardingCompleted), appRole: migrated.appRole === "dm" ? "dm" : "player", ...(recovery ? { recovery } : {}) };
 }
 
 function uniqueById<T extends { id: string }>(items: T[]) {
@@ -544,6 +579,11 @@ export function CharacterManager() {
   const [character, setCharacter] = useState<CharacterData>(newCharacter);
   const [customPacks, setCustomPacks] = useState<ContentPack[]>([]);
   const [disabledPackIds, setDisabledPackIds] = useState<string[]>([]);
+  const [campaignProfiles, setCampaignProfiles] = useState<CampaignProfile[]>([]);
+  const [activeCampaignProfileId, setActiveCampaignProfileId] = useState<string | undefined>();
+  const [onboardingCompleted, setOnboardingCompleted] = useState(true);
+  const [appRole, setAppRole] = useState<AppRole>("player");
+  const [storeLoaded, setStoreLoaded] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("Loading your roster…");
@@ -551,6 +591,8 @@ export function CharacterManager() {
   const [showLibrary, setShowLibrary] = useState(false);
   const [showRoster, setShowRoster] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showCampaigns, setShowCampaigns] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [menuCharacterId, setMenuCharacterId] = useState<string | null>(null);
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [levelUpHpGain, setLevelUpHpGain] = useState(1);
@@ -565,12 +607,16 @@ export function CharacterManager() {
   const fileInput = useRef<HTMLInputElement>(null);
   const characterFileInput = useRef<HTMLInputElement>(null);
   const fullBackupFileInput = useRef<HTMLInputElement>(null);
+  const campaignFileInput = useRef<HTMLInputElement>(null);
   const portraitFileInput = useRef<HTMLInputElement>(null);
   const characterRef = useRef(character);
   const deletedCharacterIds = useRef(new Set<string>());
   characterRef.current = character;
 
-  const content = useMemo(() => customPacks.filter((pack) => pack.pack.id === bundledPackId || !disabledPackIds.includes(pack.pack.id)), [customPacks, disabledPackIds]);
+  const activeCampaignProfile = useMemo(() => campaignProfiles.find((profile) => profile.id === activeCampaignProfileId), [campaignProfiles, activeCampaignProfileId]);
+  const characterCampaignProfile = useMemo(() => campaignProfiles.find((profile) => profile.id === character.campaignProfileId) ?? activeCampaignProfile, [campaignProfiles, character.campaignProfileId, activeCampaignProfile]);
+  const enabledContent = useMemo(() => customPacks.filter((pack) => pack.pack.id === bundledPackId || !disabledPackIds.includes(pack.pack.id)), [customPacks, disabledPackIds]);
+  const content = useMemo(() => enabledContent.filter((pack) => !characterCampaignProfile?.allowedPackIds.length || characterCampaignProfile.allowedPackIds.includes(pack.pack.id)), [enabledContent, characterCampaignProfile]);
   const ancestries = useMemo(() => uniqueById(content.flatMap((pack) => pack.ancestries ?? [])), [content]);
   const classes = useMemo(() => uniqueById(content.flatMap((pack) => pack.classes ?? [])), [content]);
   const backgrounds = useMemo(() => uniqueById(content.flatMap((pack) => pack.backgrounds ?? [])), [content]);
@@ -644,13 +690,22 @@ export function CharacterManager() {
     const stored = character.hitDiceByClass.find((pool) => pool.className === entry.className);
     return { className: entry.className, die: stored?.die || classes.find((definition) => definition.name === entry.className)?.hitDie || 8, total: stored?.total ?? entry.level, used: stored?.used ?? (index === 0 ? character.hitDiceUsed : 0) };
   }), [character.classLevels, character.hitDiceByClass, character.hitDiceUsed, classes]);
-  const encumbrance = useMemo(() => calculateEncumbrance(character.inventory, character.abilities.strength), [character.inventory, character.abilities.strength]);
+  const encumbrance = useMemo(() => calculateEncumbrance(character.inventory, character.abilities.strength, characterCampaignProfile?.encumbranceRule), [character.inventory, character.abilities.strength, characterCampaignProfile?.encumbranceRule]);
   const effectiveArmor = useMemo(() => calculateArmorClass(character, equipment), [character, equipment]);
   const effectiveSpeed = useMemo(() => calculateEffectiveSpeed(character, encumbrance, equipment), [character, encumbrance, equipment]);
   const spellcastingProfiles = useMemo(() => character.classLevels.flatMap((entry): SpellcastingProfile[] => {
     const ability = spellcastingAbilityForClass(entry.className, entry.subclassName ?? "", classes.find((definition) => definition.name === entry.className)?.primaryAbility);
     return ability ? [{ className: entry.className, ability, preparedLimit: preparedSpellLimitFor(entry.className, entry.subclassName ?? "", entry.level) }] : [];
   }), [character.classLevels, classes]);
+  const readinessReport = useMemo(() => evaluateCharacterReadiness(character, {
+    ancestries,
+    classes,
+    backgrounds,
+    feats,
+    loadedPackIds: enabledContent.map((pack) => pack.pack.id),
+    campaignProfile: characterCampaignProfile,
+  }), [character, ancestries, classes, backgrounds, feats, enabledContent, characterCampaignProfile]);
+  const creationLocked = Boolean(character.finalizedAt || character.readOnlyReview);
   useEffect(() => {
     const load = window.azerothDesktop?.load() ?? Promise.resolve(readBrowserStore());
     load.then((store) => {
@@ -659,10 +714,16 @@ export function CharacterManager() {
       if (loadedCharacters[0]) setCharacter(loadedCharacters[0]);
       setCustomPacks(withBundledPack(store.packs));
       setDisabledPackIds(store.disabledPackIds ?? []);
+      setCampaignProfiles(store.campaignProfiles ?? []);
+      setActiveCampaignProfileId(store.activeCampaignProfileId);
+      setOnboardingCompleted(store.onboardingCompleted);
+      setAppRole(store.appRole ?? "player");
+      setShowOnboarding(!store.onboardingCompleted);
+      setStoreLoaded(true);
       if (store.recovery?.restoredFrom) setStatus(`Recovered data from automatic backup ${store.recovery.restoredFrom}`);
       else if (store.recovery?.migrationBackup) setStatus(`Character data updated safely; backup saved as ${store.recovery.migrationBackup}`);
       else setStatus(store.characters.length ? "Saved on this device" : "Create your first hero");
-    }).catch(() => setStatus("Could not read local character data"));
+    }).catch(() => { setStatus("Could not read local character data"); setStoreLoaded(true); });
   }, []);
 
   useEffect(() => {
@@ -690,8 +751,127 @@ export function CharacterManager() {
   }, [character, status]);
 
   function patchCharacter(patch: Partial<CharacterData>) {
+    if (characterRef.current.readOnlyReview) {
+      setStatus("DM review copies are read-only");
+      return;
+    }
     setCharacter((current) => ({ ...current, ...patch, updatedAt: new Date().toISOString() }));
     setStatus("Unsaved changes");
+  }
+
+  function createCampaignDraft() {
+    const profile = activeCampaignProfile;
+    return normalizeCharacter({
+      ...newCharacter(),
+      campaignProfileId: profile?.id,
+      experience: profile?.startingExperience ?? 0,
+      abilityScoreMethod: profile?.allowedAbilityMethods[0] ?? "standard-array",
+    });
+  }
+
+  async function persistCampaignState(nextProfiles: CampaignProfile[], nextActiveId: string | undefined, nextOnboardingCompleted = onboardingCompleted, nextRole = appRole) {
+    const state = { campaignProfiles: nextProfiles, activeCampaignProfileId: nextActiveId, onboardingCompleted: nextOnboardingCompleted, appRole: nextRole };
+    if (window.azerothDesktop) await window.azerothDesktop.saveCampaignState(state);
+    else {
+      const store = readBrowserStore();
+      Object.assign(store, state);
+      writeBrowserStore(store);
+    }
+    setCampaignProfiles(nextProfiles);
+    setActiveCampaignProfileId(nextActiveId);
+    setOnboardingCompleted(nextOnboardingCompleted);
+    setAppRole(nextRole);
+  }
+
+  async function saveCampaignProfile(profile: CampaignProfile, activate = false) {
+    try {
+      const normalized = normalizeCampaignProfile(profile);
+      const next = [normalized, ...campaignProfiles.filter((entry) => entry.id !== normalized.id)];
+      const nextActive = activate ? normalized.id : activeCampaignProfileId;
+      await persistCampaignState(next, nextActive);
+      if (activate && character.id === "draft") setCharacter((current) => ({ ...current, campaignProfileId: normalized.id, experience: normalized.startingExperience, abilityScoreMethod: normalized.allowedAbilityMethods[0] }));
+      setStatus(activate ? `${normalized.name} saved and activated` : `${normalized.name} saved`);
+    } catch {
+      setStatus("Campaign profile could not be saved");
+    }
+  }
+
+  async function activateCampaignProfile(id?: string) {
+    try {
+      await persistCampaignState(campaignProfiles, id);
+      if (character.id === "draft") setCharacter((current) => ({ ...current, campaignProfileId: id }));
+      setStatus(id ? "Campaign profile activated" : "Active campaign profile cleared");
+    } catch {
+      setStatus("Campaign profile could not be activated");
+    }
+  }
+
+  async function deleteCampaignProfile(id: string) {
+    if (characters.some((entry) => entry.campaignProfileId === id) || character.campaignProfileId === id) {
+      setStatus("That campaign profile is linked to a character and cannot be deleted");
+      return;
+    }
+    const next = campaignProfiles.filter((entry) => entry.id !== id);
+    try {
+      await persistCampaignState(next, activeCampaignProfileId === id ? undefined : activeCampaignProfileId);
+      setStatus("Campaign profile deleted");
+    } catch {
+      setStatus("Campaign profile could not be deleted");
+    }
+  }
+
+  async function changeAppRole(role: AppRole) {
+    try {
+      await persistCampaignState(campaignProfiles, activeCampaignProfileId, onboardingCompleted, role);
+      setStatus(role === "dm" ? "DM review mode enabled" : "Player mode enabled");
+    } catch {
+      setStatus("App role could not be saved");
+    }
+  }
+
+  async function importCampaignProfile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const profile = parseCampaignProfileFile(JSON.parse(await file.text()));
+      const next = [profile, ...campaignProfiles.filter((entry) => entry.id !== profile.id)];
+      await persistCampaignState(next, profile.id);
+      if (character.id === "draft") setCharacter((current) => ({ ...current, campaignProfileId: profile.id, experience: profile.startingExperience, abilityScoreMethod: profile.allowedAbilityMethods[0] }));
+      setStatus(`${profile.name} imported and activated`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "That file is not a valid campaign profile");
+    }
+  }
+
+  async function exportCampaignProfile(profile: CampaignProfile) {
+    const contents = serializeCampaignProfile(profile);
+    const safeName = profile.name.trim().replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "campaign";
+    const filename = `${safeName}.azeroth-campaign.json`;
+    if (window.azerothDesktop) {
+      const destination = await window.azerothDesktop.saveJson(filename, contents);
+      setStatus(destination ? "Campaign profile exported" : "Campaign profile export canceled");
+    } else {
+      downloadBlob(filename, new Blob([contents], { type: "application/json" }));
+      setStatus("Campaign profile downloaded");
+    }
+  }
+
+  async function finishOnboarding(role: AppRole, createCharacter: boolean) {
+    try {
+      await persistCampaignState(campaignProfiles, activeCampaignProfileId, true, role);
+      setShowOnboarding(false);
+      if (createCharacter) {
+        setCharacter(createCampaignDraft());
+        setShowRoster(false);
+        setStatus("New character draft");
+      } else {
+        setShowRoster(true);
+        setStatus("Import a player review package or configure the campaign");
+      }
+    } catch {
+      setStatus("Welcome settings could not be saved");
+    }
   }
 
   async function choosePortrait(event: ChangeEvent<HTMLInputElement>) {
@@ -882,6 +1062,9 @@ export function CharacterManager() {
       ...source,
       id: crypto.randomUUID(),
       name: `${source.name} Copy`,
+      readOnlyReview: false,
+      reviewImportedAt: undefined,
+      finalizedAt: undefined,
       createdAt: now,
       updatedAt: now,
     });
@@ -911,6 +1094,72 @@ export function CharacterManager() {
     setMenuCharacterId(null);
   }
 
+  async function finalizeCharacter() {
+    if (!readinessReport.ready || character.readOnlyReview) return;
+    if (readinessReport.warnings.length && !window.confirm(`Finalize with ${readinessReport.warnings.length} warning${readinessReport.warnings.length === 1 ? "" : "s"}? These items will remain listed for DM review.`)) return;
+    const payload = normalizeCharacter({
+      ...character,
+      id: character.id === "draft" ? crypto.randomUUID() : character.id,
+      campaignProfileId: character.campaignProfileId ?? activeCampaignProfile?.id,
+      finalizedAt: new Date().toISOString(),
+    });
+    try {
+      const saved = await persistCharacter(payload);
+      setCharacter(saved);
+      setCharacters((current) => [saved, ...current.filter((entry) => entry.id !== saved.id)]);
+      setStatus("Character finalized; creation choices are protected");
+    } catch {
+      setStatus("Character could not be finalized");
+    }
+  }
+
+  function reopenCharacterCreation() {
+    if (character.readOnlyReview || !window.confirm("Reopen character creation? Ancestry, class, background, ability assignments, and starting choices will become editable again.")) return;
+    patchCharacter({ finalizedAt: undefined });
+    setStatus("Character creation reopened");
+  }
+
+  async function exportDmReviewPackage() {
+    try {
+      setStatus("Building DM review package...");
+      const payload = normalizeCharacter({ ...character, id: character.id === "draft" ? crypto.randomUUID() : character.id });
+      const report = evaluateCharacterReadiness(payload, { ancestries, classes, backgrounds, feats, loadedPackIds: enabledContent.map((pack) => pack.pack.id), campaignProfile: characterCampaignProfile });
+      const saved = character.readOnlyReview ? payload : await persistCharacter(payload);
+      if (!character.readOnlyReview) {
+        setCharacter(saved);
+        setCharacters((current) => [saved, ...current.filter((entry) => entry.id !== saved.id)]);
+      }
+      const { bytes } = await buildPdfArtifact();
+      const safeName = payload.name.trim().replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "character";
+      const reviewJson = JSON.stringify({
+        format: "azeroth-archives-dm-review",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        campaignProfile: characterCampaignProfile,
+        report,
+        character: payload,
+      }, null, 2);
+      const reportText = readinessReportText(payload, report, characterCampaignProfile?.name);
+      const packageName = `${safeName}-dm-review`;
+      const files = [
+        { name: `${safeName}.azeroth-review.json`, kind: "text" as const, contents: reviewJson },
+        { name: `${safeName}.pdf`, kind: "bytes" as const, contents: Array.from(bytes) },
+        { name: `${safeName}-readiness.txt`, kind: "text" as const, contents: reportText },
+      ];
+      if (window.azerothDesktop) {
+        const destination = await window.azerothDesktop.saveReviewPackage(packageName, files);
+        setStatus(destination ? "DM review package saved" : "DM review export canceled");
+      } else {
+        downloadBlob(files[0].name, new Blob([reviewJson], { type: "application/json" }));
+        downloadBlob(files[1].name, new Blob([bytes], { type: "application/pdf" }));
+        downloadBlob(files[2].name, new Blob([reportText], { type: "text/plain" }));
+        setStatus("DM review files downloaded");
+      }
+    } catch {
+      setStatus("DM review package could not be created");
+    }
+  }
+
   async function exportFullBackup() {
     try {
       setStatus("Saving current character before backup...");
@@ -923,7 +1172,16 @@ export function CharacterManager() {
         format: "azeroth-archives-full-backup",
         version: CURRENT_STORE_VERSION,
         exportedAt: new Date().toISOString(),
-        store: { version: CURRENT_STORE_VERSION, characters: store.characters, packs: store.packs, disabledPackIds: store.disabledPackIds ?? [] },
+        store: {
+          version: CURRENT_STORE_VERSION,
+          characters: store.characters,
+          packs: store.packs,
+          disabledPackIds: store.disabledPackIds ?? [],
+          campaignProfiles: store.campaignProfiles ?? [],
+          activeCampaignProfileId: store.activeCampaignProfileId,
+          onboardingCompleted: store.onboardingCompleted,
+          appRole: store.appRole,
+        },
       }, null, 2);
       const filename = `azeroth-archives-full-backup-${new Date().toISOString().slice(0, 10)}.json`;
       if (window.azerothDesktop) {
@@ -963,6 +1221,10 @@ export function CharacterManager() {
       setCharacter(loadedCharacters[0] ?? newCharacter());
       setCustomPacks(withBundledPack(saved.packs));
       setDisabledPackIds(saved.disabledPackIds ?? []);
+      setCampaignProfiles(saved.campaignProfiles ?? []);
+      setActiveCampaignProfileId(saved.activeCampaignProfileId);
+      setOnboardingCompleted(saved.onboardingCompleted);
+      setAppRole(saved.appRole);
       setShowRoster(false);
       setStatus(`Full backup restored: ${loadedCharacters.length} character${loadedCharacters.length === 1 ? "" : "s"}`);
     } catch {
@@ -979,12 +1241,13 @@ export function CharacterManager() {
       const source = parsed.character ?? parsed;
       if (typeof source.name !== "string" || !source.name.trim() || !source.abilities || typeof source.abilities !== "object") throw new Error("Invalid character");
       const now = new Date().toISOString();
-      const imported = normalizeCharacter({ ...source, id: crypto.randomUUID(), createdAt: now, updatedAt: now });
+      const reviewOnly = parsed.format === "azeroth-archives-dm-review";
+      const imported = normalizeCharacter({ ...source, id: crypto.randomUUID(), createdAt: now, updatedAt: now, readOnlyReview: reviewOnly, reviewImportedAt: reviewOnly ? now : undefined });
       const saved = await persistCharacter(imported);
       setCharacters((current) => [saved, ...current]);
       setCharacter(saved);
       setShowRoster(false);
-      setStatus("Character imported as a new copy");
+      setStatus(reviewOnly ? "DM review copy imported as read-only" : "Character imported as a new copy");
     } catch {
       setStatus("That file is not a valid character backup");
     }
@@ -1019,6 +1282,10 @@ export function CharacterManager() {
     const definition = classes.find((item) => item.name === name);
     if (!definition) return;
     const entry = character.classLevels.find((item) => item.className === name);
+    if (!entry && characterCampaignProfile && !characterCampaignProfile.allowMulticlass) {
+      setStatus("This campaign profile does not allow multiclassing");
+      return;
+    }
     setLevelUpClassName(name);
     setLevelUpSubclassName(entry?.subclassName ?? "");
     setLevelUpAbilities([definition.primaryAbility, "stamina"]);
@@ -1337,7 +1604,7 @@ export function CharacterManager() {
     }
   }
 
-  async function exportPdf() {
+  async function buildPdfArtifact() {
     setStatus("Building character sheet...");
     const classSummary = character.classLevels
       .map((entry) => `${entry.className} ${entry.level}${entry.subclassName ? ` (${entry.subclassName})` : ""}`)
@@ -1498,6 +1765,12 @@ export function CharacterManager() {
       detailSections,
     });
     const filename = `${character.name.trim().replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "character"}.pdf`;
+    return { bytes, filename };
+  }
+
+  async function exportPdf() {
+    setStatus("Building character sheet...");
+    const { bytes, filename } = await buildPdfArtifact();
     if (window.azerothDesktop) {
       const destination = await window.azerothDesktop.savePdf(filename, Array.from(bytes));
       setStatus(destination ? "Character sheet saved" : "PDF export canceled");
@@ -1516,6 +1789,7 @@ export function CharacterManager() {
       <input ref={fileInput} className="sr-only" type="file" accept=".json,.w5e,application/json" onChange={importPack} />
       <input ref={characterFileInput} className="sr-only" type="file" accept=".json,application/json" onChange={importCharacter} />
       <input ref={fullBackupFileInput} className="sr-only" type="file" accept=".json,application/json" onChange={importFullBackup} />
+      <input ref={campaignFileInput} className="sr-only" type="file" accept=".json,application/json" onChange={importCampaignProfile} />
       <input ref={portraitFileInput} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={choosePortrait} />
       <header className="topbar">
         <button className="icon-button mobile-only" aria-label="Open roster" onClick={() => setShowRoster(true)}><Menu size={20} /></button>
@@ -1525,23 +1799,24 @@ export function CharacterManager() {
           <span>Offline Warcraft 5E character manager</span>
         </div>
         <div className="topbar-actions">
+          <button className="button button-quiet" onClick={() => setShowCampaigns(true)}><Flag size={16} /><span>Campaigns</span>{activeCampaignProfile && <b>1</b>}</button>
           <button className="button button-quiet" onClick={() => setShowLibrary(true)}><LibraryBig size={16} /><span>Content library</span><b>{content.length}</b></button>
           <button className="button button-outline" onClick={exportPdf}><Download size={16} /><span>Export PDF</span></button>
-          <button className="button button-primary" onClick={saveCharacter} disabled={saving}><Save size={16} />{saving ? "Saving" : "Save character"}</button>
+          <button className="button button-primary" onClick={saveCharacter} disabled={saving || Boolean(character.readOnlyReview)}><Save size={16} />{saving ? "Saving" : "Save character"}</button>
           <button className="avatar-button" title="Settings, updates, and local data" aria-label="Open settings" onClick={() => setShowSettings(true)}><HardDrive size={19} /></button>
         </div>
       </header>
 
       <aside className={`roster-panel ${showRoster ? "is-open" : ""}`}>
         <div className="roster-heading"><div><span className="eyebrow">Your party</span><h2>Characters</h2></div><button className="icon-button mobile-only" onClick={() => setShowRoster(false)} aria-label="Close roster"><X size={18} /></button></div>
-        <button className="button button-create" onClick={() => { setCharacter(newCharacter()); setShowRoster(false); setStatus("New character draft"); }}><Plus size={17} />Create character</button>
+        <button className="button button-create" onClick={() => { setCharacter(createCampaignDraft()); setShowRoster(false); setStatus("New character draft"); }}><Plus size={17} />Create character</button>
         <label className="search-field"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a character" /></label>
         <div className="character-list">
           {visibleCharacters.map((item, index) => (
             <div key={item.id} className={`character-row ${item.id === character.id ? "active" : ""}`}>
               <button className="character-row-select" onClick={() => { setCharacter(item); setMenuCharacterId(null); setShowRoster(false); }}>
                 <span className={`mini-portrait tone-${index % 4}`}>{item.portraitDataUrl ? <img src={item.portraitDataUrl} alt="" /> : initials(item.name)}</span>
-                <span><strong>{item.name}</strong><small>Level {item.level} {item.className}</small></span>
+                <span><strong>{item.name}{item.readOnlyReview ? " · Review" : item.finalizedAt ? " · Final" : ""}</strong><small>Level {item.level} {item.className}</small></span>
               </button>
               <button className="character-row-more" aria-label={`Actions for ${item.name}`} aria-expanded={menuCharacterId === item.id} onClick={() => setMenuCharacterId((current) => current === item.id ? null : item.id)}><MoreHorizontal size={16} /></button>
               {menuCharacterId === item.id && <div className="character-actions" role="menu">
@@ -1578,27 +1853,27 @@ export function CharacterManager() {
         <div className="sync-status"><span className={status.includes("not") || status.includes("Could") ? "status-dot warning" : "status-dot"} />{status}</div>
       </aside>
 
-      <section className="workspace">
+      <section className={`workspace ${character.readOnlyReview ? "review-readonly" : ""}`}>
         <div className="character-hero">
           <div className={`portrait-large ${character.portraitDataUrl ? "has-image" : ""}`}>
             {character.portraitDataUrl ? <img src={character.portraitDataUrl} alt={`${character.name || "Character"} portrait`} /> : <span>{initials(character.name)}</span>}
-            <button aria-label={character.portraitDataUrl ? "Change portrait" : "Add portrait"} title={character.portraitDataUrl ? "Change portrait" : "Add portrait"} onClick={() => portraitFileInput.current?.click()}><Plus size={14} /></button>
+            <button disabled={Boolean(character.readOnlyReview)} aria-label={character.portraitDataUrl ? "Change portrait" : "Add portrait"} title={character.portraitDataUrl ? "Change portrait" : "Add portrait"} onClick={() => portraitFileInput.current?.click()}><Plus size={14} /></button>
           </div>
           <div className="hero-identity">
             <label className="eyebrow" htmlFor="character-name">Character name</label>
-            <input id="character-name" className="name-input" value={character.name} onChange={(event) => patchCharacter({ name: event.target.value })} />
+            <input id="character-name" className="name-input" disabled={creationLocked} value={character.name} onChange={(event) => patchCharacter({ name: event.target.value })} />
             <div className="identity-selects">
-              <DescriptionPicker className="identity-picker" ariaLabel="Ancestry" value={character.ancestry} placeholder="Choose ancestry" onChange={applyAncestry} options={ancestries.map((item) => ({ value: item.name, label: item.name, meta: `${item.speed} ft. speed · ${item.traits.length} traits`, description: ancestryDescription(item) }))} />
+              <DescriptionPicker disabled={creationLocked} className="identity-picker" ariaLabel="Ancestry" value={character.ancestry} placeholder="Choose ancestry" onChange={applyAncestry} options={ancestries.map((item) => ({ value: item.name, label: item.name, meta: `${item.speed} ft. speed · ${item.traits.length} traits`, description: ancestryDescription(item) }))} />
               <i />
-              <DescriptionPicker className="identity-picker" ariaLabel="Class" value={character.className} placeholder="Choose class" onChange={applyClass} options={classes.map((item) => ({ value: item.name, label: item.name, meta: `d${item.hitDie} Hit Die · ${ABILITY_LABELS[item.primaryAbility]}`, description: classDescription(item) }))} />
+              <DescriptionPicker disabled={creationLocked} className="identity-picker" ariaLabel="Class" value={character.className} placeholder="Choose class" onChange={applyClass} options={classes.map((item) => ({ value: item.name, label: item.name, meta: `d${item.hitDie} Hit Die · ${ABILITY_LABELS[item.primaryAbility]}`, description: classDescription(item) }))} />
               <i />
-              {!!subclasses.length && <><DescriptionPicker className="identity-picker" ariaLabel="Subclass" value={character.subclassName ?? ""} placeholder="Choose subclass" onChange={applySubclass} options={subclasses.map((item) => ({ value: item.name, label: item.name, meta: `${selectedClass?.name ?? "Class"} specialization`, description: item.description || Object.values(item.levelFeatures).flat().map((feature) => `${feature.name}: ${feature.description}`).join("\n\n") }))} /><i /></>}
-              <DescriptionPicker className="identity-picker" ariaLabel="Background" value={character.background} placeholder="Choose background" onChange={applyBackground} options={backgrounds.map((item) => ({ value: item.name, label: item.name, meta: [item.skills.join(", "), item.featId?.replaceAll("-", " ")].filter(Boolean).join(" · "), description: backgroundDescription(item) }))} />
+              {!!subclasses.length && <><DescriptionPicker disabled={creationLocked} className="identity-picker" ariaLabel="Subclass" value={character.subclassName ?? ""} placeholder="Choose subclass" onChange={applySubclass} options={subclasses.map((item) => ({ value: item.name, label: item.name, meta: `${selectedClass?.name ?? "Class"} specialization`, description: item.description || Object.values(item.levelFeatures).flat().map((feature) => `${feature.name}: ${feature.description}`).join("\n\n") }))} /><i /></>}
+              <DescriptionPicker disabled={creationLocked} className="identity-picker" ariaLabel="Background" value={character.background} placeholder="Choose background" onChange={applyBackground} options={backgrounds.map((item) => ({ value: item.name, label: item.name, meta: [item.skills.join(", "), item.featId?.replaceAll("-", " ")].filter(Boolean).join(" · "), description: backgroundDescription(item) }))} />
             </div>
           </div>
           <div className="level-card">
             <div><span>Level</span><strong>{character.level}</strong></div>
-            <button className="button level-button" onClick={levelUp} disabled={character.level >= 20}><Sparkles size={15} />Level up</button>
+            <button className="button level-button" onClick={levelUp} disabled={character.level >= 20 || Boolean(character.readOnlyReview)}><Sparkles size={15} />Level up</button>
             <div className="xp-row"><span>{character.experience.toLocaleString()} XP</span><span>{nextLevelXp.toLocaleString()} XP</span></div>
             <div className="progress-track"><span style={{ width: `${xpProgress}%` }} /></div>
           </div>
@@ -1610,6 +1885,7 @@ export function CharacterManager() {
 
         {tab === "overview" && (
           <div className="overview-grid">
+            <ReadinessPanel report={readinessReport} finalizedAt={character.finalizedAt} readOnlyReview={character.readOnlyReview} campaignName={characterCampaignProfile?.name} onFinalize={finalizeCharacter} onReopen={reopenCharacterCreation} onExportReview={exportDmReviewPackage} />
             <section className="panel vitals-panel">
               <div className="section-heading"><div><span className="eyebrow">At a glance</span><h2>Combat & vitals</h2></div><Shield size={20} /></div>
               <div className="vital-grid">
@@ -1624,7 +1900,7 @@ export function CharacterManager() {
               <div className="section-heading"><div><span className="eyebrow">Core scores</span><h2>Abilities</h2></div><span className="section-note">Modifier</span></div>
               <div className="ability-grid">
                 {abilityKeys.map((key) => (
-                  <label key={key} className="ability-card"><span>{ABILITY_LABELS[key]}</span><input type="number" value={character.abilities[key]} onChange={(event) => updateAbility(key, Number(event.target.value))} /><strong>{modifierLabel(character.abilities[key])}</strong></label>
+                  <label key={key} className="ability-card"><span>{ABILITY_LABELS[key]}</span><input disabled={creationLocked} type="number" value={character.abilities[key]} onChange={(event) => updateAbility(key, Number(event.target.value))} /><strong>{modifierLabel(character.abilities[key])}</strong></label>
                 ))}
               </div>
             </section>
@@ -1640,7 +1916,7 @@ export function CharacterManager() {
                 <button className="text-button" onClick={() => setTab("features")}>View all features <span>→</span></button>
               </div>
             </section>
-            <CreationGuide character={character} patchCharacter={patchCharacter} background={selectedBackground} feats={feats} equipment={equipment} />
+            <fieldset className="creation-lock-fieldset" disabled={creationLocked}><CreationGuide character={character} patchCharacter={patchCharacter} background={selectedBackground} feats={feats} equipment={equipment} campaignProfile={characterCampaignProfile} /></fieldset>
             <SessionTracker character={character} patchCharacter={patchCharacter} hitDicePools={hitDicePools} />
             <AdvancementPanel character={character} onRollback={rollbackLatestAdvancement} />
           </div>
@@ -1665,7 +1941,7 @@ export function CharacterManager() {
 
           {tab === "spells" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingProfiles={spellcastingProfiles} />}
 
-        {tab === "equipment" && <InventoryManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
+        {tab === "equipment" && <InventoryManager catalog={equipment} character={character} patchCharacter={patchCharacter} encumbranceRule={characterCampaignProfile?.encumbranceRule} attunementLimit={characterCampaignProfile?.attunementLimit} />}
 
         {tab === "companions" && <CompanionManager catalog={creatures} character={character} patchCharacter={patchCharacter} />}
 
@@ -1691,7 +1967,7 @@ export function CharacterManager() {
             <button className="icon-button" onClick={() => setShowLevelUp(false)} aria-label="Cancel level up"><X size={18} /></button>
           </div>
           <div className="level-up-summary">
-            <label><span>Advance class</span><select value={selectedLevelUpClass?.name ?? ""} onChange={(event) => changeLevelUpClass(event.target.value)}>{classes.map((definition) => <option key={definition.id} value={definition.name}>{definition.name}{character.classLevels.some((entry) => entry.className === definition.name) ? ` (level ${character.classLevels.find((entry) => entry.className === definition.name)?.level})` : " (new class)"}</option>)}</select></label>
+            <label><span>Advance class</span><select value={selectedLevelUpClass?.name ?? ""} onChange={(event) => changeLevelUpClass(event.target.value)}>{classes.map((definition) => <option disabled={Boolean(characterCampaignProfile && !characterCampaignProfile.allowMulticlass && !character.classLevels.some((entry) => entry.className === definition.name))} key={definition.id} value={definition.name}>{definition.name}{character.classLevels.some((entry) => entry.className === definition.name) ? ` (level ${character.classLevels.find((entry) => entry.className === definition.name)?.level})` : " (new class)"}</option>)}</select></label>
             <div><span>Class level</span><strong>{plannedClassLevel}</strong></div>
             <div><span>Proficiency</span><strong>+{proficiencyForLevel(plannedLevel)}</strong></div>
             <label><span>Hit points gained</span><input type="number" min="1" max="99" value={levelUpHpGain} onChange={(event) => setLevelUpHpGain(Math.max(1, Math.min(99, Number(event.target.value) || 1)))} /></label>
@@ -1699,7 +1975,7 @@ export function CharacterManager() {
           {!!selectedLevelUpClass?.subclasses?.length && <label className="level-up-subclass"><span>Specialization</span><select value={selectedLevelUpSubclass?.name ?? ""} onChange={(event) => { setLevelUpSubclassName(event.target.value); setLevelUpSelections({}); }}><option value="">Choose when granted</option>{selectedLevelUpClass.subclasses.map((subclass) => <option key={subclass.id} value={subclass.name}>{subclass.name}</option>)}</select><small>A specialization is required when this class level grants its first specialization feature.</small></label>}
           {hasAdvancementChoice && <div className="advancement-choice">
             <span className="eyebrow">Ability Score Improvement choice</span>
-            <div className="advancement-choice-tabs"><button className={levelUpChoice === "abilities" ? "active" : ""} onClick={() => setLevelUpChoice("abilities")}>Increase abilities</button><button className={levelUpChoice === "feat" ? "active" : ""} onClick={() => setLevelUpChoice("feat")}>Choose a feat</button></div>
+            <div className="advancement-choice-tabs"><button className={levelUpChoice === "abilities" ? "active" : ""} onClick={() => setLevelUpChoice("abilities")}>Increase abilities</button><button disabled={characterCampaignProfile?.allowOptionalFeats === false} className={levelUpChoice === "feat" ? "active" : ""} onClick={() => setLevelUpChoice("feat")}>Choose a feat</button></div>
             {levelUpChoice === "abilities" ? <div className="advancement-abilities">
               <label>First +1<select value={levelUpAbilities[0]} onChange={(event) => setLevelUpAbilities([event.target.value as AbilityKey, levelUpAbilities[1]])}>{abilityKeys.map((ability) => <option key={ability} value={ability}>{ABILITY_LABELS[ability]} ({character.abilities[ability]})</option>)}</select></label>
               <label>Second +1<select value={levelUpAbilities[1]} onChange={(event) => setLevelUpAbilities([levelUpAbilities[0], event.target.value as AbilityKey])}>{abilityKeys.map((ability) => <option key={ability} value={ability}>{ABILITY_LABELS[ability]} ({character.abilities[ability]})</option>)}</select></label>
@@ -1727,8 +2003,10 @@ export function CharacterManager() {
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
-      <div className={`drawer-scrim ${showLibrary || showRoster ? "visible" : ""}`} onClick={() => { setShowLibrary(false); setShowRoster(false); }} />
+      <div className={`drawer-scrim ${showLibrary || showRoster || showCampaigns ? "visible" : ""}`} onClick={() => { setShowLibrary(false); setShowRoster(false); setShowCampaigns(false); }} />
       {showLibrary && <ContentPackWorkshop packs={customPacks} disabledPackIds={disabledPackIds} bundledPackId={bundledPackId} onClose={() => setShowLibrary(false)} onImport={() => fileInput.current?.click()} onSave={saveContentPack} onRemove={removePack} onToggle={toggleContentPack} onExport={exportContentPack} />}
+      {showCampaigns && <CampaignPanel profiles={campaignProfiles} activeProfileId={activeCampaignProfileId} packs={customPacks} appRole={appRole} onClose={() => setShowCampaigns(false)} onSave={saveCampaignProfile} onActivate={activateCampaignProfile} onDelete={deleteCampaignProfile} onImport={() => campaignFileInput.current?.click()} onExport={exportCampaignProfile} onRoleChange={changeAppRole} onShowWelcome={() => { setShowCampaigns(false); setShowOnboarding(true); }} />}
+      {storeLoaded && showOnboarding && <Onboarding activeCampaignName={activeCampaignProfile?.name} onImportCampaign={() => campaignFileInput.current?.click()} onFinish={finishOnboarding} />}
     </main>
   );
 }

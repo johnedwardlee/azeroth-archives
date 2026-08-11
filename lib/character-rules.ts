@@ -7,6 +7,7 @@ import {
   type CharacterClassLevel,
   type CharacterData,
   type CharacterResource,
+  type EncumbranceRule,
   type EquipmentDefinition,
   type FeatDefinition,
   type InventoryItem,
@@ -174,7 +175,7 @@ export function formatPounds(value: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
 }
 
-export function calculateEncumbrance(inventory: InventoryItem[], strengthScore: number) {
+export function calculateEncumbrance(inventory: InventoryItem[], strengthScore: number, rule: EncumbranceRule = "variant") {
   const strength = Math.max(1, Math.min(30, Number.isFinite(strengthScore) ? strengthScore : 1));
   const totalWeight = inventory.reduce((total, item) => total + (listedWeightInPounds(item.weight) ?? 0) * item.quantity, 0);
   const unlistedWeightItems = inventory.reduce((total, item) => total + (listedWeightInPounds(item.weight) === null ? item.quantity : 0), 0);
@@ -186,16 +187,19 @@ export function calculateEncumbrance(inventory: InventoryItem[], strengthScore: 
   let penalty = "No encumbrance penalties.";
   let speedPenalty = 0;
 
-  if (totalWeight > carryingCapacity) {
+  if (rule === "none") {
+    label = "Not enforced";
+    penalty = "This campaign tracks listed weight without enforcing encumbrance penalties.";
+  } else if (totalWeight > carryingCapacity) {
     level = "over-capacity";
     label = "Over capacity";
     penalty = `Cannot normally carry this load. Remove at least ${formatPounds(totalWeight - carryingCapacity)} lb.`;
-  } else if (totalWeight > heavilyEncumberedAt) {
+  } else if (rule === "variant" && totalWeight > heavilyEncumberedAt) {
     level = "heavily-encumbered";
     label = "Heavily encumbered";
     penalty = "Speed −20 ft.; disadvantage on Strength, Agility, and Stamina ability checks, attack rolls, and saving throws.";
     speedPenalty = 20;
-  } else if (totalWeight > encumberedAt) {
+  } else if (rule === "variant" && totalWeight > encumberedAt) {
     level = "encumbered";
     label = "Encumbered";
     penalty = "Speed −10 ft.";
@@ -203,7 +207,7 @@ export function calculateEncumbrance(inventory: InventoryItem[], strengthScore: 
   }
 
   const loadPercent = carryingCapacity ? Math.min(100, totalWeight / carryingCapacity * 100) : 0;
-  return { strength, totalWeight, unlistedWeightItems, encumberedAt, heavilyEncumberedAt, carryingCapacity, loadPercent, level, label, penalty, speedPenalty };
+  return { strength, totalWeight, unlistedWeightItems, encumberedAt, heavilyEncumberedAt, carryingCapacity, loadPercent, level, label, penalty, speedPenalty, rule };
 }
 
 function armorValue(item: EquipmentDefinition, agilityModifier: number) {

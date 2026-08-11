@@ -53,6 +53,9 @@ describe("character save migrations", () => {
     expect(store.characters[0].schemaVersion).toBe(CURRENT_CHARACTER_SCHEMA_VERSION);
     expect(store.packs.map((pack) => pack.pack.id)).toEqual(["valid"]);
     expect(store.disabledPackIds).toEqual([]);
+    expect(store.campaignProfiles).toEqual([]);
+    expect(store.onboardingCompleted).toBe(true);
+    expect(store.appRole).toBe("player");
   });
 
   it("rejects stores created by a newer application version", () => {

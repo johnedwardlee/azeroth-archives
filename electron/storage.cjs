@@ -1,8 +1,9 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { assertCharacter } = require("./character-validation.cjs");
+const { assertCampaignProfile } = require("./campaign-validation.cjs");
 
-const STORE_VERSION = 4;
+const STORE_VERSION = 5;
 const DEFAULT_BACKUP_LIMIT = 10;
 const DEFAULT_BACKUP_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -25,6 +26,10 @@ function migrateStore(value) {
     characters: Array.isArray(parsed.characters) ? parsed.characters : [],
     packs: Array.isArray(parsed.packs) ? parsed.packs : [],
     disabledPackIds: Array.isArray(parsed.disabledPackIds) ? parsed.disabledPackIds.filter((id) => typeof id === "string") : [],
+    campaignProfiles: Array.isArray(parsed.campaignProfiles) ? parsed.campaignProfiles : [],
+    activeCampaignProfileId: typeof parsed.activeCampaignProfileId === "string" ? parsed.activeCampaignProfileId : undefined,
+    onboardingCompleted: typeof parsed.onboardingCompleted === "boolean" ? parsed.onboardingCompleted : false,
+    appRole: parsed.appRole === "dm" ? "dm" : "player",
   };
 
   if (migrated.version === 1) {
@@ -35,6 +40,9 @@ function migrateStore(value) {
   }
   if (migrated.version === 3) {
     migrated = { ...migrated, version: 4, disabledPackIds: [] };
+  }
+  if (migrated.version === 4) {
+    migrated = { ...migrated, version: 5, campaignProfiles: [], activeCampaignProfileId: undefined, onboardingCompleted: migrated.characters.length > 0, appRole: "player" };
   }
 
   return { store: migrated, sourceVersion, migrated: sourceVersion !== STORE_VERSION };
@@ -104,10 +112,14 @@ function createStorage({
   }
 
   function validateStore(store) {
-    if (!store || !Array.isArray(store.characters) || !Array.isArray(store.packs) || !Array.isArray(store.disabledPackIds)) {
+    if (!store || !Array.isArray(store.characters) || !Array.isArray(store.packs) || !Array.isArray(store.disabledPackIds) || !Array.isArray(store.campaignProfiles)) {
       throw new Error("The character library must contain character and content-pack lists.");
     }
     for (const pack of store.packs) validatePack(pack);
+    for (const profile of store.campaignProfiles) assertCampaignProfile(profile);
+    if (store.activeCampaignProfileId !== undefined && (typeof store.activeCampaignProfileId !== "string" || !store.campaignProfiles.some((profile) => profile.id === store.activeCampaignProfileId))) throw new Error("The active campaign profile is invalid.");
+    if (typeof store.onboardingCompleted !== "boolean") throw new Error("The onboarding state is invalid.");
+    if (!["player", "dm"].includes(store.appRole)) throw new Error("The app role is invalid.");
     return store;
   }
 
@@ -116,7 +128,16 @@ function createStorage({
     await fs.mkdir(path.dirname(destination), { recursive: true });
     if (createBackup) await createRotatingBackup(destination);
     const temporary = `${destination}.tmp`;
-    const normalized = validateStore({ version: STORE_VERSION, characters: store.characters, packs: store.packs, disabledPackIds: store.disabledPackIds ?? [] });
+    const normalized = validateStore({
+      version: STORE_VERSION,
+      characters: store.characters,
+      packs: store.packs,
+      disabledPackIds: store.disabledPackIds ?? [],
+      campaignProfiles: store.campaignProfiles ?? [],
+      activeCampaignProfileId: store.activeCampaignProfileId,
+      onboardingCompleted: Boolean(store.onboardingCompleted),
+      appRole: store.appRole === "dm" ? "dm" : "player",
+    });
     await fs.writeFile(temporary, JSON.stringify(normalized, null, 2), "utf8");
     await fs.rename(temporary, destination);
   }
@@ -149,7 +170,7 @@ function createStorage({
       }
       return result.store;
     } catch (error) {
-      if (error?.code === "ENOENT") return { version: STORE_VERSION, characters: [], packs: [], disabledPackIds: [] };
+      if (error?.code === "ENOENT") return { version: STORE_VERSION, characters: [], packs: [], disabledPackIds: [], campaignProfiles: [], activeCampaignProfileId: undefined, onboardingCompleted: false, appRole: "player" };
       if (error?.code === "STORE_VERSION_TOO_NEW") throw error;
       const recovered = await recoverStore();
       if (recovered) return recovered;
@@ -198,6 +219,20 @@ function createStorage({
         : [...new Set([...store.disabledPackIds, id])];
       await writeStoreUnlocked(store);
       return { id, enabled: Boolean(enabled) };
+    }),
+    saveCampaignState: (campaignState) => enqueue(async () => {
+      const store = await readStoreUnlocked();
+      const candidate = {
+        campaignProfiles: Array.isArray(campaignState?.campaignProfiles) ? campaignState.campaignProfiles : [],
+        activeCampaignProfileId: typeof campaignState?.activeCampaignProfileId === "string" ? campaignState.activeCampaignProfileId : undefined,
+        onboardingCompleted: Boolean(campaignState?.onboardingCompleted),
+        appRole: campaignState?.appRole === "dm" ? "dm" : "player",
+      };
+      candidate.campaignProfiles.forEach(assertCampaignProfile);
+      if (candidate.activeCampaignProfileId && !candidate.campaignProfiles.some((profile) => profile.id === candidate.activeCampaignProfileId)) throw new Error("The active campaign profile is invalid.");
+      Object.assign(store, candidate);
+      await writeStoreUnlocked(store);
+      return candidate;
     }),
     replaceStore: (replacement) => enqueue(async () => {
       const result = migrateStore(replacement);

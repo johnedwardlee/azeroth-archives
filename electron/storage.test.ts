@@ -16,10 +16,11 @@ const { createStorage, STORE_VERSION } = require("./storage.cjs") as {
   }) => {
     dataPath: () => string;
     backupPath: () => string;
-    load: () => Promise<{ version: number; characters: Array<{ id: string; name: string }>; packs: Array<{ pack: { id: string } }>; disabledPackIds: string[]; recovery?: { restoredFrom?: string; migrationBackup?: string } }>;
+    load: () => Promise<{ version: number; characters: Array<{ id: string; name: string }>; packs: Array<{ pack: { id: string } }>; disabledPackIds: string[]; campaignProfiles: Array<{ id: string; name: string }>; activeCampaignProfileId?: string; onboardingCompleted: boolean; appRole: "player" | "dm"; recovery?: { restoredFrom?: string; migrationBackup?: string } }>;
     saveCharacter: (character: CharacterData) => Promise<CharacterData>;
     savePack: (pack: unknown) => Promise<unknown>;
     setPackEnabled: (id: string, enabled: boolean) => Promise<unknown>;
+    saveCampaignState: (state: unknown) => Promise<unknown>;
     replaceStore: (store: unknown) => Promise<unknown>;
   };
 };
@@ -92,6 +93,15 @@ describe("desktop storage", () => {
     expect((await storage.load()).disabledPackIds).toEqual(["optional-pack"]);
     await storage.setPackEnabled("optional-pack", true);
     expect((await storage.load()).disabledPackIds).toEqual([]);
+  });
+
+  it("persists validated campaign profiles and onboarding preferences", async () => {
+    const storage = await testStorage();
+    const now = new Date().toISOString();
+    const profile = { schemaVersion: 1, id: "campaign", name: "Campaign", startingLevel: 1, startingExperience: 0, allowedPackIds: [], allowedAbilityMethods: ["standard-array"], encumbranceRule: "variant", startingEquipmentRule: "packages-or-gold", allowMulticlass: false, allowOptionalFeats: true, attunementLimit: 3, houseRules: "", createdAt: now, updatedAt: now };
+    await storage.saveCampaignState({ campaignProfiles: [profile], activeCampaignProfileId: profile.id, onboardingCompleted: true, appRole: "dm" });
+    expect(await storage.load()).toMatchObject({ campaignProfiles: [{ id: "campaign" }], activeCampaignProfileId: "campaign", onboardingCompleted: true, appRole: "dm" });
+    await expect(storage.saveCampaignState({ campaignProfiles: [{ ...profile, startingLevel: 50 }], onboardingCompleted: true, appRole: "dm" })).rejects.toThrow(/startingLevel/i);
   });
 
   it("rejects malformed current-version character data at the desktop boundary", async () => {

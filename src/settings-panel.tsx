@@ -28,7 +28,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   async function exportDiagnostics() {
     try {
-      const store = window.azerothDesktop ? await window.azerothDesktop.load() : { version: 3, characters: [], packs: [] };
+      const store = window.azerothDesktop
+        ? await window.azerothDesktop.load()
+        : {
+            version: 5,
+            characters: [],
+            packs: [],
+            disabledPackIds: [],
+            campaignProfiles: [],
+            onboardingCompleted: true,
+            appRole: "player" as const,
+          };
       const diagnostics = JSON.stringify({
         format: "azeroth-archives-diagnostics",
         generatedAt: new Date().toISOString(),

@@ -67,6 +67,12 @@ describe("living sheet rules", () => {
     expect(result.penalty).toContain("Speed −20 ft.");
   });
 
+  it("supports standard-capacity and tracking-only campaign encumbrance", () => {
+    const inventory = [{ id: "load", name: "Load", quantity: 1, weight: "105 lb.", category: "Gear", notes: "", equipped: false }];
+    expect(calculateEncumbrance(inventory, 10, "standard").level).toBe("unencumbered");
+    expect(calculateEncumbrance(inventory, 10, "none").label).toBe("Not enforced");
+  });
+
   it("applies immunity, resistance, and vulnerability in the correct order", () => {
     const character = newCharacter();
     expect(resolveIncomingDamage(11, "Fire", { ...character, damageResistances: ["Fire"] }).adjusted).toBe(5);

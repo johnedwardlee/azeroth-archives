@@ -40,6 +40,7 @@ ipcMain.handle("storage:delete-character", (_event, id) => storage.deleteCharact
 ipcMain.handle("storage:save-pack", (_event, pack) => storage.savePack(pack));
 ipcMain.handle("storage:delete-pack", (_event, id) => storage.deletePack(id));
 ipcMain.handle("storage:set-pack-enabled", (_event, id, enabled) => storage.setPackEnabled(id, enabled));
+ipcMain.handle("storage:save-campaign-state", (_event, campaignState) => storage.saveCampaignState(campaignState));
 ipcMain.handle("storage:replace", (_event, replacement) => storage.replaceStore(replacement));
 
 ipcMain.handle("app:info", () => ({
@@ -105,6 +106,28 @@ ipcMain.handle("dialog:save-content-pack", async (_event, filename, contents) =>
   if (result.canceled || !result.filePath) return null;
   await fs.writeFile(result.filePath, contents, "utf8");
   return result.filePath;
+});
+
+ipcMain.handle("dialog:save-review-package", async (_event, packageName, files) => {
+  if (typeof packageName !== "string" || !packageName.trim()) throw new Error("A review package name is required.");
+  if (!Array.isArray(files) || !files.length) throw new Error("Review package files are required.");
+  const result = await dialog.showOpenDialog({
+    title: "Choose a folder for the DM review package",
+    defaultPath: app.getPath("documents"),
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const safePackageName = packageName.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || "character-review";
+  const destination = path.join(result.filePaths[0], safePackageName);
+  await fs.mkdir(destination, { recursive: true });
+  for (const file of files) {
+    if (!file || typeof file.name !== "string" || !/^[a-z0-9][a-z0-9._-]*$/i.test(file.name)) throw new Error("A review package filename is invalid.");
+    const target = path.join(destination, file.name);
+    if (file.kind === "bytes" && Array.isArray(file.contents)) await fs.writeFile(target, Buffer.from(file.contents));
+    else if (file.kind === "text" && typeof file.contents === "string") await fs.writeFile(target, file.contents, "utf8");
+    else throw new Error("Review package contents are invalid.");
+  }
+  return destination;
 });
 
 function createWindow() {

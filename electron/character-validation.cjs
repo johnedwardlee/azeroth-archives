@@ -31,6 +31,10 @@ function assertCharacter(character) {
 
   for (const field of ["playerName", "ancestry", "className", "background", "notes", "createdAt", "updatedAt"]) requiredString(character[field], `Character ${field}`);
   if (character.subclassName !== undefined) requiredString(character.subclassName, "Character subclassName");
+  if (character.campaignProfileId !== undefined) requiredString(character.campaignProfileId, "Character campaignProfileId", false);
+  if (character.finalizedAt !== undefined) requiredString(character.finalizedAt, "Character finalizedAt", false);
+  if (character.reviewImportedAt !== undefined) requiredString(character.reviewImportedAt, "Character reviewImportedAt", false);
+  if (character.readOnlyReview !== undefined && typeof character.readOnlyReview !== "boolean") throw new Error("Character readOnlyReview must be a boolean.");
   if (character.portraitDataUrl !== undefined && (typeof character.portraitDataUrl !== "string" || !character.portraitDataUrl.startsWith("data:image/"))) throw new Error("Character portrait must be an image data URL.");
 
   const numberFields = {

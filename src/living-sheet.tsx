@@ -6,6 +6,7 @@ import {
   abilityModifier,
   type ActiveEffect,
   type CharacterData,
+  type EncumbranceRule,
   type EquipmentDefinition,
   type FeatDefinition,
   type InventoryItem,
@@ -499,7 +500,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
   );
 }
 
-export function InventoryManager({ catalog, character, patchCharacter }: { catalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter }) {
+export function InventoryManager({ catalog, character, patchCharacter, encumbranceRule = "variant", attunementLimit = 3 }: { catalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; encumbranceRule?: EncumbranceRule; attunementLimit?: number }) {
   const [selectedId, setSelectedId] = useState("");
   const [customName, setCustomName] = useState("");
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
@@ -521,7 +522,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
         }
       : { ...item, rulesDescription: "" };
   });
-  const encumbrance = calculateEncumbrance(visibleInventory, character.abilities.strength);
+  const encumbrance = calculateEncumbrance(visibleInventory, character.abilities.strength, encumbranceRule);
   const { totalWeight, unlistedWeightItems, strength, encumberedAt, heavilyEncumberedAt, carryingCapacity, loadPercent } = encumbrance;
   const effectiveArmor = calculateArmorClass({ ...character, inventory: visibleInventory }, catalog);
   const effectiveSpeed = calculateEffectiveSpeed(character, encumbrance, catalog);
@@ -558,7 +559,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
   }
 
   function setAttuned(item: InventoryItem, attuned: boolean) {
-    if (attuned && attunedCount >= 3) return;
+    if (attuned && attunedCount >= attunementLimit) return;
     updateItem(item.id, { attuned });
   }
 
@@ -607,7 +608,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
         <div className="section-heading"><div><span className="eyebrow">Carried wealth</span><h2>Currency & load</h2></div></div>
         <div className="currency-grid">{(["gold", "silver", "copper"] as const).map((coin) => <label key={coin}><span>{coin}</span><input type="number" min="0" value={character.currency[coin]} onChange={(event) => patchCharacter({ currency: { ...character.currency, [coin]: Math.max(0, Number(event.target.value)) } })} /></label>)}</div>
         <div className="carry-summary"><strong>{character.inventory.reduce((total, item) => total + item.quantity, 0)}</strong><span>items carried</span><strong>{strength}</strong><span>Strength score</span></div>
-        <div className={`attunement-summary ${attunedCount >= 3 ? "full" : ""}`}><span>Attunement</span><strong>{attunedCount} / 3</strong></div>
+        <div className={`attunement-summary ${attunedCount >= attunementLimit ? "full" : ""}`}><span>Attunement</span><strong>{attunedCount} / {attunementLimit}</strong></div>
         <div className="equipment-derived-stats">
           <div><span>Armor Class</span><strong>{effectiveArmor.value}</strong><small>{effectiveArmor.source}</small></div>
           <div><span>Effective speed</span><strong>{effectiveSpeed.value} ft.</strong><small>{effectiveSpeed.effects.length ? effectiveSpeed.effects.join(" · ") : "No movement penalties"}</small></div>
@@ -621,8 +622,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
           </div>
           <div className="encumbrance-meter" role="progressbar" aria-label={`Carried weight: ${formatPounds(totalWeight)} of ${formatPounds(carryingCapacity)} pounds`} aria-valuemin={0} aria-valuemax={carryingCapacity} aria-valuenow={Math.min(totalWeight, carryingCapacity)}>
             <span style={{ width: `${loadPercent}%` }} />
-            <i className="encumbered-marker" aria-hidden="true" />
-            <i className="heavily-encumbered-marker" aria-hidden="true" />
+            {encumbranceRule === "variant" && <><i className="encumbered-marker" aria-hidden="true" /><i className="heavily-encumbered-marker" aria-hidden="true" /></>}
           </div>
           <div className="encumbrance-thresholds"><span>{formatPounds(encumberedAt)} lb. encumbered</span><span>{formatPounds(heavilyEncumberedAt)} lb. heavy</span></div>
           <div className="encumbrance-penalty">{encumbrance.level !== "unencumbered" && <AlertTriangle size={15} />}<div><strong>Current penalties</strong><p>{encumbrance.penalty}</p></div></div>
@@ -661,7 +661,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
                       <label><span>Charges</span><input aria-label={`${item.name} charges`} type="number" min="0" value={item.charges ?? ""} onChange={(event) => updateItem(item.id, { charges: event.target.value === "" ? undefined : Number(event.target.value) })} placeholder="Current" /></label>
                       <label><span>Maximum</span><input aria-label={`${item.name} maximum charges`} type="number" min="0" value={item.maximumCharges ?? ""} onChange={(event) => updateItem(item.id, { maximumCharges: event.target.value === "" ? undefined : Number(event.target.value) })} placeholder="Maximum" /></label>
                     </div>
-                    <div className="equipment-usage-actions"><label><input type="checkbox" checked={Boolean(item.attuned)} disabled={!item.attuned && attunedCount >= 3} onChange={(event) => setAttuned(item, event.target.checked)} />Attuned</label><label><input type="checkbox" checked={Boolean(item.consumable)} onChange={(event) => updateItem(item.id, { consumable: event.target.checked })} />Consumable</label>{item.maximumCharges !== undefined && <button disabled={(item.charges ?? 0) <= 0} onClick={() => updateItem(item.id, { charges: (item.charges ?? 0) - 1 })}>Use charge</button>}{item.consumable && <button disabled={item.quantity <= 0} onClick={() => useConsumable(item)}>Use item</button>}</div>
+                    <div className="equipment-usage-actions"><label><input type="checkbox" checked={Boolean(item.attuned)} disabled={!item.attuned && attunedCount >= attunementLimit} onChange={(event) => setAttuned(item, event.target.checked)} />Attuned</label><label><input type="checkbox" checked={Boolean(item.consumable)} onChange={(event) => updateItem(item.id, { consumable: event.target.checked })} />Consumable</label>{item.maximumCharges !== undefined && <button disabled={(item.charges ?? 0) <= 0} onClick={() => updateItem(item.id, { charges: (item.charges ?? 0) - 1 })}>Use charge</button>}{item.consumable && <button disabled={item.quantity <= 0} onClick={() => useConsumable(item)}>Use item</button>}</div>
                     <label><span>Notes</span><textarea aria-label={`${item.name} notes`} value={item.notes} onChange={(event) => updateItem(item.id, { notes: event.target.value })} placeholder="Add personal notes, charges, or other details" rows={4} /></label>
                   </div>
                 </div>}

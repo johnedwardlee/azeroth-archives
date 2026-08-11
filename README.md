@@ -5,6 +5,7 @@ Azeroth Archives is an offline-first Windows desktop character manager for a cus
 ## Player features
 
 - Guided character creation with class skill lists, standard array, point buy, rolled or manual scores, background ability boosts, starting equipment, Fighting Styles, Expertise, and Weapon Masteries
+- Portable campaign profiles, first-launch onboarding, readiness validation, protected finalized creation choices, and read-only DM review packages
 - Guided single-class or multiclass advancement with rollback history, subclass checks, hit-point increases, feats, ability improvements, Expertise, Metamagic, spell choices, Fighting Styles, and Weapon Masteries
 - Living hit points, temporary hit points, death saves, class-specific hit dice, inspiration, conditions, rests, class resources, concentration, and active effects
 - Rules-aware Actions dashboard generated from features, attacks, prepared spells, and equipped items
@@ -27,7 +28,7 @@ Every published version remains available on GitHub as a rollback point. Back up
 
 ## Local data, backups, and recovery
 
-Characters and imported packs are stored in `azeroth-archives-data.json` under the operating system's application-data folder. The Settings & Updates panel shows the exact path.
+Characters, campaign profiles, onboarding preferences, and imported packs are stored in `azeroth-archives-data.json` under the operating system's application-data folder. The Settings & Updates panel shows the exact path.
 
 The desktop app runs as a single instance, serializes local-data changes, writes atomically, and keeps up to ten rotating backups in the adjacent `backups` directory. If the primary file becomes unreadable, the app restores the newest valid automatic backup and reports that recovery in the roster status. Store-version upgrades create a dedicated pre-migration backup before changing the saved format.
 
