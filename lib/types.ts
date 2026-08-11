@@ -212,6 +212,7 @@ export type ContentPack = {
 };
 
 export type CharacterData = {
+  schemaVersion: 2;
   id: string;
   name: string;
   portraitDataUrl?: string;

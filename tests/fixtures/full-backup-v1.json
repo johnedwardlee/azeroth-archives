@@ -1,0 +1,25 @@
+{
+  "format": "azeroth-archives-full-backup",
+  "version": 1,
+  "exportedAt": "2026-08-10T00:00:00.000Z",
+  "store": {
+    "version": 1,
+    "characters": [
+      {
+        "id": "legacy-fixture",
+        "name": "Migration Test Hero",
+        "className": "Warrior",
+        "level": 3,
+        "abilities": {
+          "strength": 16,
+          "agility": 12,
+          "stamina": 14,
+          "intellect": 10,
+          "spirit": 11,
+          "charisma": 13
+        }
+      }
+    ],
+    "packs": []
+  }
+}

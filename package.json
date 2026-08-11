@@ -1,6 +1,6 @@
 {
   "name": "azeroth-archives-desktop",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "private": true,
   "description": "Offline Warcraft 5E character manager",
   "author": "Warcraft 5E Table",
@@ -13,7 +13,8 @@
     "build": "tsc --noEmit && vite build",
     "dist": "pnpm run build && electron-builder --win nsis",
     "release:win": "pnpm run build && electron-builder --win nsis --publish never",
-    "test": "tsc --noEmit && vite build"
+    "test": "vitest run && tsc --noEmit && vite build",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
@@ -27,12 +28,14 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
+    "ajv": "^8.20.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^40.8.0",
     "electron-builder": "^26.0.12",
     "typescript": "^5.9.3",
     "vite": "^8.0.13",
+    "vitest": "^4.1.10",
     "wait-on": "^9.0.1"
   },
   "build": {

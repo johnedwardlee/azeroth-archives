@@ -2,14 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const pnpmDirectory = path.resolve("node_modules/.pnpm");
-const ajvDirectory = fs.readdirSync(pnpmDirectory).find((entry) => entry.startsWith("ajv@"));
-
-if (!ajvDirectory) {
-  throw new Error("Ajv is not installed in this workspace; install dependencies before validating a pack.");
-}
-
-const Ajv = require(path.join(pnpmDirectory, ajvDirectory, "node_modules/ajv/dist/2020")).default;
+const Ajv = require("ajv/dist/2020").default;
 
 const packPath = path.resolve(process.argv[2] || "content-packs/dnd2024-wikidot.w5e");
 const schemaPath = path.resolve("content-format/warcraft5e-content.schema.json");

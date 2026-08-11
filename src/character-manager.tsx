@@ -60,7 +60,9 @@ import {
 } from "../lib/types";
 
 type Tab = "overview" | "features" | "actions" | "combat" | "spells" | "equipment" | "notes";
-type OfflineStore = { version: 1; characters: CharacterData[]; packs: ContentPack[] };
+export const CURRENT_STORE_VERSION = 2 as const;
+export const CURRENT_CHARACTER_SCHEMA_VERSION = 2 as const;
+export type OfflineStore = { version: 2; characters: CharacterData[]; packs: ContentPack[]; recovery?: { restoredFrom: string } };
 
 const abilityKeys = Object.keys(ABILITY_LABELS) as AbilityKey[];
 const browserStorageKey = "azeroth-archives-offline-data";
@@ -73,14 +75,9 @@ function withBundledPack(packs: ContentPack[]) {
 
 function readBrowserStore(): OfflineStore {
   try {
-    const parsed = JSON.parse(localStorage.getItem(browserStorageKey) ?? "null") as Partial<OfflineStore> | null;
-    return {
-      version: 1,
-      characters: Array.isArray(parsed?.characters) ? parsed.characters : [],
-      packs: Array.isArray(parsed?.packs) ? parsed.packs : [],
-    };
+    return migrateOfflineStore(JSON.parse(localStorage.getItem(browserStorageKey) ?? "null"));
   } catch {
-    return { version: 1, characters: [], packs: [] };
+    return { version: CURRENT_STORE_VERSION, characters: [], packs: [] };
   }
 }
 
@@ -122,9 +119,10 @@ function resizePortrait(file: File) {
   });
 }
 
-function newCharacter(): CharacterData {
+export function newCharacter(): CharacterData {
   const now = new Date().toISOString();
   return {
+    schemaVersion: CURRENT_CHARACTER_SCHEMA_VERSION,
     id: "draft",
     name: "New Hero",
     playerName: "",
@@ -181,12 +179,13 @@ function newCharacter(): CharacterData {
   };
 }
 
-function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
+export function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
   const defaults = newCharacter();
   const maximumHitDice = Math.max(1, Number(value.hitDiceTotal ?? value.level ?? 1));
   const normalized: CharacterData = {
     ...defaults,
     ...value,
+    schemaVersion: CURRENT_CHARACTER_SCHEMA_VERSION,
     abilities: { ...defaults.abilities, ...(value.abilities ?? {}) },
     portraitDataUrl: typeof value.portraitDataUrl === "string" && value.portraitDataUrl.startsWith("data:image/") ? value.portraitDataUrl : undefined,
     subclassName: value.subclassName ?? "",
@@ -266,6 +265,20 @@ function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
   };
 }
 
+export function migrateOfflineStore(value: unknown): OfflineStore {
+  const parsed = value && typeof value === "object" ? value as { characters?: unknown; packs?: unknown; recovery?: unknown } : {};
+  const characters = Array.isArray(parsed.characters)
+    ? parsed.characters.filter((item): item is Partial<CharacterData> => Boolean(item) && typeof item === "object").map(normalizeCharacter)
+    : [];
+  const packs = Array.isArray(parsed.packs)
+    ? parsed.packs.filter((pack): pack is ContentPack => Boolean(pack) && typeof pack === "object" && typeof (pack as ContentPack).pack?.id === "string")
+    : [];
+  const recovery = parsed.recovery && typeof parsed.recovery === "object" && typeof (parsed.recovery as { restoredFrom?: unknown }).restoredFrom === "string"
+    ? { restoredFrom: (parsed.recovery as { restoredFrom: string }).restoredFrom }
+    : undefined;
+  return { version: CURRENT_STORE_VERSION, characters, packs, ...(recovery ? { recovery } : {}) };
+}
+
 function uniqueById<T extends { id: string }>(items: T[]) {
   return [...new Map(items.map((item) => [item.id, item])).values()];
 }
@@ -323,6 +336,7 @@ export function CharacterManager() {
   const [deleteTarget, setDeleteTarget] = useState<CharacterData | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const characterFileInput = useRef<HTMLInputElement>(null);
+  const fullBackupFileInput = useRef<HTMLInputElement>(null);
   const portraitFileInput = useRef<HTMLInputElement>(null);
   const characterRef = useRef(character);
   const deletedCharacterIds = useRef(new Set<string>());
@@ -398,7 +412,7 @@ export function CharacterManager() {
       setCharacters(loadedCharacters);
       if (loadedCharacters[0]) setCharacter(loadedCharacters[0]);
       setCustomPacks(withBundledPack(store.packs));
-      setStatus(store.characters.length ? "Saved on this device" : "Create your first hero");
+      setStatus(store.recovery ? `Recovered data from automatic backup ${store.recovery.restoredFrom}` : store.characters.length ? "Saved on this device" : "Create your first hero");
     }).catch(() => setStatus("Could not read local character data"));
   }, []);
 
@@ -619,6 +633,58 @@ export function CharacterManager() {
       setStatus("Character backup downloaded");
     }
     setMenuCharacterId(null);
+  }
+
+  async function exportFullBackup() {
+    try {
+      const store = window.azerothDesktop ? await window.azerothDesktop.load() : readBrowserStore();
+      const backup = JSON.stringify({
+        format: "azeroth-archives-full-backup",
+        version: CURRENT_STORE_VERSION,
+        exportedAt: new Date().toISOString(),
+        store: { version: CURRENT_STORE_VERSION, characters: store.characters, packs: store.packs },
+      }, null, 2);
+      const filename = `azeroth-archives-full-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      if (window.azerothDesktop) {
+        const destination = await window.azerothDesktop.saveJson(filename, backup);
+        setStatus(destination ? "Full backup saved" : "Full backup canceled");
+      } else {
+        const anchor = document.createElement("a");
+        anchor.href = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
+        anchor.download = filename;
+        anchor.click();
+        URL.revokeObjectURL(anchor.href);
+        setStatus("Full backup downloaded");
+      }
+    } catch {
+      setStatus("Could not create a full backup");
+    }
+  }
+
+  async function importFullBackup(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text()) as { format?: string; store?: unknown };
+      if (parsed.format !== "azeroth-archives-full-backup" || !parsed.store || typeof parsed.store !== "object") throw new Error("Invalid full backup");
+      const source = parsed.store as { characters?: unknown; packs?: unknown };
+      if (!Array.isArray(source.characters) || !Array.isArray(source.packs)) throw new Error("Invalid full backup contents");
+      const restored = migrateOfflineStore(source);
+      if (!window.confirm(`Restore ${restored.characters.length} character${restored.characters.length === 1 ? "" : "s"} and ${restored.packs.length} imported content pack${restored.packs.length === 1 ? "" : "s"}? This replaces the current local library.`)) {
+        setStatus("Full backup restore canceled");
+        return;
+      }
+      const saved = window.azerothDesktop ? await window.azerothDesktop.replaceStore(restored) : (writeBrowserStore(restored), restored);
+      const loadedCharacters = saved.characters.map(normalizeCharacter);
+      setCharacters(loadedCharacters);
+      setCharacter(loadedCharacters[0] ?? newCharacter());
+      setCustomPacks(withBundledPack(saved.packs));
+      setShowRoster(false);
+      setStatus(`Full backup restored: ${loadedCharacters.length} character${loadedCharacters.length === 1 ? "" : "s"}`);
+    } catch {
+      setStatus("That file is not a valid full backup");
+    }
   }
 
   async function importCharacter(event: ChangeEvent<HTMLInputElement>) {
@@ -905,6 +971,7 @@ export function CharacterManager() {
     <main className="app-shell">
       <input ref={fileInput} className="sr-only" type="file" accept=".json,.w5e,application/json" onChange={importPack} />
       <input ref={characterFileInput} className="sr-only" type="file" accept=".json,application/json" onChange={importCharacter} />
+      <input ref={fullBackupFileInput} className="sr-only" type="file" accept=".json,application/json" onChange={importFullBackup} />
       <input ref={portraitFileInput} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={choosePortrait} />
       <header className="topbar">
         <button className="icon-button mobile-only" aria-label="Open roster" onClick={() => setShowRoster(true)}><Menu size={20} /></button>
@@ -943,6 +1010,16 @@ export function CharacterManager() {
           {!visibleCharacters.length && <div className="empty-roster"><Swords size={24} /><p>No saved heroes yet.</p><span>Your first character will appear here after saving.</span></div>}
         </div>
         <div className="roster-imports">
+          <button className="import-card" onClick={exportFullBackup}>
+            <span className="import-icon"><HardDrive size={20} /></span>
+            <span><strong>Back up everything</strong><small>Characters and imported content</small></span>
+            <Download size={16} />
+          </button>
+          <button className="import-card" onClick={() => fullBackupFileInput.current?.click()}>
+            <span className="import-icon"><Upload size={20} /></span>
+            <span><strong>Restore full backup</strong><small>Replace this device's local library</small></span>
+            <FileDown size={16} />
+          </button>
           <button className="import-card" onClick={() => characterFileInput.current?.click()}>
             <span className="import-icon"><FileDown size={20} /></span>
             <span><strong>Import character</strong><small>Restore a character backup</small></span>

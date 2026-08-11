@@ -21,28 +21,80 @@ function isAllowedNetworkRequest(requestUrl) {
   }
 }
 
-const emptyStore = () => ({ version: 1, characters: [], packs: [] });
+const STORE_VERSION = 2;
+const BACKUP_LIMIT = 10;
+const BACKUP_INTERVAL_MS = 5 * 60 * 1000;
+const emptyStore = () => ({ version: STORE_VERSION, characters: [], packs: [] });
 const dataPath = () => path.join(app.getPath("userData"), "azeroth-archives-data.json");
+const backupPath = () => path.join(app.getPath("userData"), "backups");
 
-async function readStore() {
+function normalizeStore(parsed) {
+  return {
+    version: STORE_VERSION,
+    characters: Array.isArray(parsed?.characters) ? parsed.characters : [],
+    packs: Array.isArray(parsed?.packs) ? parsed.packs : [],
+  };
+}
+
+async function availableBackups() {
   try {
-    const parsed = JSON.parse(await fs.readFile(dataPath(), "utf8"));
-    return {
-      version: 1,
-      characters: Array.isArray(parsed.characters) ? parsed.characters : [],
-      packs: Array.isArray(parsed.packs) ? parsed.packs : [],
-    };
+    const names = await fs.readdir(backupPath());
+    return names.filter((name) => /^azeroth-archives-data-.*\.json$/i.test(name)).sort().reverse();
   } catch (error) {
-    if (error?.code === "ENOENT") return emptyStore();
+    if (error?.code === "ENOENT") return [];
     throw error;
   }
 }
 
-async function writeStore(store) {
+async function recoverStore() {
+  for (const name of await availableBackups()) {
+    try {
+      const recovered = normalizeStore(JSON.parse(await fs.readFile(path.join(backupPath(), name), "utf8")));
+      await writeStore(recovered, false);
+      return { ...recovered, recovery: { restoredFrom: name } };
+    } catch {
+      // Continue to the next rotating backup.
+    }
+  }
+  return null;
+}
+
+async function readStore() {
+  try {
+    return normalizeStore(JSON.parse(await fs.readFile(dataPath(), "utf8")));
+  } catch (error) {
+    if (error?.code === "ENOENT") return emptyStore();
+    const recovered = await recoverStore();
+    if (recovered) return recovered;
+    throw new Error("Character data is unreadable and no valid automatic backup is available.", { cause: error });
+  }
+}
+
+async function createRotatingBackup(destination) {
+  try {
+    await fs.access(destination);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  await fs.mkdir(backupPath(), { recursive: true });
+  const existing = await availableBackups();
+  if (existing[0]) {
+    const latest = await fs.stat(path.join(backupPath(), existing[0]));
+    if (Date.now() - latest.mtimeMs < BACKUP_INTERVAL_MS) return;
+  }
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  await fs.copyFile(destination, path.join(backupPath(), `azeroth-archives-data-${timestamp}.json`));
+  const backups = await availableBackups();
+  await Promise.all(backups.slice(BACKUP_LIMIT).map((name) => fs.unlink(path.join(backupPath(), name))));
+}
+
+async function writeStore(store, createBackup = true) {
   const destination = dataPath();
   await fs.mkdir(path.dirname(destination), { recursive: true });
+  if (createBackup) await createRotatingBackup(destination);
   const temporary = `${destination}.tmp`;
-  await fs.writeFile(temporary, JSON.stringify(store, null, 2), "utf8");
+  await fs.writeFile(temporary, JSON.stringify(normalizeStore(store), null, 2), "utf8");
   await fs.rename(temporary, destination);
 }
 
@@ -84,6 +136,15 @@ ipcMain.handle("storage:delete-pack", async (_event, id) => {
   const store = await readStore();
   store.packs = store.packs.filter((item) => item.pack.id !== id);
   await writeStore(store);
+});
+
+ipcMain.handle("storage:replace", async (_event, replacement) => {
+  if (!replacement || !Array.isArray(replacement.characters) || !Array.isArray(replacement.packs)) {
+    throw new Error("The full backup does not contain valid characters and content packs.");
+  }
+  const store = normalizeStore(replacement);
+  await writeStore(store);
+  return store;
 });
 
 ipcMain.handle("dialog:save-pdf", async (_event, filename, bytes) => {
