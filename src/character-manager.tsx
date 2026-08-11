@@ -46,11 +46,13 @@ import {
   METAMAGIC_OPTIONS,
   isEquipmentProficient,
   conditionEffectText,
+  featAbilityIncrease,
   preparedSpellLimitFor,
   progressionSpellSlots,
   syncMulticlassResources,
   syncMulticlassSpellSlots,
   syncAutomaticResources,
+  syncEffectConditions,
   syncProgressionSpellSlots,
   spellcastingAbilityForClass,
 } from "../lib/character-rules";
@@ -68,11 +70,12 @@ import {
   type ClassDefinition,
   type ContentPack,
   type RulesFeature,
+  type SpellcastingProfile,
 } from "../lib/types";
 
 type Tab = "overview" | "features" | "actions" | "combat" | "spells" | "equipment" | "companions" | "notes";
 export const CURRENT_STORE_VERSION = 4 as const;
-export const CURRENT_CHARACTER_SCHEMA_VERSION = 4 as const;
+export const CURRENT_CHARACTER_SCHEMA_VERSION = 5 as const;
 export type OfflineStore = {
   version: 4;
   characters: CharacterData[];
@@ -206,47 +209,141 @@ export function newCharacter(): CharacterData {
   };
 }
 
+function finiteNumber(value: unknown, fallback: number, minimum: number, maximum: number, integer = false) {
+  const number = typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN;
+  const safe = Number.isFinite(number) ? number : fallback;
+  const clamped = Math.max(minimum, Math.min(maximum, safe));
+  return integer ? Math.trunc(clamped) : clamped;
+}
+
+function textValue(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function stringList(value: unknown) {
+  return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))] : [];
+}
+
+function abilityRecord(value: unknown, fallback: Record<AbilityKey, number>, minimum = 1, maximum = 30) {
+  const source = value && typeof value === "object" ? value as Partial<Record<AbilityKey, unknown>> : {};
+  return Object.fromEntries(abilityKeys.map((ability) => [ability, finiteNumber(source[ability], fallback[ability], minimum, maximum, true)])) as Record<AbilityKey, number>;
+}
+
+function normalizedClassLevels(value: unknown, legacyClassName: string, legacySubclassName: string, legacyLevel: number) {
+  const merged = new Map<string, CharacterClassLevel>();
+  if (Array.isArray(value)) {
+    for (const candidate of value) {
+      if (!candidate || typeof candidate !== "object") continue;
+      const entry = candidate as Partial<CharacterClassLevel>;
+      const className = textValue(entry.className).trim();
+      if (!className) continue;
+      const previous = merged.get(className);
+      merged.set(className, {
+        className,
+        subclassName: textValue(entry.subclassName, previous?.subclassName ?? "").trim(),
+        level: Math.min(20, (previous?.level ?? 0) + finiteNumber(entry.level, 1, 1, 20, true)),
+      });
+    }
+  }
+  if (!merged.size && legacyClassName) merged.set(legacyClassName, { className: legacyClassName, subclassName: legacySubclassName, level: legacyLevel });
+  let remaining = 20;
+  return [...merged.values()].flatMap((entry) => {
+    if (remaining <= 0) return [];
+    const level = Math.min(entry.level, remaining);
+    remaining -= level;
+    return [{ ...entry, level }];
+  });
+}
+
 export function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
   const defaults = newCharacter();
-  const legacyLevel = Math.max(1, Math.min(20, Number(value.level ?? 1) || 1));
-  const classLevels: CharacterClassLevel[] = Array.isArray(value.classLevels)
-    ? value.classLevels.filter((entry) => entry && typeof entry.className === "string" && entry.className.trim()).map((entry) => ({ className: entry.className.trim(), subclassName: typeof entry.subclassName === "string" ? entry.subclassName : "", level: Math.max(1, Math.min(20, Number(entry.level) || 1)) }))
-    : [];
-  if (!classLevels.length && typeof value.className === "string" && value.className.trim()) classLevels.push({ className: value.className.trim(), subclassName: value.subclassName ?? "", level: legacyLevel });
-  const totalLevel = classLevels.length ? Math.min(20, classLevels.reduce((total, entry) => total + entry.level, 0)) : legacyLevel;
-  const maximumHitDice = Math.max(1, Number(value.hitDiceTotal ?? totalLevel));
+  const legacyLevel = finiteNumber(value.level, 1, 1, 20, true);
+  const legacyClassName = textValue(value.className).trim();
+  const legacySubclassName = textValue(value.subclassName).trim();
+  const classLevels = normalizedClassLevels(value.classLevels, legacyClassName, legacySubclassName, legacyLevel);
+  const totalLevel = classLevels.length ? classLevels.reduce((total, entry) => total + entry.level, 0) : legacyLevel;
+  const maximumHitDice = totalLevel;
+  const abilities = abilityRecord(value.abilities, defaults.abilities);
+  const baseAbilities = abilityRecord(value.baseAbilities ?? value.abilities, defaults.baseAbilities);
+  const maxHp = finiteNumber(value.maxHp, defaults.maxHp, 1, 9999, true);
   const normalized: CharacterData = {
     ...defaults,
     ...value,
     schemaVersion: CURRENT_CHARACTER_SCHEMA_VERSION,
-    abilities: { ...defaults.abilities, ...(value.abilities ?? {}) },
-    baseAbilities: { ...defaults.baseAbilities, ...(value.baseAbilities ?? value.abilities ?? {}) },
+    id: textValue(value.id, defaults.id).trim() || crypto.randomUUID(),
+    name: textValue(value.name, defaults.name).trim() || defaults.name,
+    playerName: textValue(value.playerName),
+    ancestry: textValue(value.ancestry),
+    className: classLevels[0]?.className || legacyClassName,
+    background: textValue(value.background),
+    experience: finiteNumber(value.experience, 0, 0, 99_999_999, true),
+    currentHp: finiteNumber(value.currentHp, Math.min(defaults.currentHp, maxHp), 0, maxHp, true),
+    maxHp,
+    temporaryHp: finiteNumber(value.temporaryHp, 0, 0, 9999, true),
+    armorClass: finiteNumber(value.armorClass, defaults.armorClass, 0, 99, true),
+    speed: finiteNumber(value.speed, defaults.speed, 0, 999, true),
+    proficiencyBonus: proficiencyForLevel(totalLevel),
+    abilities,
+    baseAbilities,
     abilityScoreMethod: (["standard-array", "point-buy", "rolled", "manual"] as const).includes(value.abilityScoreMethod ?? "manual") ? value.abilityScoreMethod ?? "manual" : "manual",
-    backgroundAbilityBonuses: value.backgroundAbilityBonuses && typeof value.backgroundAbilityBonuses === "object" ? value.backgroundAbilityBonuses : {},
+    backgroundAbilityBonuses: Object.fromEntries(abilityKeys.flatMap((ability) => {
+      const bonus = value.backgroundAbilityBonuses?.[ability];
+      return bonus === undefined ? [] : [[ability, finiteNumber(bonus, 0, -5, 5, true)]];
+    })),
     portraitDataUrl: typeof value.portraitDataUrl === "string" && value.portraitDataUrl.startsWith("data:image/") ? value.portraitDataUrl : undefined,
-    subclassName: value.subclassName ?? "",
+    subclassName: classLevels[0]?.subclassName ?? legacySubclassName,
     classLevels,
     level: totalLevel,
-    temporaryHp: Math.max(0, Number(value.temporaryHp ?? 0)),
-    savingThrowProficiencies: Array.isArray(value.savingThrowProficiencies) ? value.savingThrowProficiencies : [],
-    skillProficiencies: Array.isArray(value.skillProficiencies) ? value.skillProficiencies : [],
-    skillExpertise: Array.isArray(value.skillExpertise) ? value.skillExpertise : [],
-    classSkillChoices: Array.isArray(value.classSkillChoices) ? value.classSkillChoices : [],
-    languages: Array.isArray(value.languages) ? value.languages : [],
-    toolProficiencies: Array.isArray(value.toolProficiencies) ? value.toolProficiencies : [],
-    armorProficiencies: Array.isArray(value.armorProficiencies) ? value.armorProficiencies : [],
-    weaponProficiencies: Array.isArray(value.weaponProficiencies) ? value.weaponProficiencies : [],
-    weaponMasteries: Array.isArray(value.weaponMasteries) ? value.weaponMasteries : [],
+    savingThrowProficiencies: stringList(value.savingThrowProficiencies).filter((ability): ability is AbilityKey => abilityKeys.includes(ability as AbilityKey)),
+    skillProficiencies: stringList(value.skillProficiencies),
+    skillExpertise: stringList(value.skillExpertise),
+    classSkillChoices: stringList(value.classSkillChoices),
+    languages: stringList(value.languages),
+    toolProficiencies: stringList(value.toolProficiencies),
+    armorProficiencies: stringList(value.armorProficiencies),
+    weaponProficiencies: stringList(value.weaponProficiencies),
+    weaponMasteries: stringList(value.weaponMasteries),
     advancementChoices: Array.isArray(value.advancementChoices) ? value.advancementChoices.filter((choice) => choice && typeof choice.featureName === "string" && Array.isArray(choice.selections)) : [],
     advancementHistory: Array.isArray(value.advancementHistory) ? value.advancementHistory.filter((entry) => entry && typeof entry.id === "string" && entry.before && typeof entry.before === "object") : [],
     abilityScoresConfirmed: Boolean(value.abilityScoresConfirmed),
     startingEquipmentConfirmed: Boolean(value.startingEquipmentConfirmed),
     startingEquipmentChoice: value.startingEquipmentChoice === "A" || value.startingEquipmentChoice === "B" ? value.startingEquipmentChoice : "",
-    startingGold: Math.max(0, Number(value.startingGold) || 0),
-    attacks: Array.isArray(value.attacks) ? value.attacks.map((attack) => ({ ...attack, damageBonus: Number(attack.damageBonus) || 0 })) : [],
-    feats: Array.isArray(value.feats) ? value.feats : [],
-    spells: Array.isArray(value.spells) ? value.spells : [],
-    spellSlots: value.spellSlots && typeof value.spellSlots === "object" ? value.spellSlots : {},
+    startingGold: finiteNumber(value.startingGold, 0, 0, 9_999_999, true),
+    attacks: Array.isArray(value.attacks) ? value.attacks.filter((attack) => attack && typeof attack.name === "string").map((attack) => ({
+      id: textValue(attack.id).trim() || crypto.randomUUID(), contentId: typeof attack.contentId === "string" ? attack.contentId : undefined, inventoryItemId: typeof attack.inventoryItemId === "string" ? attack.inventoryItemId : undefined,
+      name: attack.name.trim() || "Attack", ability: abilityKeys.includes(attack.ability) ? attack.ability : "strength", proficient: Boolean(attack.proficient),
+      bonus: finiteNumber(attack.bonus, 0, -99, 99, true), damage: textValue(attack.damage), damageType: textValue(attack.damageType), damageBonus: finiteNumber(attack.damageBonus, 0, -99, 99, true), notes: textValue(attack.notes),
+    })) : [],
+    features: Array.isArray(value.features) ? value.features.filter((feature) => feature && typeof feature.name === "string" && Boolean(feature.name.trim()) && typeof feature.description === "string") : [],
+    feats: Array.isArray(value.feats) ? value.feats.filter((feat) => feat && typeof feat.id === "string" && Boolean(feat.id.trim()) && typeof feat.name === "string" && Boolean(feat.name.trim()) && typeof feat.category === "string" && typeof feat.description === "string") : [],
+    spells: Array.isArray(value.spells) ? value.spells.filter((spell) => spell && typeof spell.id === "string" && typeof spell.name === "string" && Array.isArray(spell.classes)).map((spell) => {
+      const className = typeof spell.className === "string" && classLevels.some((entry) => entry.className === spell.className)
+        ? spell.className
+        : classLevels.find((entry) => spell.classes.some((name) => typeof name === "string" && name.toLowerCase() === entry.className.toLowerCase()))?.className;
+      const level = finiteNumber(spell.level, 0, 0, 9, true);
+      return {
+        id: spell.id.trim() || crypto.randomUUID(),
+        name: spell.name.trim() || "Unnamed spell",
+        aliases: stringList(spell.aliases),
+        level,
+        school: textValue(spell.school),
+        classes: stringList(spell.classes),
+        ritual: Boolean(spell.ritual),
+        castingTime: textValue(spell.castingTime),
+        range: textValue(spell.range),
+        components: textValue(spell.components),
+        duration: textValue(spell.duration),
+        description: textValue(spell.description),
+        source: typeof spell.source === "string" ? spell.source : undefined,
+        prepared: level === 0 || Boolean(spell.prepared),
+        ...(className ? { className } : {}),
+      };
+    }) : [],
+    spellSlots: value.spellSlots && typeof value.spellSlots === "object" ? Object.fromEntries(Object.entries(value.spellSlots).flatMap(([level, slot]) => {
+      if (!/^[1-9]$/.test(level) || !slot || typeof slot !== "object") return [];
+      const maximum = finiteNumber(slot.maximum, 0, 0, 20, true);
+      return [[level, { maximum, used: finiteNumber(slot.used, 0, 0, maximum, true) }]];
+    })) : {},
     concentratingSpellId: typeof value.concentratingSpellId === "string" ? value.concentratingSpellId : undefined,
     activeEffects: Array.isArray(value.activeEffects) ? value.activeEffects.filter((effect) => effect && typeof effect.name === "string").map((effect) => ({
       ...effect,
@@ -272,8 +369,16 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
       notes: typeof item.notes === "string" ? item.notes : "",
       source: typeof item.source === "string" ? item.source : undefined,
     })) : [],
-    inventory: Array.isArray(value.inventory) ? value.inventory.map((item) => ({
+    inventory: Array.isArray(value.inventory) ? value.inventory.filter((item) => item && typeof item.name === "string").map((item) => ({
       ...item,
+      id: textValue(item.id).trim() || crypto.randomUUID(),
+      name: item.name.trim() || "Item",
+      category: typeof item.category === "string" ? item.category : undefined,
+      quantity: finiteNumber(item.quantity, 1, 0, 999_999, true),
+      equipped: Boolean(item.equipped),
+      notes: textValue(item.notes),
+      weight: typeof item.weight === "string" ? item.weight : undefined,
+      cost: typeof item.cost === "string" ? item.cost : undefined,
       charges: item.charges === undefined ? undefined : Math.max(0, Number(item.charges) || 0),
       maximumCharges: item.maximumCharges === undefined ? undefined : Math.max(0, Number(item.maximumCharges) || 0),
       ammunition: item.ammunition === undefined ? undefined : Math.max(0, Number(item.ammunition) || 0),
@@ -282,7 +387,11 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
       container: typeof item.container === "string" ? item.container : "",
       equipmentSlot: (["none", "main-hand", "off-hand", "two-hands", "armor", "worn"] as const).includes(item.equipmentSlot ?? "none") ? item.equipmentSlot : "none",
     })) : [],
-    currency: { ...defaults.currency, ...(value.currency ?? {}) },
+    currency: {
+      copper: finiteNumber(value.currency?.copper, 0, 0, 999_999_999, true),
+      silver: finiteNumber(value.currency?.silver, 0, 0, 999_999_999, true),
+      gold: finiteNumber(value.currency?.gold, 0, 0, 999_999_999, true),
+    },
     resources: Array.isArray(value.resources)
       ? value.resources.filter((resource) => resource && typeof resource.name === "string").map((resource) => {
           const maximum = Math.max(0, Number(resource.maximum) || 0);
@@ -299,17 +408,17 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
       : [],
     inspiration: Boolean(value.inspiration),
     hitDiceTotal: maximumHitDice,
-    hitDiceUsed: Math.max(0, Math.min(maximumHitDice, Number(value.hitDiceUsed ?? 0))),
-    hitDiceByClass: Array.isArray(value.hitDiceByClass) && value.hitDiceByClass.length ? value.hitDiceByClass.map((pool) => ({ className: pool.className, die: Math.max(0, Number(pool.die) || 0), total: Math.max(1, Number(pool.total) || 1), used: Math.max(0, Math.min(Number(pool.total) || 1, Number(pool.used) || 0)) })) : classLevels.map((entry, index) => ({ className: entry.className, die: 0, total: entry.level, used: index === 0 ? Math.max(0, Math.min(entry.level, Number(value.hitDiceUsed ?? 0))) : 0 })),
-    deathSaveSuccesses: Math.max(0, Math.min(3, Number(value.deathSaveSuccesses ?? 0))),
-    deathSaveFailures: Math.max(0, Math.min(3, Number(value.deathSaveFailures ?? 0))),
-    conditions: Array.isArray(value.conditions) ? value.conditions : [],
-    exhaustionLevel: Math.max(0, Math.min(6, Number(value.exhaustionLevel ?? (value.conditions?.includes("Exhaustion") ? 1 : 0)))),
-    damageResistances: Array.isArray(value.damageResistances) ? value.damageResistances : [],
-    damageVulnerabilities: Array.isArray(value.damageVulnerabilities) ? value.damageVulnerabilities : [],
-    damageImmunities: Array.isArray(value.damageImmunities) ? value.damageImmunities : [],
-    conditionImmunities: Array.isArray(value.conditionImmunities) ? value.conditionImmunities : [],
-    savingThrowBonuses: value.savingThrowBonuses && typeof value.savingThrowBonuses === "object" ? value.savingThrowBonuses : {},
+    hitDiceUsed: finiteNumber(value.hitDiceUsed, 0, 0, maximumHitDice, true),
+    hitDiceByClass: classLevels.map((entry, index) => { const stored = Array.isArray(value.hitDiceByClass) ? value.hitDiceByClass.find((pool) => pool && pool.className === entry.className) : undefined; return { className: entry.className, die: finiteNumber(stored?.die, 0, 0, 20, true), total: entry.level, used: finiteNumber(stored?.used, index === 0 ? value.hitDiceUsed ?? 0 : 0, 0, entry.level, true) }; }),
+    deathSaveSuccesses: finiteNumber(value.deathSaveSuccesses, 0, 0, 3, true),
+    deathSaveFailures: finiteNumber(value.deathSaveFailures, 0, 0, 3, true),
+    conditions: stringList(value.conditions),
+    exhaustionLevel: finiteNumber(value.exhaustionLevel, value.conditions?.includes("Exhaustion") ? 1 : 0, 0, 6, true),
+    damageResistances: stringList(value.damageResistances),
+    damageVulnerabilities: stringList(value.damageVulnerabilities),
+    damageImmunities: stringList(value.damageImmunities),
+    conditionImmunities: stringList(value.conditionImmunities),
+    savingThrowBonuses: Object.fromEntries(abilityKeys.flatMap((ability) => { const bonus = value.savingThrowBonuses?.[ability]; return bonus === undefined ? [] : [[ability, finiteNumber(bonus, 0, -99, 99, true)]]; })),
     journal: Array.isArray(value.journal) ? value.journal.filter((entry) => entry && typeof entry.title === "string").map((entry) => ({
       id: typeof entry.id === "string" && entry.id ? entry.id : crypto.randomUUID(),
       type: (["session", "quest", "npc", "location", "lore"] as const).includes(entry.type) ? entry.type : "session",
@@ -320,7 +429,22 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
       createdAt: typeof entry.createdAt === "string" ? entry.createdAt : new Date().toISOString(),
       updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : new Date().toISOString(),
     })) : [],
+    notes: textValue(value.notes),
+    createdAt: textValue(value.createdAt, defaults.createdAt),
+    updatedAt: textValue(value.updatedAt, defaults.updatedAt),
   };
+  const inventoryIds = new Set(normalized.inventory.map((item) => item.id));
+  const assignedInventoryIds = new Set<string>();
+  normalized.attacks = normalized.attacks.map((attack) => {
+    const storedItemId = attack.inventoryItemId && inventoryIds.has(attack.inventoryItemId) ? attack.inventoryItemId : undefined;
+    const inferredItemId = storedItemId ?? normalized.inventory.find((item) => item.contentId === attack.contentId && item.equipped && !assignedInventoryIds.has(item.id))?.id;
+    if (inferredItemId) assignedInventoryIds.add(inferredItemId);
+    if (inferredItemId) return { ...attack, inventoryItemId: inferredItemId };
+    const withoutInventoryItem = { ...attack };
+    delete withoutInventoryItem.inventoryItemId;
+    return withoutInventoryItem;
+  });
+  normalized.conditions = syncEffectConditions(normalized.conditions, [], normalized.activeEffects);
   const training = classTrainingFor(normalized.className);
   if (!normalized.armorProficiencies.length) normalized.armorProficiencies = training.armor;
   if (!normalized.weaponProficiencies.length) normalized.weaponProficiencies = training.weapons;
@@ -433,6 +557,7 @@ export function CharacterManager() {
   const [levelUpChoice, setLevelUpChoice] = useState<"abilities" | "feat">("abilities");
   const [levelUpAbilities, setLevelUpAbilities] = useState<[AbilityKey, AbilityKey]>(["strength", "stamina"]);
   const [levelUpFeatId, setLevelUpFeatId] = useState("");
+  const [levelUpFeatAbility, setLevelUpFeatAbility] = useState<AbilityKey | "">("");
   const [levelUpSelections, setLevelUpSelections] = useState<Record<string, string[]>>({});
   const [levelUpClassName, setLevelUpClassName] = useState("");
   const [levelUpSubclassName, setLevelUpSubclassName] = useState("");
@@ -508,6 +633,8 @@ export function CharacterManager() {
   const plannedFeatures = [...plannedClassFeatures, ...plannedSubclassFeatures];
   const advancementPrompts = useMemo(() => advancementPromptsForFeatures(plannedFeatures, selectedLevelUpClass?.name ?? character.className), [plannedFeatures, selectedLevelUpClass?.name, character.className]);
   const hasAdvancementChoice = plannedFeatures.some((feature) => /Ability Score Improvement/i.test(feature.name));
+  const selectedLevelUpFeat = hasAdvancementChoice && levelUpChoice === "feat" ? feats.find((feat) => feat.id === levelUpFeatId) : undefined;
+  const levelUpFeatIncrease = featAbilityIncrease(selectedLevelUpFeat);
   const needsSubclass = !selectedLevelUpSubclass && Boolean(selectedLevelUpClass?.subclasses?.some((item) => (item.levelFeatures[String(plannedClassLevel)] ?? []).length));
   const advancementChoicesComplete = advancementPrompts.every((prompt) => {
     const selections = levelUpSelections[prompt.id] ?? [];
@@ -520,7 +647,10 @@ export function CharacterManager() {
   const encumbrance = useMemo(() => calculateEncumbrance(character.inventory, character.abilities.strength), [character.inventory, character.abilities.strength]);
   const effectiveArmor = useMemo(() => calculateArmorClass(character, equipment), [character, equipment]);
   const effectiveSpeed = useMemo(() => calculateEffectiveSpeed(character, encumbrance, equipment), [character, encumbrance, equipment]);
-  const spellcastingAbility = character.classLevels.map((entry) => spellcastingAbilityForClass(entry.className, entry.subclassName ?? "", classes.find((definition) => definition.name === entry.className)?.primaryAbility)).find((ability): ability is AbilityKey => Boolean(ability)) ?? null;
+  const spellcastingProfiles = useMemo(() => character.classLevels.flatMap((entry): SpellcastingProfile[] => {
+    const ability = spellcastingAbilityForClass(entry.className, entry.subclassName ?? "", classes.find((definition) => definition.name === entry.className)?.primaryAbility);
+    return ability ? [{ className: entry.className, ability, preparedLimit: preparedSpellLimitFor(entry.className, entry.subclassName ?? "", entry.level) }] : [];
+  }), [character.classLevels, classes]);
   useEffect(() => {
     const load = window.azerothDesktop?.load() ?? Promise.resolve(readBrowserStore());
     load.then((store) => {
@@ -623,6 +753,11 @@ export function CharacterManager() {
       weaponMasteries: [],
       advancementChoices: character.advancementChoices.filter((choice) => choice.kind === "other"),
       feats: character.feats.filter((feat) => !fightingStyleIds.has(feat.id)),
+      spells: character.spells.map((spell) => {
+        if (spell.classes.some((className) => className.toLowerCase() === name.toLowerCase())) return { ...spell, className: name };
+        const { className: _removedOwner, ...unownedSpell } = spell;
+        return unownedSpell;
+      }),
       features: [
         ...character.features.filter((feature) => !classFeatureNames.has(feature.name) && !subclassFeatureNames.has(feature.name)),
         ...Object.entries(selectedClass?.levelFeatures ?? {})
@@ -778,6 +913,11 @@ export function CharacterManager() {
 
   async function exportFullBackup() {
     try {
+      setStatus("Saving current character before backup...");
+      const payload = normalizeCharacter({ ...character, id: character.id === "draft" ? crypto.randomUUID() : character.id });
+      const savedCharacter = await persistCharacter(payload);
+      setCharacter(savedCharacter);
+      setCharacters((current) => [savedCharacter, ...current.filter((item) => item.id !== savedCharacter.id)]);
       const store = window.azerothDesktop ? await window.azerothDesktop.load() : readBrowserStore();
       const backup = JSON.stringify({
         format: "azeroth-archives-full-backup",
@@ -865,6 +1005,7 @@ export function CharacterManager() {
     setLevelUpChoice("abilities");
     setLevelUpAbilities([selectedClass.primaryAbility, "stamina"]);
     setLevelUpFeatId("");
+    setLevelUpFeatAbility("");
     setLevelUpClassName(selectedClass.name);
     setLevelUpSubclassName(entry?.subclassName ?? "");
     setLevelUpSelections(Object.fromEntries(prompts.map((prompt) => {
@@ -883,6 +1024,7 @@ export function CharacterManager() {
     setLevelUpAbilities([definition.primaryAbility, "stamina"]);
     setLevelUpSelections({});
     setLevelUpFeatId("");
+    setLevelUpFeatAbility("");
     setLevelUpHpGain(Math.max(1, Math.floor(definition.hitDie / 2) + 1 + abilityModifier(character.abilities.stamina)));
   }
 
@@ -918,12 +1060,13 @@ export function CharacterManager() {
     const classLevels = currentLevelUpEntry
       ? character.classLevels.map((entry) => entry.className === selectedLevelUpClass.name ? { ...entry, level: plannedClassLevel, subclassName: selectedLevelUpSubclass?.name ?? entry.subclassName ?? "" } : entry)
       : [...character.classLevels, { className: selectedLevelUpClass.name, subclassName: selectedLevelUpSubclass?.name ?? "", level: 1 }];
+    const selectedFeat = selectedLevelUpFeat;
+    if (hasAdvancementChoice && levelUpChoice === "feat" && (!selectedFeat || (levelUpFeatIncrease && !levelUpFeatAbility))) return;
     const abilities = { ...character.abilities };
     if (hasAdvancementChoice && levelUpChoice === "abilities") {
       for (const ability of levelUpAbilities) abilities[ability] = Math.min(20, abilities[ability] + 1);
     }
-    const selectedFeat = hasAdvancementChoice && levelUpChoice === "feat" ? feats.find((feat) => feat.id === levelUpFeatId) : undefined;
-    if (hasAdvancementChoice && levelUpChoice === "feat" && !selectedFeat) return;
+    if (levelUpFeatIncrease && levelUpFeatAbility) abilities[levelUpFeatAbility] = Math.min(levelUpFeatIncrease.maximum, abilities[levelUpFeatAbility] + 1);
     const choiceRecords: AdvancementChoice[] = advancementPrompts.map((prompt) => ({
       id: crypto.randomUUID(),
       featureId: prompt.featureId,
@@ -938,7 +1081,7 @@ export function CharacterManager() {
     const chosenFeatIds = choiceRecords.filter((choice) => choice.kind === "fighting-style").flatMap((choice) => choice.selections);
     const chosenSpellIds = choiceRecords.filter((choice) => choice.kind === "spell").flatMap((choice) => choice.selections);
     const chosenFeats = feats.filter((feat) => chosenFeatIds.includes(feat.id) && !character.feats.some((known) => known.id === feat.id));
-    const chosenSpells = spells.filter((spell) => chosenSpellIds.includes(spell.id) && !character.spells.some((known) => known.id === spell.id)).map((spell) => ({ ...spell, prepared: true }));
+    const chosenSpells = spells.filter((spell) => chosenSpellIds.includes(spell.id) && !character.spells.some((known) => known.id === spell.id)).map((spell) => ({ ...spell, prepared: true, className: selectedLevelUpClass.name }));
     const progressionSlots = syncMulticlassSpellSlots(character.spellSlots, classLevels);
     const hitDiceByClass = character.hitDiceByClass.some((pool) => pool.className === selectedLevelUpClass.name)
       ? character.hitDiceByClass.map((pool) => pool.className === selectedLevelUpClass.name ? { ...pool, die: selectedLevelUpClass.hitDie, total: pool.total + 1 } : pool)
@@ -946,6 +1089,7 @@ export function CharacterManager() {
     const summaryParts = [`+${levelUpHpGain} HP`];
     if (hasAdvancementChoice && levelUpChoice === "abilities") summaryParts.push(`Ability increase: ${levelUpAbilities.map((ability) => ABILITY_LABELS[ability]).join(" / ")}`);
     if (selectedFeat) summaryParts.push(`Feat: ${selectedFeat.name}`);
+    if (levelUpFeatIncrease && levelUpFeatAbility) summaryParts.push(`Feat ability increase: ${ABILITY_LABELS[levelUpFeatAbility]}`);
     if (choiceRecords.length) summaryParts.push(`${choiceRecords.length} feature choice${choiceRecords.length === 1 ? "" : "s"}`);
     patchCharacter({
       level: nextLevel,
@@ -1174,11 +1318,9 @@ export function CharacterManager() {
     ]);
     addLivingSection("ENCUMBRANCE", [{ name: `${encumbrance.totalWeight}/${encumbrance.carryingCapacity} lb. · ${encumbrance.label}`, detail: encumbrance.penalty }]);
     addLivingSection("ACTIVE EFFECTS", character.activeEffects.map((effect) => ({ name: `${effect.concentration ? "Concentration · " : ""}${effect.name}`, detail: `${effect.source} · ${effect.duration === "rounds" ? `${effect.remaining} rounds` : effect.duration === "minutes" ? `${effect.remaining} minutes` : effect.duration === "until-rest" ? "Until rest" : "Manual"}${effect.condition ? ` · ${effect.condition}` : ""}` })));
-    if (spellcastingAbility) {
-      const spellcastingModifier = abilityModifier(character.abilities[spellcastingAbility]);
-      const spellAttack = spellcastingModifier + character.proficiencyBonus;
+    if (spellcastingProfiles.length) {
       const concentratingSpell = character.spells.find((spell) => spell.id === character.concentratingSpellId);
-      addLivingSection("SPELLCASTING", [{ name: ABILITY_LABELS[spellcastingAbility], detail: `Spell save DC ${8 + spellAttack} · Spell attack ${spellAttack >= 0 ? "+" : ""}${spellAttack}${concentratingSpell ? ` · Concentrating: ${concentratingSpell.name}` : ""}` }]);
+      addLivingSection("SPELLCASTING", spellcastingProfiles.map((profile) => { const spellAttack = abilityModifier(character.abilities[profile.ability]) + character.proficiencyBonus; return { name: `${profile.className} - ${ABILITY_LABELS[profile.ability]}`, detail: `Spell save DC ${8 + spellAttack} · Spell attack ${spellAttack >= 0 ? "+" : ""}${spellAttack}${concentratingSpell ? ` · Concentrating: ${concentratingSpell.name}` : ""}` }; }));
     }
     if (character.conditions.length) addLivingSection("ACTIVE CONDITIONS", character.conditions.map((condition) => ({ name: condition === "Exhaustion" ? `Exhaustion ${character.exhaustionLevel}` : condition, detail: conditionEffectText(condition, character.exhaustionLevel) })));
     addLivingSection("COMPANIONS & SUMMONS", character.companions.map((companion) => ({ name: `${companion.active ? "Active · " : ""}${companion.name}`, detail: `${companion.kind} · HP ${companion.currentHp}/${companion.maxHp} · AC ${companion.armorClass} · ${companion.speed}${companion.notes ? ` · ${companion.notes}` : ""}` })));
@@ -1231,7 +1373,7 @@ export function CharacterManager() {
       .sort((left, right) => Number(right.prepared) - Number(left.prepared) || left.level - right.level || left.name.localeCompare(right.name))
       .map((spell) => ({
         name: `${spell.prepared ? "Prepared - " : ""}${spell.name}`,
-        detail: `${spell.level ? `Level ${spell.level}` : "Cantrip"} ${spell.school} - ${spell.castingTime} - ${spell.range} - ${spell.duration}`,
+        detail: `${spell.className ? `${spell.className} - ` : ""}${spell.level ? `Level ${spell.level}` : "Cantrip"} ${spell.school} - ${spell.castingTime} - ${spell.range} - ${spell.duration}`,
       }));
     const equipmentRows = character.inventory.map((item) => ({
       name: `${item.equipped ? "Equipped - " : ""}${item.quantity}x ${item.name}`,
@@ -1308,14 +1450,12 @@ export function CharacterManager() {
           detail: `${effect.source} - ${effect.duration === "rounds" ? `${effect.remaining} rounds` : effect.duration === "minutes" ? `${effect.remaining} minutes` : effect.duration === "until-rest" ? "Until rest" : "Manual"}${effect.condition ? ` - ${effect.condition}` : ""}`,
         })),
       },
-      ...(spellcastingAbility ? [{
+      ...(spellcastingProfiles.length ? [{
         title: "SPELLCASTING",
         icon: "spark" as const,
         rows: (() => {
-          const modifier = abilityModifier(character.abilities[spellcastingAbility]);
-          const attack = modifier + character.proficiencyBonus;
           const concentratingSpell = character.spells.find((spell) => spell.id === character.concentratingSpellId);
-          return [{ name: ABILITY_LABELS[spellcastingAbility], detail: `Spell save DC ${8 + attack} - Spell attack ${attack >= 0 ? "+" : ""}${attack}${concentratingSpell ? ` - Concentrating: ${concentratingSpell.name}` : ""}` }];
+          return spellcastingProfiles.map((profile) => { const attack = abilityModifier(character.abilities[profile.ability]) + character.proficiencyBonus; return { name: `${profile.className} - ${ABILITY_LABELS[profile.ability]}`, detail: `Spell save DC ${8 + attack} - Spell attack ${attack >= 0 ? "+" : ""}${attack}${concentratingSpell ? ` - Concentrating: ${concentratingSpell.name}` : ""}` }; });
         })(),
       }] : []),
       ...(character.conditions.length ? [{
@@ -1523,7 +1663,7 @@ export function CharacterManager() {
 
         {tab === "combat" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 
-        {tab === "spells" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingAbility={spellcastingAbility} />}
+          {tab === "spells" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingProfiles={spellcastingProfiles} />}
 
         {tab === "equipment" && <InventoryManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 
@@ -1564,7 +1704,7 @@ export function CharacterManager() {
               <label>First +1<select value={levelUpAbilities[0]} onChange={(event) => setLevelUpAbilities([event.target.value as AbilityKey, levelUpAbilities[1]])}>{abilityKeys.map((ability) => <option key={ability} value={ability}>{ABILITY_LABELS[ability]} ({character.abilities[ability]})</option>)}</select></label>
               <label>Second +1<select value={levelUpAbilities[1]} onChange={(event) => setLevelUpAbilities([levelUpAbilities[0], event.target.value as AbilityKey])}>{abilityKeys.map((ability) => <option key={ability} value={ability}>{ABILITY_LABELS[ability]} ({character.abilities[ability]})</option>)}</select></label>
               <small>Select the same ability twice for +2. Ability Score Improvements cannot raise a score above 20.</small>
-            </div> : <label className="advancement-feat">Feat<select value={levelUpFeatId} onChange={(event) => setLevelUpFeatId(event.target.value)}><option value="">Choose an eligible feat</option>{feats.filter((feat) => !character.feats.some((known) => known.id === feat.id)).map((feat) => <option key={feat.id} value={feat.id}>{feat.name}{feat.prerequisite ? ` — ${feat.prerequisite}` : ""}</option>)}</select><small>Prerequisites are shown for review; the app does not override the GM’s eligibility ruling.</small></label>}
+            </div> : <div className="advancement-feat"><label>Feat<select value={levelUpFeatId} onChange={(event) => { const id = event.target.value; const increase = featAbilityIncrease(feats.find((feat) => feat.id === id)); setLevelUpFeatId(id); setLevelUpFeatAbility(increase?.options[0] ?? ""); }}><option value="">Choose an eligible feat</option>{feats.filter((feat) => !character.feats.some((known) => known.id === feat.id)).map((feat) => <option key={feat.id} value={feat.id}>{feat.name}{feat.prerequisite ? ` — ${feat.prerequisite}` : ""}</option>)}</select></label>{levelUpFeatIncrease && <label>Feat ability +1<select value={levelUpFeatAbility} onChange={(event) => setLevelUpFeatAbility(event.target.value as AbilityKey)}>{levelUpFeatIncrease.options.map((ability) => <option key={ability} value={ability}>{ABILITY_LABELS[ability]} ({character.abilities[ability]} → {Math.min(levelUpFeatIncrease.maximum, character.abilities[ability] + 1)})</option>)}</select></label>}<small>Prerequisites are shown for review; the app does not override the GM’s eligibility ruling.</small></div>}
           </div>}
           {advancementPrompts.length > 0 && <div className="advancement-prompts"><span className="eyebrow">Feature choices</span>{advancementPrompts.map((prompt) => {
             const options = advancementOptions(prompt);
@@ -1580,7 +1720,7 @@ export function CharacterManager() {
           </div>
           <div className="level-up-actions">
             <button className="button button-outline" onClick={() => setShowLevelUp(false)}>Cancel</button>
-            <button className="button button-primary" disabled={needsSubclass || !advancementChoicesComplete || (hasAdvancementChoice && levelUpChoice === "feat" && !levelUpFeatId)} onClick={confirmLevelUp}><Sparkles size={15} />Apply level {plannedLevel}</button>
+            <button className="button button-primary" disabled={needsSubclass || !advancementChoicesComplete || (hasAdvancementChoice && levelUpChoice === "feat" && (!levelUpFeatId || Boolean(levelUpFeatIncrease && !levelUpFeatAbility)))} onClick={confirmLevelUp}><Sparkles size={15} />Apply level {plannedLevel}</button>
           </div>
         </section>
       </div>}

@@ -4,7 +4,6 @@ import { DescriptionPicker } from "./description-picker";
 import {
   ABILITY_LABELS,
   abilityModifier,
-  type AbilityKey,
   type ActiveEffect,
   type CharacterData,
   type EquipmentDefinition,
@@ -12,7 +11,9 @@ import {
   type InventoryItem,
   type HitDicePool,
   type SpellDefinition,
+  type SpellcastingProfile,
   type SpellSlotState,
+  type TrackedSpell,
 } from "../lib/types";
 import {
   activeEffectFromSpell,
@@ -30,10 +31,10 @@ import {
   featPrerequisiteIssues,
   formatPounds,
   hasUnproficientArmor,
-  preparedSpellLimitForClasses,
   isEquipmentProficient,
   resolveIncomingDamage,
   rollDiceFormula,
+  syncEffectConditions,
 } from "../lib/character-rules";
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
@@ -89,10 +90,11 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
     const absorbed = Math.min(character.temporaryHp, amount);
     const concentration = (character.concentratingSpellId || character.activeEffects.some((effect) => effect.concentration)) && amount > 0 ? concentrationSave(character, amount) : null;
     const concentrationLost = Boolean(concentration && !concentration.success);
+    const activeEffects = concentrationLost ? character.activeEffects.filter((effect) => !effect.concentration) : character.activeEffects;
     patchCharacter({
       temporaryHp: character.temporaryHp - absorbed,
       currentHp: Math.max(0, character.currentHp - (amount - absorbed)),
-      ...(concentrationLost ? { concentratingSpellId: undefined, activeEffects: character.activeEffects.filter((effect) => !effect.concentration) } : {}),
+      ...(concentrationLost ? { concentratingSpellId: undefined, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects) } : {}),
     });
     setHpFeedback(`${hpAmount} ${damageType} → ${amount} damage. ${resolution.reason}${absorbed ? `; ${absorbed} absorbed by temporary HP` : ""}.${concentration ? ` Concentration DC ${concentration.dc}: ${concentration.rolls.join("/")} + ${concentration.modifier} = ${concentration.total} — ${concentration.success ? "maintained" : "lost"}.` : ""}`);
   }
@@ -106,6 +108,8 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
 
   function longRest() {
     const exhaustionLevel = Math.max(0, character.exhaustionLevel - 1);
+    const activeEffects = character.activeEffects.filter((effect) => effect.duration === "manual" && !effect.concentration);
+    const effectConditions = syncEffectConditions(character.conditions, character.activeEffects, activeEffects);
     patchCharacter({
       currentHp: character.maxHp,
       temporaryHp: 0,
@@ -117,19 +121,21 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
         Object.entries(character.spellSlots).map(([level, slot]) => [level, { ...slot, used: 0 }]),
       ),
       concentratingSpellId: undefined,
-      activeEffects: character.activeEffects.filter((effect) => effect.duration === "manual"),
+      activeEffects,
       resources: character.resources.map((resource) => resource.recovery === "manual" ? resource : { ...resource, current: resource.maximum }),
       exhaustionLevel,
-      conditions: exhaustionLevel ? character.conditions : character.conditions.filter((item) => item !== "Exhaustion"),
+      conditions: exhaustionLevel ? [...new Set([...effectConditions, "Exhaustion"])] : effectConditions.filter((item) => item !== "Exhaustion"),
     });
   }
 
   function shortRest() {
+    const activeEffects = character.activeEffects.filter((effect) => effect.duration !== "until-rest");
     patchCharacter({
       resources: character.resources.map((resource) => resource.recovery === "short"
         ? { ...resource, current: resource.maximum }
         : resource.recovery === "short-one" ? { ...resource, current: Math.min(resource.maximum, resource.current + 1) } : resource),
-      activeEffects: character.activeEffects.filter((effect) => effect.duration !== "until-rest"),
+      activeEffects,
+      conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects),
     });
   }
 
@@ -159,17 +165,18 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
       return;
     }
     const endsConcentration = ["Incapacitated", "Paralyzed", "Petrified", "Stunned", "Unconscious"].includes(condition);
+    const activeEffects = endsConcentration ? character.activeEffects.filter((effect) => !effect.concentration) : character.activeEffects;
     patchCharacter({
-      conditions: [...character.conditions, condition],
+      conditions: syncEffectConditions([...character.conditions, condition], character.activeEffects, activeEffects),
       exhaustionLevel: condition === "Exhaustion" ? Math.max(1, character.exhaustionLevel) : character.exhaustionLevel,
-      ...(endsConcentration ? { concentratingSpellId: undefined } : {}),
+      ...(endsConcentration ? { concentratingSpellId: undefined, activeEffects } : {}),
     });
     setCondition("");
   }
 
   function removeCondition(conditionName: string) {
     patchCharacter({
-      conditions: character.conditions.filter((value) => value !== conditionName),
+      conditions: syncEffectConditions(character.conditions.filter((value) => value !== conditionName), character.activeEffects, character.activeEffects),
       ...(conditionName === "Exhaustion" ? { exhaustionLevel: 0 } : {}),
     });
   }
@@ -187,9 +194,10 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
   function endEffect(id: string) {
     const effect = character.activeEffects.find((entry) => entry.id === id);
     if (!effect) return;
+    const activeEffects = character.activeEffects.filter((entry) => entry.id !== id);
     patchCharacter({
-      activeEffects: character.activeEffects.filter((entry) => entry.id !== id),
-      conditions: effect.condition ? character.conditions.filter((condition) => condition !== effect.condition) : character.conditions,
+      activeEffects,
+      conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects),
       ...(effect.concentration ? { concentratingSpellId: undefined } : {}),
     });
   }
@@ -207,7 +215,7 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
     const expiredConditions = new Set(expired.map((effect) => effect.condition).filter((condition): condition is string => Boolean(condition)));
     patchCharacter({
       activeEffects,
-      conditions: character.conditions.filter((condition) => !expiredConditions.has(condition)),
+      conditions: syncEffectConditions(character.conditions.filter((condition) => !expiredConditions.has(condition)), character.activeEffects, activeEffects),
       ...(expired.some((effect) => effect.concentration) ? { concentratingSpellId: undefined } : {}),
     });
   }
@@ -216,7 +224,8 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
     const name = effectName.trim() || effectCondition;
     if (!name) return;
     const effect: ActiveEffect = { id: crypto.randomUUID(), name, source: "Manual", duration: effectDuration, ...(effectDuration === "rounds" || effectDuration === "minutes" ? { remaining: Math.max(1, effectRemaining) } : {}), ...(effectCondition ? { condition: effectCondition } : {}) };
-    patchCharacter({ activeEffects: [...character.activeEffects, effect], conditions: effectCondition && !character.conditions.includes(effectCondition) ? [...character.conditions, effectCondition] : character.conditions });
+    const activeEffects = [...character.activeEffects, effect];
+    patchCharacter({ activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects) });
     setEffectName("");
     setEffectCondition("");
     setEffectRemaining(1);
@@ -338,8 +347,9 @@ export function FeatManager({ catalog, character, patchCharacter }: { catalog: F
   );
 }
 
-export function SpellbookManager({ catalog, equipmentCatalog, character, patchCharacter, spellcastingAbility }: { catalog: SpellDefinition[]; equipmentCatalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; spellcastingAbility: AbilityKey | null }) {
+export function SpellbookManager({ catalog, equipmentCatalog, character, patchCharacter, spellcastingProfiles }: { catalog: SpellDefinition[]; equipmentCatalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; spellcastingProfiles: SpellcastingProfile[] }) {
   const [selectedId, setSelectedId] = useState("");
+  const [selectedOwner, setSelectedOwner] = useState("");
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [lastCast, setLastCast] = useState("");
@@ -354,24 +364,42 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
   const visibleSpells = character.spells
     .map((spell) => {
       const currentDefinition = catalogById.get(spell.id);
-      return currentDefinition ? { ...spell, ...currentDefinition, prepared: spell.prepared } : spell;
+      return currentDefinition ? { ...spell, ...currentDefinition, prepared: spell.prepared, className: spell.className } : spell;
     })
     .filter((spell) => spell.name.toLowerCase().includes(query.toLowerCase()));
   const concentratingSpell = character.concentratingSpellId
     ? character.spells.find((spell) => spell.id === character.concentratingSpellId)
     : undefined;
-  const spellcastingModifier = spellcastingAbility ? abilityModifier(character.abilities[spellcastingAbility]) : null;
-  const spellAttackBonus = spellcastingModifier === null ? null : spellcastingModifier + character.proficiencyBonus;
-  const spellSaveDc = spellAttackBonus === null ? null : 8 + spellAttackBonus;
-  const preparedLimit = preparedSpellLimitForClasses(character.classLevels);
-  const preparedCount = character.spells.filter((spell) => spell.level > 0 && spell.prepared).length;
+  const selectedDefinition = catalog.find((spell) => spell.id === selectedId);
+  const eligibleProfiles = (spell: Pick<SpellDefinition, "classes">) => {
+    const matches = spellcastingProfiles.filter((profile) => spell.classes.some((className) => className.toLowerCase() === profile.className.toLowerCase()));
+    return matches.length ? matches : spellcastingProfiles;
+  };
+  const selectedOwnerOptions = selectedDefinition ? eligibleProfiles(selectedDefinition) : [];
+  const ownerForSpell = (spell: TrackedSpell) => spellcastingProfiles.find((profile) => profile.className === spell.className) ?? eligibleProfiles(spell)[0];
+  const preparedCountFor = (className: string) => character.spells.filter((spell) => spell.level > 0 && spell.prepared && ownerForSpell(spell)?.className === className).length;
   const spellcastingBlocked = hasUnproficientArmor(character, equipmentCatalog);
+
+  function chooseSpell(id: string) {
+    const spell = catalog.find((entry) => entry.id === id);
+    setSelectedId(id);
+    setSelectedOwner(spell ? eligibleProfiles(spell)[0]?.className ?? "" : "");
+  }
 
   function addSpell() {
     const spell = catalog.find((item) => item.id === selectedId);
     if (!spell) return;
-    patchCharacter({ spells: [...character.spells, { ...spell, prepared: spell.level === 0 }] });
+    const className = selectedOwner || eligibleProfiles(spell)[0]?.className;
+    patchCharacter({ spells: [...character.spells, { ...spell, prepared: spell.level === 0, ...(className ? { className } : {}) }] });
     setSelectedId("");
+    setSelectedOwner("");
+  }
+
+  function assignSpellOwner(spell: TrackedSpell, className: string) {
+    const profile = spellcastingProfiles.find((entry) => entry.className === className);
+    const destinationIsFull = spell.level > 0 && spell.prepared && profile?.preparedLimit !== null && profile?.preparedLimit !== undefined
+      && preparedCountFor(className) >= profile.preparedLimit;
+    patchCharacter({ spells: character.spells.map((item) => item.id === spell.id ? { ...item, className, prepared: destinationIsFull ? false : item.prepared } : item) });
   }
 
   function updateSlot(level: number, patch: Partial<SpellSlotState>) {
@@ -389,7 +417,10 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
     });
   }
 
-  function castSpell(spell: SpellDefinition, asRitual = false, selectedLevel?: number) {
+  function castSpell(spell: TrackedSpell, asRitual = false, selectedLevel?: number) {
+    const owner = ownerForSpell(spell);
+    if (!asRitual && spell.level > 0 && !spell.prepared) return;
+    if (asRitual && spell.level > 0 && !spell.prepared && owner?.className !== "Mage") return;
     const availableLevels = availableSlotLevels(spell);
     const requestedLevel = selectedLevel && availableLevels.includes(selectedLevel) ? selectedLevel : availableLevels[0];
     const slotLevel = asRitual || spell.level === 0 ? 0 : requestedLevel ?? null;
@@ -411,6 +442,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
     patchCharacter({
       spellSlots,
       activeEffects,
+      conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects),
       ...(requiresConcentration ? { concentratingSpellId: spell.id } : {}),
     });
     setLastCast(asRitual
@@ -432,32 +464,34 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
     <div className="living-tab-grid spellbook-layout">
       <section className="panel slot-panel">
         <div className="section-heading"><div><span className="eyebrow">Daily resources</span><h2>Spell slots</h2></div><button className="text-button" onClick={() => patchCharacter({ spellSlots: Object.fromEntries(Object.entries(character.spellSlots).map(([level, slot]) => [level, { ...slot, used: 0 }])) })}>Restore all</button></div>
-        <div className="spellcasting-stats">
-          <div><span>Ability</span><strong>{spellcastingAbility ? ABILITY_LABELS[spellcastingAbility] : "—"}</strong></div>
-          <div><span>Spell attack</span><strong>{spellAttackBonus === null ? "—" : `${spellAttackBonus >= 0 ? "+" : ""}${spellAttackBonus}`}</strong></div>
-          <div><span>Save DC</span><strong>{spellSaveDc ?? "—"}</strong></div>
-          <div><span>Prepared</span><strong>{preparedCount}{preparedLimit !== null ? ` / ${preparedLimit}` : ""}</strong></div>
-        </div>
-        {!spellcastingAbility && <p className="spellcasting-note">This class has no default spellcasting ability. Known spells can still be tracked and cast.</p>}
+        <div className="spellcasting-profile-list">{spellcastingProfiles.map((profile) => {
+          const modifier = abilityModifier(character.abilities[profile.ability]);
+          const attack = modifier + character.proficiencyBonus;
+          return <div className="spellcasting-profile" key={profile.className}><strong>{profile.className}</strong><div className="spellcasting-stats"><div><span>Ability</span><b>{ABILITY_LABELS[profile.ability]}</b></div><div><span>Spell attack</span><b>{attack >= 0 ? "+" : ""}{attack}</b></div><div><span>Save DC</span><b>{8 + attack}</b></div><div><span>Prepared</span><b>{preparedCountFor(profile.className)}{profile.preparedLimit !== null ? ` / ${profile.preparedLimit}` : ""}</b></div></div></div>;
+        })}</div>
+        {!spellcastingProfiles.length && <p className="spellcasting-note">This character has no default spellcasting ability. Known spells can still be tracked.</p>}
         {spellcastingBlocked && <p className="spellcasting-note equipment-blocked">Spellcasting is blocked while wearing armor or a shield without proficiency.</p>}
         <div className="slot-grid">{Array.from({ length: 9 }, (_, index) => index + 1).map((level) => { const slot = character.spellSlots[String(level)] ?? { maximum: 0, used: 0 }; return <div className="slot-row" key={level}><strong>{level}</strong><label>Max <input aria-label={`Level ${level} maximum spell slots`} type="number" min="0" max="20" value={slot.maximum} onChange={(event) => updateSlot(level, { maximum: Number(event.target.value) })} /></label><span>{slot.maximum - slot.used} left</span><button disabled={slot.used <= 0} onClick={() => updateSlot(level, { used: slot.used - 1 })}>−</button><button disabled={slot.used >= slot.maximum} onClick={() => updateSlot(level, { used: slot.used + 1 })}>Use</button></div>; })}</div>
       </section>
 
       <section className="panel spell-list-panel">
         <div className="section-heading"><div><span className="eyebrow">Known magic</span><h2>Spellbook</h2></div><span className="count-chip">{character.spells.length}</span></div>
-        {concentratingSpell && <div className="concentration-banner"><Sparkles size={16} /><div><span>Concentrating</span><strong>{concentratingSpell.name}</strong></div><button onClick={() => patchCharacter({ concentratingSpellId: undefined, activeEffects: character.activeEffects.filter((effect) => !effect.concentration) })}>End</button></div>}
+        {concentratingSpell && <div className="concentration-banner"><Sparkles size={16} /><div><span>Concentrating</span><strong>{concentratingSpell.name}</strong></div><button onClick={() => { const activeEffects = character.activeEffects.filter((effect) => !effect.concentration); patchCharacter({ concentratingSpellId: undefined, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects) }); }}>End</button></div>}
         {lastCast && <div className="cast-feedback" role="status">{lastCast}<button aria-label="Dismiss casting message" onClick={() => setLastCast("")}>×</button></div>}
         {spellRollResult && <div className="cast-feedback spell-roll-feedback" role="status">{spellRollResult}<button aria-label="Dismiss spell roll" onClick={() => setSpellRollResult("")}>×</button></div>}
-        <div className="catalog-add-row spell-add"><DescriptionPicker ariaLabel="Available spells" value={selectedId} placeholder="Choose a spell" onChange={setSelectedId} options={available.map((spell) => ({ value: spell.id, label: spell.name, meta: `${spell.level ? `Level ${spell.level}` : "Cantrip"} · ${spell.school} · ${spell.classes.join(", ")}`, description: `${spell.castingTime} · ${spell.range} · ${spell.duration}\n\n${spell.description}` }))} /><button className="button button-primary" disabled={!selectedId} onClick={addSpell}><Plus size={15} />Learn</button><label className="inline-check"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />All classes</label></div>
+        <div className={`catalog-add-row spell-add${selectedOwnerOptions.length > 1 ? " has-owner" : ""}`}><DescriptionPicker ariaLabel="Available spells" value={selectedId} placeholder="Choose a spell" onChange={chooseSpell} options={available.map((spell) => ({ value: spell.id, label: spell.name, meta: `${spell.level ? `Level ${spell.level}` : "Cantrip"} · ${spell.school} · ${spell.classes.join(", ")}`, description: `${spell.castingTime} · ${spell.range} · ${spell.duration}\n\n${spell.description}` }))} />{selectedOwnerOptions.length > 1 && <select aria-label="Spellcasting class" value={selectedOwner} onChange={(event) => setSelectedOwner(event.target.value)}>{selectedOwnerOptions.map((profile) => <option key={profile.className} value={profile.className}>{profile.className}</option>)}</select>}<button className="button button-primary" disabled={!selectedId} onClick={addSpell}><Plus size={15} />Learn</button><label className="inline-check"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />All classes</label></div>
         <label className="catalog-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search known spells" /></label>
         <div className="spell-card-list">{visibleSpells.map((spell) => {
           const slotLevels = availableSlotLevels(spell);
           const selectedCastLevel = castLevels[spell.id] && slotLevels.includes(castLevels[spell.id]) ? castLevels[spell.id] : slotLevels[0];
+          const owner = ownerForSpell(spell);
           const preparedToCast = spell.level === 0 || spell.prepared;
           const canCast = !spellcastingBlocked && (spell.level === 0 || (preparedToCast && selectedCastLevel !== undefined));
           const formula = extractDiceFormula(spell.description);
-          const atPreparedLimit = preparedLimit !== null && preparedCount >= preparedLimit;
-          return <article key={spell.id} className={spell.prepared ? "prepared" : ""}><div className="spell-card-top"><div><span>{spell.level ? `Level ${spell.level} ${spell.school}` : `${spell.school} cantrip`}</span><h3>{spell.name}</h3></div><label><input type="checkbox" checked={spell.prepared} disabled={!spell.prepared && spell.level > 0 && atPreparedLimit} onChange={(event) => patchCharacter({ spells: character.spells.map((item) => item.id === spell.id ? { ...item, prepared: event.target.checked } : item) })} />Prepared</label><button className="icon-button danger" aria-label={`Forget ${spell.name}`} onClick={() => patchCharacter({ spells: character.spells.filter((item) => item.id !== spell.id), ...(character.concentratingSpellId === spell.id ? { concentratingSpellId: undefined, activeEffects: character.activeEffects.filter((effect) => !effect.concentration) } : {}) })}><Trash2 size={14} /></button></div><div className="spell-meta"><span>{spell.castingTime}</span><span>{spell.range}</span><span>{spell.duration}</span>{spell.components && <span>{spell.components}</span>}{spell.ritual && <span>Ritual</span>}</div><p>{spell.description}</p><div className="spell-card-actions">{spell.level > 0 && slotLevels.length > 0 && <select aria-label={`${spell.name} casting level`} value={selectedCastLevel} onChange={(event) => setCastLevels((current) => ({ ...current, [spell.id]: Number(event.target.value) }))}>{slotLevels.map((level) => <option key={level} value={level}>Level {level}{level > spell.level ? " (upcast)" : ""}</option>)}</select>}<button className="button button-primary" disabled={!canCast} onClick={() => castSpell(spell, false, selectedCastLevel)}>{spellcastingBlocked ? "Armor blocks casting" : !preparedToCast ? "Not prepared" : canCast ? spell.level === 0 ? "Cast cantrip" : "Cast" : "No slot available"}</button>{spell.ritual && <button className="button button-outline" disabled={spellcastingBlocked} onClick={() => castSpell(spell, true)}>Cast ritual</button>}{formula && <button className="button button-outline" onClick={() => rollSpellEffect(spell)}>Roll {formula}</button>}</div></article>;
+          const atPreparedLimit = owner?.preparedLimit !== null && owner?.preparedLimit !== undefined && preparedCountFor(owner.className) >= owner.preparedLimit;
+          const canRitualCast = Boolean(spell.ritual && !spellcastingBlocked && (spell.prepared || owner?.className === "Mage"));
+          const ownerOptions = eligibleProfiles(spell);
+          return <article key={spell.id} className={spell.prepared ? "prepared" : ""}><div className="spell-card-top"><div><span>{spell.level ? `Level ${spell.level} ${spell.school}` : `${spell.school} cantrip`}</span><h3>{spell.name}</h3></div><label><input type="checkbox" checked={spell.prepared} disabled={!spell.prepared && spell.level > 0 && atPreparedLimit} onChange={(event) => patchCharacter({ spells: character.spells.map((item) => item.id === spell.id ? { ...item, prepared: event.target.checked } : item) })} />Prepared</label><button className="icon-button danger" aria-label={`Forget ${spell.name}`} onClick={() => { const endingConcentration = character.concentratingSpellId === spell.id; const activeEffects = endingConcentration ? character.activeEffects.filter((effect) => !effect.concentration) : character.activeEffects; patchCharacter({ spells: character.spells.filter((item) => item.id !== spell.id), ...(endingConcentration ? { concentratingSpellId: undefined, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects) } : {}) }); }}><Trash2 size={14} /></button></div><div className="spell-meta">{ownerOptions.length > 0 && <label className="spell-owner"><span>Class</span><select aria-label={`${spell.name} spellcasting class`} value={owner?.className ?? ""} onChange={(event) => assignSpellOwner(spell, event.target.value)}>{ownerOptions.map((profile) => <option key={profile.className} value={profile.className}>{profile.className}</option>)}</select></label>}<span>{spell.castingTime}</span><span>{spell.range}</span><span>{spell.duration}</span>{spell.components && <span>{spell.components}</span>}{spell.ritual && <span>Ritual</span>}{owner && <span>{ABILITY_LABELS[owner.ability]} · DC {8 + abilityModifier(character.abilities[owner.ability]) + character.proficiencyBonus}</span>}</div><p>{spell.description}</p><div className="spell-card-actions">{spell.level > 0 && slotLevels.length > 0 && <select aria-label={`${spell.name} casting level`} value={selectedCastLevel} onChange={(event) => setCastLevels((current) => ({ ...current, [spell.id]: Number(event.target.value) }))}>{slotLevels.map((level) => <option key={level} value={level}>Level {level}{level > spell.level ? " (upcast)" : ""}</option>)}</select>}<button className="button button-primary" disabled={!canCast} onClick={() => castSpell(spell, false, selectedCastLevel)}>{spellcastingBlocked ? "Armor blocks casting" : !preparedToCast ? "Not prepared" : canCast ? spell.level === 0 ? "Cast cantrip" : "Cast" : "No slot available"}</button>{spell.ritual && <button className="button button-outline" disabled={!canRitualCast} onClick={() => castSpell(spell, true)}>{canRitualCast ? "Cast ritual" : "Prepare to ritual cast"}</button>}{formula && <button className="button button-outline" onClick={() => rollSpellEffect(spell)}>Roll {formula}</button>}</div></article>;
         })}</div>
         {!visibleSpells.length && <div className="empty-state compact">No spells here yet. Learn one from the imported content library.</div>}
       </section>
@@ -497,14 +531,9 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
   function addCatalogItem() {
     const definition = catalog.find((item) => item.id === selectedId);
     if (!definition) return;
-    const existing = character.inventory.find((item) => item.contentId === definition.id);
-    if (existing) {
-      patchCharacter({ inventory: character.inventory.map((item) => item.id === existing.id ? { ...item, quantity: item.quantity + 1 } : item) });
-    } else {
-      const itemId = crypto.randomUUID();
-      patchCharacter({ inventory: [...character.inventory, { id: itemId, contentId: definition.id, name: definition.name, category: definition.category, quantity: 1, equipped: false, notes: "", weight: definition.weight, cost: definition.cost, equipmentSlot: "none" }] });
-      setExpandedIds((current) => [...current, itemId]);
-    }
+    const itemId = crypto.randomUUID();
+    patchCharacter({ inventory: [...character.inventory, { id: itemId, contentId: definition.id, name: definition.name, category: definition.category, quantity: 1, equipped: false, notes: "", weight: definition.weight, cost: definition.cost, equipmentSlot: "none" }] });
+    setExpandedIds((current) => [...current, itemId]);
     setSelectedId("");
   }
 
@@ -536,20 +565,30 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
   function useConsumable(item: InventoryItem) {
     if (item.quantity <= 0) return;
     if (item.quantity === 1) {
-      patchCharacter({ inventory: character.inventory.filter((value) => value.id !== item.id) });
+      removeItem(item);
     } else {
       updateItem(item.id, { quantity: item.quantity - 1 });
     }
+  }
+
+  function removeItem(item: InventoryItem) {
+    const anotherCopyRemains = Boolean(item.contentId && character.inventory.some((entry) => entry.id !== item.id && entry.contentId === item.contentId));
+    patchCharacter({
+      inventory: character.inventory.filter((entry) => entry.id !== item.id),
+      attacks: character.attacks.filter((attack) => attack.inventoryItemId
+        ? attack.inventoryItemId !== item.id
+        : anotherCopyRemains || attack.contentId !== item.contentId),
+    });
   }
 
   function setEquipped(item: InventoryItem, equipped: boolean) {
     const definition = item.contentId ? catalogById.get(item.contentId) : undefined;
     let attacks = character.attacks;
     if (definition?.damage) {
-      if (equipped && !attacks.some((attack) => attack.contentId === definition.id)) {
-        attacks = [...attacks, attackFromEquipment(definition, isEquipmentProficient(character, definition), character.weaponMasteries.includes(definition.name))];
+      if (equipped && !attacks.some((attack) => attack.inventoryItemId === item.id)) {
+        attacks = [...attacks, attackFromEquipment(definition, isEquipmentProficient(character, definition), character.weaponMasteries.includes(definition.name), item.id)];
       } else if (!equipped) {
-        attacks = attacks.filter((attack) => attack.contentId !== definition.id);
+        attacks = attacks.filter((attack) => attack.inventoryItemId ? attack.inventoryItemId !== item.id : attack.contentId !== definition.id);
       }
     }
     patchCharacter({
@@ -574,7 +613,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
           <div><span>Effective speed</span><strong>{effectiveSpeed.value} ft.</strong><small>{effectiveSpeed.effects.length ? effectiveSpeed.effects.join(" · ") : "No movement penalties"}</small></div>
         </div>
         <div className="training-summary"><strong>Training</strong><span>{[...character.armorProficiencies, ...character.weaponProficiencies].join(" · ") || "No equipment proficiencies recorded"}</span></div>
-        {equipmentWarnings.length > 0 && <div className="equipment-warning-summary"><AlertTriangle size={15} /><div><strong>Equipment warnings</strong>{equipmentWarnings.map((warning) => <p key={warning}>{warning}</p>)}</div></div>}
+        {equipmentWarnings.length > 0 && <div className="equipment-warning-summary"><AlertTriangle size={15} /><div><strong>Equipment warnings</strong>{equipmentWarnings.map((warning, index) => <p key={`${warning}-${index}`}>{warning}</p>)}</div></div>}
         <div className={`encumbrance-summary ${encumbrance.level}`}>
           <div className="encumbrance-heading">
             <div><span>Listed weight</span><strong>{formatPounds(totalWeight)} <small>/ {formatPounds(carryingCapacity)} lb.</small></strong></div>
@@ -610,7 +649,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
                 <div className="inventory-name"><h3>{item.name}</h3><span>{item.category}{item.cost ? ` · ${item.cost}` : ""}{item.weight ? ` · ${item.weight}` : ""}{item.container ? ` · in ${item.container}` : ""}</span><div className="inventory-status-chips">{item.equipmentSlot && item.equipmentSlot !== "none" && <b>{item.equipmentSlot.replace("-", " ")}</b>}{definition?.damage && <b className={proficient ? "proficient-chip" : "warning-chip"}>{proficient ? "Proficient" : "Not proficient"}</b>}{masteryActive && <b>Mastery: {definition?.mastery}</b>}{requiresAttunement && <b className={!item.attuned ? "warning-chip" : ""}>{item.attuned ? "Attuned" : "Attunement required"}</b>}{item.attuned && !requiresAttunement && <b>Attuned</b>}{item.ammunition !== undefined && <b>{item.ammunition} ammo</b>}{item.maximumCharges !== undefined && <b>{item.charges ?? 0}/{item.maximumCharges} charges</b>}{item.consumable && <b>Consumable</b>}</div><p className="inventory-description-preview">{preview}</p>{warnings.map((warning) => <small className="inventory-warning" key={warning}>{warning}</small>)}</div>
                 <label className="quantity-field">Qty <input aria-label={`${item.name} quantity`} type="number" min="0" value={item.quantity} onChange={(event) => updateItem(item.id, { quantity: Math.max(0, Number(event.target.value)) })} /></label>
                 <button className="inventory-expand" aria-label={`${expanded ? "Hide" : "Show"} details for ${item.name}`} aria-expanded={expanded} onClick={() => toggleItem(item.id)}><span>{expanded ? "Hide" : "Details"}</span><ChevronDown size={15} /></button>
-                <button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => patchCharacter({ inventory: character.inventory.filter((value) => value.id !== item.id), attacks: item.contentId ? character.attacks.filter((attack) => attack.contentId !== item.contentId) : character.attacks })}><Trash2 size={14} /></button>
+                <button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => removeItem(item)}><Trash2 size={14} /></button>
                 {expanded && <div className={`inventory-details ${item.rulesDescription ? "" : "notes-only"}`}>
                   {item.rulesDescription && <div className="inventory-rules"><span>Rules description</span><p>{item.rulesDescription}</p></div>}
                   <div className="inventory-detail-fields">

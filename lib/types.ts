@@ -150,6 +150,13 @@ export type RuleDefinition = {
 
 export type TrackedSpell = SpellDefinition & {
   prepared: boolean;
+  className?: string;
+};
+
+export type SpellcastingProfile = {
+  className: string;
+  ability: AbilityKey;
+  preparedLimit: number | null;
 };
 
 export type TrackedFeat = FeatDefinition;
@@ -200,6 +207,7 @@ export type ActiveEffect = {
 export type CharacterAttack = {
   id: string;
   contentId?: string;
+  inventoryItemId?: string;
   name: string;
   ability: AbilityKey;
   proficient: boolean;
@@ -288,7 +296,7 @@ export type ContentPack = {
 };
 
 export type CharacterData = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   id: string;
   name: string;
   portraitDataUrl?: string;

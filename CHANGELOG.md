@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.1
+
+- Applied feat-granted ability increases during level-up and preserved them through advancement rollback.
+- Added per-class ownership, spellcasting statistics, ritual behavior, and preparation limits for multiclass spells.
+- Enforced prepared-spell and incapacitation restrictions on the Actions dashboard.
+- Upgraded character saves to schema 5 with strict normalization and Electron persistence validation.
+- Synchronized conditions with active effects, concentration loss, expiration, and rests.
+- Made identical equipment independent inventory instances with separately linked attacks and usage tracking.
+- Ensured full backups flush the currently open character before export.
+- Repaired Warcraft content extraction artifacts and expanded the prose audit to prevent recurrence.
+
 ## 1.1.0
 
 - Added multiclass advancement with class-specific levels, combined spell slots and resources, and separate Hit Dice pools.

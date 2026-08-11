@@ -1,5 +1,6 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { assertCharacter } = require("./character-validation.cjs");
 
 const STORE_VERSION = 4;
 const DEFAULT_BACKUP_LIMIT = 10;
@@ -161,8 +162,7 @@ function createStorage({
     backupPath,
     load: () => enqueue(() => readStoreUnlocked()),
     saveCharacter: (character) => enqueue(async () => {
-      requireId(character?.id, "Character");
-      if (typeof character?.name !== "string" || !character.name.trim()) throw new Error("Character name is required.");
+      assertCharacter(character);
       const store = await readStoreUnlocked();
       const saved = { ...character, name: character.name.trim(), updatedAt: new Date().toISOString() };
       store.characters = [saved, ...store.characters.filter((item) => item.id !== saved.id)];
@@ -202,6 +202,7 @@ function createStorage({
     replaceStore: (replacement) => enqueue(async () => {
       const result = migrateStore(replacement);
       validateStore(result.store);
+      for (const character of result.store.characters) assertCharacter(character);
       await writeStoreUnlocked(result.store);
       return result.store;
     }),

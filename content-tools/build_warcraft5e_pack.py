@@ -501,6 +501,7 @@ def normalize_rules_text(text: str, *, direct_voice: bool = False) -> str:
         "feat ure": "feature",
         "exp end": "expend",
         "reg ain": "regain",
+        "re place": "replace",
         "oftimes": "of times",
     }.items():
         text = replace_term(text, broken, repaired)
@@ -508,6 +509,19 @@ def normalize_rules_text(text: str, *, direct_voice: bool = False) -> str:
     text = re.sub(r"\(see a class's section for its spell list\)", "(see the corresponding spell list)", text, flags=re.IGNORECASE)
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
     text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"(?<=[.!?])\s+in the Spells collection\s*for\b", " See the Spells collection for", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<=[.!?])\s+in the creature statistics\s*for\b", " See the creature statistics for", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bcollectionfor\b", "collection for", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bstatisticsfor\b", "statistics for", text, flags=re.IGNORECASE)
+    text = re.sub(r"^Min\.\s+Sorcerer\s+Level\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^Crafte\s+d\s+Gear\s+.*?Quarterstaff\s+(?=You gain)", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"a Zombie if you chose a corpse in the creature statistics for the stat blocks\)",
+        "a Zombie if you chose a corpse (see the creature statistics for the stat blocks)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"(?<=[.!?])\s+whenever\b", " Whenever", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<=[.!?])\s+you\b", " You", text)
     text = re.sub(r"(?<=[.!?])\s+your\b", " Your", text)
     text = text.strip()
@@ -916,9 +930,9 @@ def build_pack(baseline: dict[str, Any], phb: dict[str, Any], spell_cache: dict[
         "pack": {
             "id": "warcraft5e-campaign",
             "name": "Warcraft 5E Campaign",
-            "version": "2026.08.09.2",
+            "version": "2026.08.11.1",
             "description": "Approved Grand Coalition campaign options with Warcraft presentation, complete offline rules descriptions, and the campaign's ancestry, class, background, feat, spell, and equipment restrictions.",
-            "source": "Warcraft5E Vault player guides and dnd2024-wikidot baseline 2026.08.09.2",
+            "source": "Warcraft5E Vault player guides and dnd2024-wikidot baseline 2026.08.11.1",
         },
         "ancestries": build_ancestries(baseline),
         "classes": build_classes(baseline, phb),

@@ -156,9 +156,14 @@ ISSUE_PATTERNS = {
         r"4NIM|C\.H/|Cr!APTER|SPELt|\\VITH|rea\s+ch|Char\s+med|crea\s+ture|"
         r"path\s+ways|t:1e|sp~|r1 ction|\bthi\s+s\b|\bthe\s+m\b|\byou\s+r\b|"
         r"\bw\s+ith\b|\bdea\s+l\b|\bdam\s+age\b|\bcre\s+ature\b|\bspe\s+ll\b|"
-        r"\blev\s+els?\b|\bfeat\s+ure\b|\bexp\s+end\b|\breg\s+ain\b|\boftimes\b",
+        r"\blev\s+els?\b|\bfeat\s+ure\b|\bexp\s+end\b|\breg\s+ain\b|\boftimes\b|"
+        r"\bMin\.\s+Sorcerer\s+Level\b|\bCrafte\s+d\s+Gear\b",
         re.IGNORECASE,
     ),
+    "joined-word": re.compile(r"\b(?:collectionfor|statisticsfor)\b", re.IGNORECASE),
+    "broken-reference-join": re.compile(r"\bin the creature statistics for the stat blocks\)", re.IGNORECASE),
+    "lowercase-sentence-start": re.compile(r"(?<=[.!?])\s+(?:in|whenever)\b"),
+    "split-word": re.compile(r"\bre place\b", re.IGNORECASE),
     "direct-voice-grammar": re.compile(
         r"(?i:\b(?:of|to|for|from|against|around|near) them\b|\bput them\b|"
         r"\ba (?:Agility|Intellect|Stamina)\b)|[.!?]\s+(?:you|your)\b",

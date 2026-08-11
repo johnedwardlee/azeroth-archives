@@ -3,9 +3,9 @@
   "pack": {
     "id": "warcraft5e-campaign",
     "name": "Warcraft 5E Campaign",
-    "version": "2026.08.09.2",
+    "version": "2026.08.11.1",
     "description": "Approved Grand Coalition campaign options with Warcraft presentation, complete offline rules descriptions, and the campaign's ancestry, class, background, feat, spell, and equipment restrictions.",
-    "source": "Warcraft5E Vault player guides and dnd2024-wikidot baseline 2026.08.09.2"
+    "source": "Warcraft5E Vault player guides and dnd2024-wikidot baseline 2026.08.11.1"
   },
   "ancestries": [
     {
@@ -527,7 +527,7 @@
           {
             "id": "bard-1-spellcasting",
             "name": "Spellcasting",
-            "description": "You have learned to cast spells through your bardic arts. in the Spells collectionfor the rules on spellcasting. The information below details how you use those rules with Bard spells, which appear in the Bard spell list later in the class's description.",
+            "description": "You have learned to cast spells through your bardic arts. See the Spells collection for the rules on spellcasting. The information below details how you use those rules with Bard spells, which appear in the Bard spell list later in the class's description.",
             "source": "http://dnd2024.wikidot.com/bard:main"
           }
         ],
@@ -824,7 +824,7 @@
           {
             "id": "cleric-1-spellcasting",
             "name": "Spellcasting",
-            "description": "You have learned to cast spells through prayer and meditation. in the Spells collectionfor the rules on spellcasting. The information below details how you use those rules with Priest spells, which appear on the Priest spell list later in the class's description.",
+            "description": "You have learned to cast spells through prayer and meditation. See the Spells collection for the rules on spellcasting. The information below details how you use those rules with Priest spells, which appear on the Priest spell list later in the class's description.",
             "source": "http://dnd2024.wikidot.com/cleric:main"
           },
           {
@@ -1381,7 +1381,7 @@
               {
                 "id": "eldritch-knight-3-spellcasting",
                 "name": "Spellcasting",
-                "description": "You have learned to cast spells. in the Spells collectionfor the rules on spellcasting. The information below details how you use those rules as an Eldritch Knight.",
+                "description": "You have learned to cast spells. See the Spells collection for the rules on spellcasting. The information below details how you use those rules as an Eldritch Knight.",
                 "source": "http://dnd2024.wikidot.com/fighter:eldritch-knight"
               },
               {
@@ -1849,7 +1849,7 @@
           {
             "id": "paladin-1-spellcasting",
             "name": "Spellcasting",
-            "description": "You have learned to cast spells through prayer and meditation. in the Spells collectionfor the rules on Spellcasting. The Information below details how you use those rules with Paladin spells, which appear in the Paladin spell list later in the class's description.",
+            "description": "You have learned to cast spells through prayer and meditation. See the Spells collection for the rules on Spellcasting. The Information below details how you use those rules with Paladin spells, which appear in the Paladin spell list later in the class's description.",
             "source": "http://dnd2024.wikidot.com/paladin:main"
           },
           {
@@ -2173,7 +2173,7 @@
           {
             "id": "ranger-1-spellcasting",
             "name": "Spellcasting",
-            "description": "You have learned to channel the magical essence of nature to cast spells. in the Spells collectionfor the rules on Spellcasting. The Information below details how you use those rules with Hunter spells, which appear in the Hunter spell list later in the class's description.",
+            "description": "You have learned to channel the magical essence of nature to cast spells. See the Spells collection for the rules on Spellcasting. The Information below details how you use those rules with Hunter spells, which appear in the Hunter spell list later in the class's description.",
             "source": "http://dnd2024.wikidot.com/ranger:main"
           },
           {
@@ -2664,7 +2664,7 @@
               {
                 "id": "arcane-trickster-3-spellcasting",
                 "name": "Spellcasting",
-                "description": "You have learned to cast spells. in the Spells collectionfor the rules on spellcasting. The information below details how you use those rules as an Arcane Trickster.",
+                "description": "You have learned to cast spells. See the Spells collection for the rules on spellcasting. The information below details how you use those rules as an Arcane Trickster.",
                 "source": "http://dnd2024.wikidot.com/rogue:arcane-trickster"
               },
               {
@@ -2852,7 +2852,7 @@
           {
             "id": "sorcerer-1-spellcasting",
             "name": "Spellcasting",
-            "description": "Drawing from your innate magic, you can cast spells. in the Spells collectionfor the rules on spellcasting. The information below details how you use those rules with Sorcerer spells, which appear in the Sorcerer spell list later in the class's description.",
+            "description": "Drawing from your innate magic, you can cast spells. See the Spells collection for the rules on spellcasting. The information below details how you use those rules with Sorcerer spells, which appear in the Sorcerer spell list later in the class's description.",
             "source": "http://dnd2024.wikidot.com/sorcerer:main"
           },
           {
@@ -2872,7 +2872,7 @@
           {
             "id": "sorcerer-2-metamagic",
             "name": "Metamagic",
-            "description": "Min. Sorcerer Level Because your magic flows from within, you can alter your spells to suit your needs; you gain two Metamagic options of your choice from \"Metamagic Options\" later in this class's description. You use the chosen options to temporarily modify spells you cast. To use an option, you must spend the number of Sorcery Points that it costs. You can use only one Metamagic option on a spell when you cast it unless otherwise noted in one of those options. whenever you gain a Sorcerer level, you can re place one of your Metamagic options with one you don't know. You gain two more options at Sorcerer level 10 and two more at Sorcerer level 17.",
+            "description": "Because your magic flows from within, you can alter your spells to suit your needs; you gain two Metamagic options of your choice from \"Metamagic Options\" later in this class's description. You use the chosen options to temporarily modify spells you cast. To use an option, you must spend the number of Sorcery Points that it costs. You can use only one Metamagic option on a spell when you cast it unless otherwise noted in one of those options. Whenever you gain a Sorcerer level, you can replace one of your Metamagic options with one you don't know. You gain two more options at Sorcerer level 10 and two more at Sorcerer level 17.",
             "source": "http://dnd2024.wikidot.com/sorcerer:main"
           },
           {
@@ -3199,7 +3199,7 @@
           {
             "id": "wizard-1-spellcasting",
             "name": "Spellcasting",
-            "description": "As a student of arcane magic, you have learned to cast spells. in the Spells collectionfor the rules on spellcasting. The information below details how you use those rules with Mage spells, which appear in the Mage spell list later in the class's description.",
+            "description": "As a student of arcane magic, you have learned to cast spells. See the Spells collection for the rules on spellcasting. The information below details how you use those rules with Mage spells, which appear in the Mage spell list later in the class's description.",
             "source": "http://dnd2024.wikidot.com/wizard:main"
           },
           {
@@ -4111,7 +4111,7 @@
       "id": "healer",
       "name": "Healer",
       "category": "Origin",
-      "description": "Crafte d Gear Ladder, Torch Case, Pouch Block and Tackle Jug, Lamp Ball Bearings, Bucket, Caltrops, Grappling Hook, Iron Pot Bell, Shovel, Tinder Box Basket, Rope, Net, Tent Club, Greatclub, Quarterstaff You gain the following benefits. Battle Medic. If you have a Healer's Kit, you can expend one use of it and tend to a creature within 5 feet of yourself as a Utilize action. That creature can expend one of its Hit Point Dice, and you then roll that die. The creature regains a number of Hit Points equal to the roll plus your Proficiency Bonus. Healing Rerolls. Whenever you roll a die to determine the number of Hit Points you restore with a spell or with this feat's Battle Medic benefit, you can reroll the die if it rolls a 1, and you must use the new roll.",
+      "description": "You gain the following benefits. Battle Medic. If you have a Healer's Kit, you can expend one use of it and tend to a creature within 5 feet of yourself as a Utilize action. That creature can expend one of its Hit Point Dice, and you then roll that die. The creature regains a number of Hit Points equal to the roll plus your Proficiency Bonus. Healing Rerolls. Whenever you roll a die to determine the number of Hit Points you restore with a spell or with this feat's Battle Medic benefit, you can reroll the die if it rolls a 1, and you must use the new roll.",
       "source": "http://dnd2024.wikidot.com/feat:healer"
     },
     {
@@ -9709,7 +9709,7 @@
       "range": "10 feet",
       "components": "V, S, M",
       "duration": "Instantaneous",
-      "description": "Choose a pile of bones or a corpse of a Medium or Small Humanoid within range. The target becomes an Undead creature: a Skeleton if you chose bones or a Zombie if you chose a corpse in the creature statisticsfor the stat blocks). On each of your turns, you can take a Bonus Action to mentally command any creature you made with this spell if the creature is within 60 feet of you (if you control multiple creatures, you can command any of them at the same time, issuing the same command to each one). You decide what action the creature will take and where it will move on its next turn, or you can issue a general command, such as to guard a chamber or corridor. If you issue no commands, the creature takes the Dodge action and moves only to avoid harm. Once given an order, the creature continues to follow it until its task is complete. The creature is under your control for 24 hours, after which it stops obeying any command you've given it. To maintain control of the creature for another 24 hours, you must cast this spell on the creature again before the current 24-hour period ends. This use of the spell reasserts your control over up to four creatures you have animated with this spell rather than animating a new creature. Using a Higher-Level Spell Slot. You animate or reassert control over two additional Undead creatures for each spell slot level above 3. Each of the creatures must come from a different corpse or pile of bones.",
+      "description": "Choose a pile of bones or a corpse of a Medium or Small Humanoid within range. The target becomes an Undead creature: a Skeleton if you chose bones or a Zombie if you chose a corpse (see the creature statistics for the stat blocks). On each of your turns, you can take a Bonus Action to mentally command any creature you made with this spell if the creature is within 60 feet of you (if you control multiple creatures, you can command any of them at the same time, issuing the same command to each one). You decide what action the creature will take and where it will move on its next turn, or you can issue a general command, such as to guard a chamber or corridor. If you issue no commands, the creature takes the Dodge action and moves only to avoid harm. Once given an order, the creature continues to follow it until its task is complete. The creature is under your control for 24 hours, after which it stops obeying any command you've given it. To maintain control of the creature for another 24 hours, you must cast this spell on the creature again before the current 24-hour period ends. This use of the spell reasserts your control over up to four creatures you have animated with this spell rather than animating a new creature. Using a Higher-Level Spell Slot. You animate or reassert control over two additional Undead creatures for each spell slot level above 3. Each of the creatures must come from a different corpse or pile of bones.",
       "source": "http://dnd2024.wikidot.com/spell:animate-dead"
     },
     {
@@ -11253,7 +11253,7 @@
       "range": "60 feet",
       "components": "V, S, M",
       "duration": "C, up to 1 hour",
-      "description": "You attempt to transform a creature that you can see within range into a Beast. The target must succeed on a Spirit saving throw or shape-shift into a Beast form for the duration. That form can be any Beast you choose that has a Challenge Rating equal to or less than the target's (or the target's level if it doesn't have a Challenge Rating). The target's game statistics are replaced by the stat block of the chosen Beast, but the target retains its alignment, personality, creature type, Hit Points, and Hit Point Dice. in the creature statisticsfor a sample of Beast stat blocks. The target gains a number of Temporary Hit Points equal to the Hit Points of the Beast form. These Temporary Hit Points vanish if any remain when the spell ends. The spell ends early on the target if it has no Temporary Hit Points left. The target is limited in the actions it can perform by the anatomy of its new form, and it can't speak or cast spells. The target's gear melds into the new form. The creature can't use or otherwise benefit from any of that equipment.",
+      "description": "You attempt to transform a creature that you can see within range into a Beast. The target must succeed on a Spirit saving throw or shape-shift into a Beast form for the duration. That form can be any Beast you choose that has a Challenge Rating equal to or less than the target's (or the target's level if it doesn't have a Challenge Rating). The target's game statistics are replaced by the stat block of the chosen Beast, but the target retains its alignment, personality, creature type, Hit Points, and Hit Point Dice. See the creature statistics for a sample of Beast stat blocks. The target gains a number of Temporary Hit Points equal to the Hit Points of the Beast form. These Temporary Hit Points vanish if any remain when the spell ends. The spell ends early on the target if it has no Temporary Hit Points left. The target is limited in the actions it can perform by the anatomy of its new form, and it can't speak or cast spells. The target's gear melds into the new form. The creature can't use or otherwise benefit from any of that equipment.",
       "source": "http://dnd2024.wikidot.com/spell:polymorph"
     },
     {

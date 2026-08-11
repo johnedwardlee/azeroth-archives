@@ -80,11 +80,11 @@ export function CombatManager({
   const [rollResult, setRollResult] = useState<{ label: string; dice: number[]; kept: number; modifier: number; mode: RollMode; reasons: string[] } | null>(null);
   const [damageResult, setDamageResult] = useState("");
   const equipmentById = useMemo(() => new Map(catalog.map((item) => [item.id, item])), [catalog]);
-  const carriedWeapons = character.inventory
-    .map((item) => item.contentId ? equipmentById.get(item.contentId) : undefined)
-    .filter((item): item is EquipmentDefinition => Boolean(item?.damage))
-    .filter((item) => !character.attacks.some((attack) => attack.contentId === item.id))
-    .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index);
+  const carriedWeapons = character.inventory.flatMap((inventoryItem) => {
+    const definition = inventoryItem.contentId ? equipmentById.get(inventoryItem.contentId) : undefined;
+    if (!definition?.damage || character.attacks.some((attack) => attack.inventoryItemId === inventoryItem.id)) return [];
+    return [{ inventoryItem, definition }];
+  });
 
   function roll(label: string, modifier: number, kind: RollKind = "ability", ability?: AbilityKey, skillName = "") {
     const effects = conditionRollEffects(character, kind, ability, skillName, catalog);
@@ -97,7 +97,7 @@ export function CombatManager({
   function rollAttack(attack: CharacterAttack, modifier: number) {
     const definition = attack.contentId ? equipmentById.get(attack.contentId) : undefined;
     const usesAmmunition = definition?.properties?.some((property) => /ammunition/i.test(property));
-    const inventoryItem = usesAmmunition ? character.inventory.find((item) => item.contentId === attack.contentId) : undefined;
+    const inventoryItem = usesAmmunition ? character.inventory.find((item) => item.id === attack.inventoryItemId) ?? character.inventory.find((item) => item.contentId === attack.contentId) : undefined;
     if (inventoryItem?.ammunition !== undefined) {
       if (inventoryItem.ammunition <= 0) {
         setDamageResult(`${attack.name}: no ammunition remaining.`);
@@ -147,9 +147,10 @@ export function CombatManager({
   }
 
   function addWeapon() {
-    const weapon = equipmentById.get(weaponId);
-    if (!weapon) return;
-    const attack = attackFromEquipment(weapon, isEquipmentProficient(character, weapon), character.weaponMasteries.includes(weapon.name));
+    const inventoryItem = character.inventory.find((item) => item.id === weaponId);
+    const weapon = inventoryItem?.contentId ? equipmentById.get(inventoryItem.contentId) : undefined;
+    if (!inventoryItem || !weapon) return;
+    const attack = attackFromEquipment(weapon, isEquipmentProficient(character, weapon), character.weaponMasteries.includes(weapon.name), inventoryItem.id);
     patchCharacter({ attacks: [...character.attacks, attack] });
     setWeaponId("");
   }
@@ -218,7 +219,7 @@ export function CombatManager({
       <section className="panel attacks-panel">
         <div className="section-heading"><div><span className="eyebrow">Combat actions</span><h2>Attacks</h2></div><button className="button button-outline" onClick={addCustomAttack}><Plus size={14} />Custom</button></div>
         <div className="weapon-import-row">
-          <DescriptionPicker ariaLabel="Carried weapons" value={weaponId} placeholder="Add a carried weapon" onChange={setWeaponId} options={carriedWeapons.map((weapon) => ({ value: weapon.id, label: weapon.name, meta: `${weapon.damage} ${weapon.damageType}${weapon.mastery ? ` · ${weapon.mastery}` : ""}`, description: [weapon.description, weapon.properties?.length ? `Properties: ${weapon.properties.join(", ")}` : ""].filter(Boolean).join("\n\n") }))} />
+          <DescriptionPicker ariaLabel="Carried weapons" value={weaponId} placeholder="Add a carried weapon" onChange={setWeaponId} options={carriedWeapons.map(({ inventoryItem, definition }) => ({ value: inventoryItem.id, label: definition.name, meta: `${definition.damage} ${definition.damageType}${inventoryItem.equipmentSlot && inventoryItem.equipmentSlot !== "none" ? ` · ${inventoryItem.equipmentSlot}` : ""}${definition.mastery ? ` · ${definition.mastery}` : ""}`, description: [definition.description, definition.properties?.length ? `Properties: ${definition.properties.join(", ")}` : "", inventoryItem.notes].filter(Boolean).join("\n\n") }))} />
           <button className="button button-primary" disabled={!weaponId} onClick={addWeapon}><Swords size={14} />Add attack</button>
         </div>
         <div className="attack-list">

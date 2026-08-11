@@ -19,8 +19,43 @@ export type EncumbranceLevel = "unencumbered" | "encumbered" | "heavily-encumber
 export type RollKind = "ability" | "attack" | "save";
 export type RollMode = "normal" | "advantage" | "disadvantage";
 
+const abilityKeys: AbilityKey[] = ["strength", "agility", "stamina", "intellect", "spirit", "charisma"];
+const incapacitatingConditions = new Set(["incapacitated", "paralyzed", "petrified", "stunned", "unconscious"]);
+
 export const DAMAGE_TYPES = ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"];
 export const METAMAGIC_OPTIONS = ["Careful Spell", "Distant Spell", "Empowered Spell", "Extended Spell", "Heightened Spell", "Quickened Spell", "Seeking Spell", "Subtle Spell", "Transmuted Spell", "Twinned Spell"];
+
+export function featAbilityIncrease(feat?: FeatDefinition) {
+  if (!feat) return null;
+  const sentence = feat.description.match(/Ability Score Increase:\s*([^.]*)\./i)?.[1] ?? "";
+  if (!sentence) return null;
+  const maximum = Number(sentence.match(/maximum of\s+(\d+)/i)?.[1] ?? 20);
+  const options = /one ability score of your choice/i.test(sentence)
+    ? abilityKeys
+    : abilityKeys.filter((ability) => new RegExp(`\\b${ability}\\b`, "i").test(sentence));
+  return options.length ? { options, maximum: maximum === 30 ? 30 : 20 } : null;
+}
+
+export function isIncapacitated(character: Pick<CharacterData, "conditions">) {
+  return character.conditions.some((condition) => incapacitatingConditions.has(condition.trim().toLowerCase()));
+}
+
+export function syncEffectConditions(currentConditions: string[], previousEffects: ActiveEffect[], nextEffects: ActiveEffect[]) {
+  const nextEffectConditions = new Map<string, string>();
+  for (const effect of nextEffects) {
+    const condition = effect.condition?.trim();
+    if (condition) nextEffectConditions.set(condition.toLowerCase(), condition);
+  }
+  const removedEffectConditions = new Set(previousEffects.flatMap((effect) => {
+    const condition = effect.condition?.trim();
+    return condition && !nextEffectConditions.has(condition.toLowerCase()) ? [condition.toLowerCase()] : [];
+  }));
+  const conditions = currentConditions.filter((condition) => !removedEffectConditions.has(condition.trim().toLowerCase()));
+  for (const [normalized, condition] of nextEffectConditions) {
+    if (!conditions.some((entry) => entry.trim().toLowerCase() === normalized)) conditions.push(condition);
+  }
+  return conditions;
+}
 
 export type AdvancementPrompt = {
   id: string;
@@ -542,11 +577,12 @@ export function resolveIncomingDamage(amount: number, damageType: string, charac
   };
 }
 
-export function attackFromEquipment(item: EquipmentDefinition, proficient = true, masteryActive = false): CharacterAttack {
+export function attackFromEquipment(item: EquipmentDefinition, proficient = true, masteryActive = false, inventoryItemId?: string): CharacterAttack {
   const usesAgility = item.category.toLowerCase().includes("ranged") || item.properties?.some((property) => property.toLowerCase() === "finesse");
   return {
     id: crypto.randomUUID(),
     contentId: item.id,
+    ...(inventoryItemId ? { inventoryItemId } : {}),
     name: item.name,
     ability: usesAgility ? "agility" : "strength",
     proficient,

@@ -3,6 +3,8 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { newCharacter } from "../src/character-manager";
+import type { CharacterData } from "../lib/types";
 
 const require = createRequire(import.meta.url);
 const { createStorage, STORE_VERSION } = require("./storage.cjs") as {
@@ -15,7 +17,7 @@ const { createStorage, STORE_VERSION } = require("./storage.cjs") as {
     dataPath: () => string;
     backupPath: () => string;
     load: () => Promise<{ version: number; characters: Array<{ id: string; name: string }>; packs: Array<{ pack: { id: string } }>; disabledPackIds: string[]; recovery?: { restoredFrom?: string; migrationBackup?: string } }>;
-    saveCharacter: (character: { id: string; name: string }) => Promise<{ id: string; name: string }>;
+    saveCharacter: (character: CharacterData) => Promise<CharacterData>;
     savePack: (pack: unknown) => Promise<unknown>;
     setPackEnabled: (id: string, enabled: boolean) => Promise<unknown>;
     replaceStore: (store: unknown) => Promise<unknown>;
@@ -31,6 +33,10 @@ async function testStorage(backupIntervalMs = 0) {
   return createStorage({ getUserDataPath: () => directory, validatePack: assertContentPack, backupIntervalMs });
 }
 
+function validCharacter(id: string, name: string) {
+  return { ...newCharacter(), id, name };
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
@@ -38,7 +44,7 @@ afterEach(async () => {
 describe("desktop storage", () => {
   it("serializes overlapping character saves without losing records", async () => {
     const storage = await testStorage();
-    await Promise.all(Array.from({ length: 20 }, (_, index) => storage.saveCharacter({ id: `hero-${index}`, name: `Hero ${index}` })));
+    await Promise.all(Array.from({ length: 20 }, (_, index) => storage.saveCharacter(validCharacter(`hero-${index}`, `Hero ${index}`))));
 
     const store = await storage.load();
     expect(store.characters).toHaveLength(20);
@@ -47,8 +53,8 @@ describe("desktop storage", () => {
 
   it("recovers the newest valid rotating backup after corruption", async () => {
     const storage = await testStorage();
-    await storage.saveCharacter({ id: "first", name: "First Hero" });
-    await storage.saveCharacter({ id: "second", name: "Second Hero" });
+    await storage.saveCharacter(validCharacter("first", "First Hero"));
+    await storage.saveCharacter(validCharacter("second", "Second Hero"));
     await writeFile(storage.dataPath(), "not json", "utf8");
 
     const recovered = await storage.load();
@@ -86,5 +92,12 @@ describe("desktop storage", () => {
     expect((await storage.load()).disabledPackIds).toEqual(["optional-pack"]);
     await storage.setPackEnabled("optional-pack", true);
     expect((await storage.load()).disabledPackIds).toEqual([]);
+  });
+
+  it("rejects malformed current-version character data at the desktop boundary", async () => {
+    const storage = await testStorage();
+    await expect(storage.saveCharacter({ ...validCharacter("bad", "Bad Hero"), abilities: { ...newCharacter().abilities, strength: "lots" } as never })).rejects.toThrow(/abilities\.strength/i);
+    await expect(storage.saveCharacter({ ...validCharacter("bad-link", "Bad Link"), attacks: [{ id: "attack", inventoryItemId: "missing-item", name: "Dagger", ability: "agility", proficient: true, bonus: 0, damage: "1d4", damageType: "Piercing", damageBonus: 0, notes: "" }] })).rejects.toThrow(/inventory item/i);
+    await expect(storage.replaceStore({ version: STORE_VERSION, characters: [{ ...validCharacter("bad-levels", "Bad Levels"), level: 20, classLevels: [{ className: "Mage", level: 20 }, { className: "Paladin", level: 20 }] }], packs: [], disabledPackIds: [] })).rejects.toThrow(/add up|level/i);
   });
 });

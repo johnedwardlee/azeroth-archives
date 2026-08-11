@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   activeEffectFromSpell,
+  attackFromEquipment,
   calculateEncumbrance,
   classTrainingFor,
   concentrationSave,
+  featAbilityIncrease,
   featPrerequisiteIssues,
+  generatedCharacterActions,
+  isIncapacitated,
   multiclassSpellSlots,
   preparedSpellLimitForClasses,
   progressionSpellSlots,
   resolveIncomingDamage,
+  syncEffectConditions,
 } from "./character-rules";
 import { newCharacter } from "../src/character-manager";
 import type { SpellDefinition } from "./types";
@@ -24,6 +29,34 @@ describe("living sheet rules", () => {
     const character = { ...newCharacter(), level: 2, className: "Rogue", abilities: { ...newCharacter().abilities, strength: 10 } };
     const issues = featPrerequisiteIssues({ id: "test", name: "Test", category: "General", prerequisite: "Level 4+, Strength 13+, Martial Weapon proficiency", description: "Test" }, character);
     expect(issues).toEqual(["Requires level 4.", "Requires Strength 13.", "Requires Martial Weapon proficiency."]);
+  });
+
+  it("extracts the allowed ability and cap from feat ASI text", () => {
+    expect(featAbilityIncrease({ id: "alert", name: "Alert", category: "General", description: "Ability Score Increase: Increase your Agility or Intellect score by 1, to a maximum of 20. More rules." }))
+      .toEqual({ options: ["agility", "intellect"], maximum: 20 });
+    expect(featAbilityIncrease({ id: "boon", name: "Boon", category: "Epic Boon", description: "Ability Score Increase: Increase one ability score of your choice by 1, to a maximum of 30." })?.options).toHaveLength(6);
+  });
+
+  it("exposes only prepared leveled spells as actions and identifies incapacitation", () => {
+    const spell = { id: "spell", name: "Spell", level: 1, school: "Evocation", classes: ["Mage"], castingTime: "Action", range: "30 feet", components: "V", duration: "Instantaneous", description: "Test", prepared: false, className: "Mage" };
+    const character = { ...newCharacter(), className: "Mage", classLevels: [{ className: "Mage", level: 1 }], spells: [spell] };
+    expect(generatedCharacterActions(character, []).some((action) => action.spellId === spell.id)).toBe(false);
+    expect(generatedCharacterActions({ ...character, spells: [{ ...spell, prepared: true }] }, []).some((action) => action.spellId === spell.id)).toBe(true);
+    expect(isIncapacitated({ conditions: ["Stunned"] })).toBe(true);
+    expect(isIncapacitated({ conditions: [" unconscious "] })).toBe(true);
+  });
+
+  it("keeps shared effect conditions until the last source ends", () => {
+    const first = { id: "first", name: "First", source: "Test", duration: "rounds" as const, remaining: 1, condition: "Stunned" };
+    const second = { ...first, id: "second", name: "Second" };
+    expect(syncEffectConditions(["Stunned", "Prone"], [first, second], [second])).toEqual(["Stunned", "Prone"]);
+    expect(syncEffectConditions(["Stunned", "Prone"], [first, second], [])).toEqual(["Prone"]);
+    expect(syncEffectConditions([], [], [first])).toEqual(["Stunned"]);
+  });
+
+  it("links generated weapon attacks to one inventory instance", () => {
+    const attack = attackFromEquipment({ id: "dagger", name: "Dagger", category: "Simple Melee", damage: "1d4", damageType: "Piercing" }, true, false, "inventory-dagger-2");
+    expect(attack).toMatchObject({ contentId: "dagger", inventoryItemId: "inventory-dagger-2" });
   });
 
   it("calculates variant encumbrance thresholds and penalties", () => {

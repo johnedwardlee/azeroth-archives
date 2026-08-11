@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Clock3, Search, Sparkles, Zap } from "lucide-react";
-import { activeEffectFromSpell, generatedCharacterActions, hasUnproficientArmor, type GeneratedAction } from "../lib/character-rules";
+import { activeEffectFromSpell, generatedCharacterActions, hasUnproficientArmor, isIncapacitated, syncEffectConditions, type GeneratedAction } from "../lib/character-rules";
 import type { CharacterData, EquipmentDefinition } from "../lib/types";
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
@@ -14,6 +14,10 @@ export function ActionDashboard({ character, patchCharacter, catalog }: { charac
   const visible = actions.filter((action) => `${action.name} ${action.source} ${action.description}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   function useAction(action: GeneratedAction) {
+    if (action.timing !== "passive" && isIncapacitated(character)) {
+      setFeedback(`${action.name}: the character is Incapacitated and cannot take actions, Bonus Actions, or Reactions.`);
+      return;
+    }
     if (action.resourceId) {
       const resource = character.resources.find((entry) => entry.id === action.resourceId);
       const cost = action.resourceCost ?? 1;
@@ -40,6 +44,7 @@ export function ActionDashboard({ character, patchCharacter, catalog }: { charac
       if (hasUnproficientArmor(character, catalog)) { setFeedback("Spellcasting is blocked by armor worn without proficiency."); return; }
       const spell = character.spells.find((entry) => entry.id === action.spellId);
       if (!spell) return;
+      if (spell.level > 0 && !spell.prepared) { setFeedback(`${spell.name} is not prepared.`); return; }
       const slotLevel = spell.level === 0 ? 0 : Array.from({ length: 10 - spell.level }, (_, index) => spell.level + index).find((level) => {
         const slot = character.spellSlots[String(level)];
         return slot && slot.used < slot.maximum;
@@ -52,12 +57,13 @@ export function ActionDashboard({ character, patchCharacter, catalog }: { charac
       const activeEffects = effect
         ? [...character.activeEffects.filter((entry) => !(effect.concentration && entry.concentration)), effect]
         : character.activeEffects;
-      patchCharacter({ spellSlots, activeEffects, ...(effect?.concentration ? { concentratingSpellId: spell.id } : {}) });
+      patchCharacter({ spellSlots, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects), ...(effect?.concentration ? { concentratingSpellId: spell.id } : {}) });
       setFeedback(`${spell.name} cast${slotLevel ? ` with a level ${slotLevel} slot` : " as a cantrip"}${effect ? "; effect tracked" : ""}.`);
     }
   }
 
   function canUse(action: GeneratedAction) {
+    if (action.timing !== "passive" && isIncapacitated(character)) return false;
     if (action.resourceId) return (character.resources.find((entry) => entry.id === action.resourceId)?.current ?? 0) >= (action.resourceCost ?? 1);
     if (action.inventoryId) {
       const item = character.inventory.find((entry) => entry.id === action.inventoryId);
@@ -66,7 +72,9 @@ export function ActionDashboard({ character, patchCharacter, catalog }: { charac
     if (action.spellId) {
       if (hasUnproficientArmor(character, catalog)) return false;
       const spell = character.spells.find((entry) => entry.id === action.spellId);
-      if (!spell || spell.level === 0) return Boolean(spell);
+      if (!spell) return false;
+      if (spell.level === 0) return true;
+      if (!spell.prepared) return false;
       return Object.entries(character.spellSlots).some(([level, slot]) => Number(level) >= spell.level && slot.used < slot.maximum);
     }
     return false;

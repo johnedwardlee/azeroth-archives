@@ -69,4 +69,39 @@ describe("character save migrations", () => {
 
     expect(store.packs).toEqual([]);
   });
+
+  it("normalizes malformed numeric data, caps multiclass totals, and assigns legacy spells to a class", () => {
+    const character = normalizeCharacter({
+      id: "unsafe",
+      name: "Unsafe",
+      level: 20,
+      className: "Mage",
+      classLevels: [{ className: "Mage", level: 20 }, { className: "Paladin", level: 20 }],
+      abilities: { ...newCharacter().abilities, strength: "invalid" } as never,
+      currency: { copper: -4, silver: Number.NaN, gold: 12 } as never,
+      inventory: [{ id: "bad-stack", name: "Bad stack", quantity: -99, equipped: false, notes: "" }],
+      spells: [{ id: "light", name: "Light", level: 0, school: "Evocation", classes: ["Mage"], castingTime: "Action", range: "Touch", components: "V", duration: "1 hour", description: "Light.", prepared: false }],
+    });
+
+    expect(character.schemaVersion).toBe(5);
+    expect(character.classLevels).toEqual([{ className: "Mage", subclassName: "", level: 20 }]);
+    expect(character.abilities.strength).toBe(newCharacter().abilities.strength);
+    expect(character.currency).toEqual({ copper: 0, silver: 0, gold: 12 });
+    expect(character.inventory[0].quantity).toBe(0);
+    expect(character.spells[0]).toMatchObject({ className: "Mage", prepared: true });
+  });
+
+  it("repairs legacy effect conditions and weapon-to-inventory links", () => {
+    const character = normalizeCharacter({
+      id: "legacy-links",
+      name: "Legacy Links",
+      inventory: [{ id: "dagger-one", contentId: "dagger", name: "Dagger", quantity: 1, equipped: true, notes: "" }],
+      attacks: [{ id: "dagger-attack", contentId: "dagger", name: "Dagger", ability: "agility", proficient: true, bonus: 0, damage: "1d4", damageType: "Piercing", damageBonus: 0, notes: "" }],
+      activeEffects: [{ id: "stun-effect", name: "Stunned", source: "Test", duration: "rounds", remaining: 1, condition: "Stunned" }],
+      conditions: [],
+    });
+
+    expect(character.conditions).toContain("Stunned");
+    expect(character.attacks[0].inventoryItemId).toBe("dagger-one");
+  });
 });
