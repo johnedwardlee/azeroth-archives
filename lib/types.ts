@@ -122,6 +122,7 @@ export type InventoryItem = {
   quantity: number;
   equipped: boolean;
   notes: string;
+  source?: string;
   weight?: string;
   cost?: string;
   charges?: number;
@@ -212,7 +213,7 @@ export type ContentPack = {
 };
 
 export type CharacterData = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   id: string;
   name: string;
   portraitDataUrl?: string;
@@ -230,6 +231,9 @@ export type CharacterData = {
   speed: number;
   proficiencyBonus: number;
   abilities: Record<AbilityKey, number>;
+  baseAbilities: Record<AbilityKey, number>;
+  abilityScoreMethod: "standard-array" | "point-buy" | "rolled" | "manual";
+  backgroundAbilityBonuses: Partial<Record<AbilityKey, number>>;
   savingThrowProficiencies: AbilityKey[];
   skillProficiencies: string[];
   skillExpertise: string[];
@@ -242,6 +246,8 @@ export type CharacterData = {
   advancementChoices: AdvancementChoice[];
   abilityScoresConfirmed: boolean;
   startingEquipmentConfirmed: boolean;
+  startingEquipmentChoice: "" | "A" | "B";
+  startingGold: number;
   attacks: CharacterAttack[];
   features: RulesFeature[];
   feats: TrackedFeat[];

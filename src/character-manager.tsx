@@ -60,9 +60,9 @@ import {
 } from "../lib/types";
 
 type Tab = "overview" | "features" | "actions" | "combat" | "spells" | "equipment" | "notes";
-export const CURRENT_STORE_VERSION = 2 as const;
-export const CURRENT_CHARACTER_SCHEMA_VERSION = 2 as const;
-export type OfflineStore = { version: 2; characters: CharacterData[]; packs: ContentPack[]; recovery?: { restoredFrom: string } };
+export const CURRENT_STORE_VERSION = 3 as const;
+export const CURRENT_CHARACTER_SCHEMA_VERSION = 3 as const;
+export type OfflineStore = { version: 3; characters: CharacterData[]; packs: ContentPack[]; recovery?: { restoredFrom: string } };
 
 const abilityKeys = Object.keys(ABILITY_LABELS) as AbilityKey[];
 const browserStorageKey = "azeroth-archives-offline-data";
@@ -138,7 +138,10 @@ export function newCharacter(): CharacterData {
     armorClass: 14,
     speed: 30,
     proficiencyBonus: 2,
-    abilities: { strength: 15, agility: 12, stamina: 14, intellect: 10, spirit: 11, charisma: 13 },
+    abilities: { strength: 15, agility: 14, stamina: 13, intellect: 12, spirit: 10, charisma: 8 },
+    baseAbilities: { strength: 15, agility: 14, stamina: 13, intellect: 12, spirit: 10, charisma: 8 },
+    abilityScoreMethod: "standard-array",
+    backgroundAbilityBonuses: {},
     savingThrowProficiencies: [],
     skillProficiencies: [],
     skillExpertise: [],
@@ -151,6 +154,8 @@ export function newCharacter(): CharacterData {
     advancementChoices: [],
     abilityScoresConfirmed: false,
     startingEquipmentConfirmed: false,
+    startingEquipmentChoice: "",
+    startingGold: 0,
     attacks: [],
     features: [],
     feats: [],
@@ -159,7 +164,7 @@ export function newCharacter(): CharacterData {
     concentratingSpellId: undefined,
     activeEffects: [],
     inventory: [],
-    currency: { copper: 0, silver: 0, gold: 15 },
+    currency: { copper: 0, silver: 0, gold: 0 },
     resources: [],
     inspiration: false,
     hitDiceTotal: 1,
@@ -187,6 +192,9 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
     ...value,
     schemaVersion: CURRENT_CHARACTER_SCHEMA_VERSION,
     abilities: { ...defaults.abilities, ...(value.abilities ?? {}) },
+    baseAbilities: { ...defaults.baseAbilities, ...(value.baseAbilities ?? value.abilities ?? {}) },
+    abilityScoreMethod: (["standard-array", "point-buy", "rolled", "manual"] as const).includes(value.abilityScoreMethod ?? "manual") ? value.abilityScoreMethod ?? "manual" : "manual",
+    backgroundAbilityBonuses: value.backgroundAbilityBonuses && typeof value.backgroundAbilityBonuses === "object" ? value.backgroundAbilityBonuses : {},
     portraitDataUrl: typeof value.portraitDataUrl === "string" && value.portraitDataUrl.startsWith("data:image/") ? value.portraitDataUrl : undefined,
     subclassName: value.subclassName ?? "",
     temporaryHp: Math.max(0, Number(value.temporaryHp ?? 0)),
@@ -202,6 +210,8 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
     advancementChoices: Array.isArray(value.advancementChoices) ? value.advancementChoices.filter((choice) => choice && typeof choice.featureName === "string" && Array.isArray(choice.selections)) : [],
     abilityScoresConfirmed: Boolean(value.abilityScoresConfirmed),
     startingEquipmentConfirmed: Boolean(value.startingEquipmentConfirmed),
+    startingEquipmentChoice: value.startingEquipmentChoice === "A" || value.startingEquipmentChoice === "B" ? value.startingEquipmentChoice : "",
+    startingGold: Math.max(0, Number(value.startingGold) || 0),
     attacks: Array.isArray(value.attacks) ? value.attacks.map((attack) => ({ ...attack, damageBonus: Number(attack.damageBonus) || 0 })) : [],
     feats: Array.isArray(value.feats) ? value.feats : [],
     spells: Array.isArray(value.spells) ? value.spells : [],
@@ -457,7 +467,14 @@ export function CharacterManager() {
   }
 
   function updateAbility(key: AbilityKey, value: number) {
-    const abilities = { ...character.abilities, [key]: Math.max(1, Math.min(30, value || 1)) };
+    const score = Math.max(1, Math.min(30, value || 1));
+    if (character.level === 1 && !character.abilityScoresConfirmed) {
+      const baseAbilities = { ...character.baseAbilities, [key]: score };
+      const abilities = Object.fromEntries(abilityKeys.map((ability) => [ability, baseAbilities[ability] + (character.backgroundAbilityBonuses[ability] ?? 0)])) as CharacterData["abilities"];
+      patchCharacter({ baseAbilities, abilities, abilityScoreMethod: "manual", resources: syncAutomaticResources(character.resources, character.className, character.level, abilities) });
+      return;
+    }
+    const abilities = { ...character.abilities, [key]: score };
     patchCharacter({ abilities, resources: syncAutomaticResources(character.resources, character.className, character.level, abilities) });
   }
 
@@ -534,12 +551,20 @@ export function CharacterManager() {
     const previousTools = new Set(previousBackground?.toolProficiencies ?? []);
     const toolProficiencies = [...character.toolProficiencies.filter((tool) => !previousTools.has(tool)), ...(selectedBackground?.toolProficiencies ?? [])];
     const selectedFeat = selectedBackground?.featId ? feats.find((feat) => feat.id === selectedBackground.featId) : undefined;
+    const resetCreationAbilities = character.level === 1 && !character.abilityScoresConfirmed;
+    const inventory = character.inventory.filter((item) => item.source !== "Starting equipment");
+    const currency = { ...character.currency, gold: Math.max(0, character.currency.gold - character.startingGold) };
     patchCharacter({
       background: name,
       skillProficiencies: [...new Set(skillProficiencies)],
       skillExpertise: character.skillExpertise.filter((skill) => skillProficiencies.includes(skill)),
       toolProficiencies: [...new Set(toolProficiencies)],
       startingEquipmentConfirmed: false,
+      startingEquipmentChoice: "",
+      startingGold: 0,
+      inventory,
+      currency,
+      ...(resetCreationAbilities ? { backgroundAbilityBonuses: {}, abilities: { ...character.baseAbilities } } : {}),
       feats: [...character.feats.filter((feat) => feat.id !== previousBackground?.featId), ...(selectedFeat && !character.feats.some((feat) => feat.id === selectedFeat.id) ? [selectedFeat] : [])],
       features: [
         ...character.features.filter((feature) => !backgroundFeatureNames.has(feature.name)),
@@ -1096,7 +1121,7 @@ export function CharacterManager() {
                 <button className="text-button" onClick={() => setTab("features")}>View all features <span>→</span></button>
               </div>
             </section>
-            <CreationGuide character={character} patchCharacter={patchCharacter} backgroundSkills={selectedBackground?.skills ?? []} startingEquipment={selectedBackground?.equipment} feats={feats} equipment={equipment} />
+            <CreationGuide character={character} patchCharacter={patchCharacter} background={selectedBackground} feats={feats} equipment={equipment} />
             <SessionTracker character={character} patchCharacter={patchCharacter} hitDie={selectedClass?.hitDie ?? 8} />
           </div>
         )}

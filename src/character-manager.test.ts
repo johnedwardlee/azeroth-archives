@@ -24,9 +24,9 @@ describe("character save migrations", () => {
       abilities: { strength: 16 } as never,
     });
 
-    expect(character.schemaVersion).toBe(2);
+    expect(character.schemaVersion).toBe(CURRENT_CHARACTER_SCHEMA_VERSION);
     expect(character.abilities.strength).toBe(16);
-    expect(character.abilities.agility).toBe(12);
+    expect(character.abilities.agility).toBe(14);
     expect(character.hitDiceTotal).toBe(5);
     expect(character.hitDiceUsed).toBe(5);
     expect(character.temporaryHp).toBe(0);
@@ -45,7 +45,7 @@ describe("character save migrations", () => {
 
     expect(store.version).toBe(CURRENT_STORE_VERSION);
     expect(store.characters).toHaveLength(1);
-    expect(store.characters[0].schemaVersion).toBe(2);
+    expect(store.characters[0].schemaVersion).toBe(CURRENT_CHARACTER_SCHEMA_VERSION);
     expect(store.packs.map((pack) => pack.pack.id)).toEqual(["valid"]);
   });
 });

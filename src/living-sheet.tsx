@@ -26,6 +26,7 @@ import {
   extractDiceFormula,
   equipmentRequiresAttunement,
   equipmentRuleWarnings,
+  featPrerequisiteIssues,
   formatPounds,
   hasUnproficientArmor,
   preparedSpellLimitFor,
@@ -325,7 +326,7 @@ export function FeatManager({ catalog, character, patchCharacter }: { catalog: F
       <div className="section-heading"><div><span className="eyebrow">Character choices</span><h2>Feats</h2></div><span className="count-chip">{character.feats.length}</span></div>
       <div className="catalog-add-row"><DescriptionPicker ariaLabel="Available feats" value={selectedId} placeholder="Choose an available feat" onChange={setSelectedId} options={available.map((feat) => ({ value: feat.id, label: feat.name, meta: [feat.category, feat.prerequisite].filter(Boolean).join(" · "), description: feat.description }))} /><button className="button button-primary" disabled={!selectedId} onClick={addFeat}><Plus size={15} />Add feat</button></div>
       <div className="tracker-card-list">
-        {visibleFeats.map((feat) => <article key={feat.id}><div><span>{feat.category}</span><h3>{feat.name}</h3>{feat.prerequisite && <small>{feat.prerequisite}</small>}<p>{feat.description}</p></div><button className="icon-button danger" aria-label={`Remove ${feat.name}`} onClick={() => patchCharacter({ feats: character.feats.filter((item) => item.id !== feat.id) })}><Trash2 size={14} /></button></article>)}
+        {visibleFeats.map((feat) => { const issues = featPrerequisiteIssues(feat, character); return <article className={issues.length ? "has-warning" : ""} key={feat.id}><div><span>{feat.category}</span><h3>{feat.name}</h3>{feat.prerequisite && <small>{feat.prerequisite}</small>}{issues.map((issue) => <small className="feat-warning" key={issue}><AlertTriangle size={11} />{issue} GM override allowed.</small>)}<p>{feat.description}</p></div><button className="icon-button danger" aria-label={`Remove ${feat.name}`} onClick={() => patchCharacter({ feats: character.feats.filter((item) => item.id !== feat.id) })}><Trash2 size={14} /></button></article>; })}
         {!character.feats.length && <div className="empty-state compact">No feats selected yet.</div>}
       </div>
     </section>

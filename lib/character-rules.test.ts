@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   activeEffectFromSpell,
   calculateEncumbrance,
+  classTrainingFor,
   concentrationSave,
+  featPrerequisiteIssues,
   progressionSpellSlots,
   resolveIncomingDamage,
 } from "./character-rules";
@@ -10,6 +12,18 @@ import { newCharacter } from "../src/character-manager";
 import type { SpellDefinition } from "./types";
 
 describe("living sheet rules", () => {
+  it("limits class skills to each class list while allowing Bard flexibility", () => {
+    expect(classTrainingFor("Warrior").skillOptions).toContain("Athletics");
+    expect(classTrainingFor("Warrior").skillOptions).not.toContain("Arcana");
+    expect(classTrainingFor("Bard").skillOptions).toEqual([]);
+  });
+
+  it("reports feat prerequisites without preventing GM overrides", () => {
+    const character = { ...newCharacter(), level: 2, className: "Rogue", abilities: { ...newCharacter().abilities, strength: 10 } };
+    const issues = featPrerequisiteIssues({ id: "test", name: "Test", category: "General", prerequisite: "Level 4+, Strength 13+, Martial Weapon proficiency", description: "Test" }, character);
+    expect(issues).toEqual(["Requires level 4.", "Requires Strength 13.", "Requires Martial Weapon proficiency."]);
+  });
+
   it("calculates variant encumbrance thresholds and penalties", () => {
     const inventory = [{ id: "load", name: "Load", quantity: 1, weight: "105 lb.", category: "Gear", notes: "", equipped: false }];
     const result = calculateEncumbrance(inventory, 10);
@@ -29,7 +43,7 @@ describe("living sheet rules", () => {
     const character = { ...newCharacter(), savingThrowProficiencies: ["stamina" as const], proficiencyBonus: 3 };
     expect(concentrationSave(character, 12).dc).toBe(10);
     expect(concentrationSave(character, 42).dc).toBe(21);
-    expect(concentrationSave(character, 42).modifier).toBe(5);
+    expect(concentrationSave(character, 42).modifier).toBe(4);
   });
 
   it("tracks concentration spell durations", () => {

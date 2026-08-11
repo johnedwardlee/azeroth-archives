@@ -1,7 +1,7 @@
 import type { CharacterData, ContentPack } from "../lib/types";
 
 type DesktopStore = {
-  version: 2;
+  version: 3;
   characters: CharacterData[];
   packs: ContentPack[];
   recovery?: { restoredFrom: string };

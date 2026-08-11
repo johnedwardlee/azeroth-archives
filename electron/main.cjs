@@ -21,7 +21,7 @@ function isAllowedNetworkRequest(requestUrl) {
   }
 }
 
-const STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const BACKUP_LIMIT = 10;
 const BACKUP_INTERVAL_MS = 5 * 60 * 1000;
 const emptyStore = () => ({ version: STORE_VERSION, characters: [], packs: [] });

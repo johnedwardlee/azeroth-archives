@@ -7,6 +7,7 @@ import {
   type CharacterData,
   type CharacterResource,
   type EquipmentDefinition,
+  type FeatDefinition,
   type InventoryItem,
   type RulesFeature,
   type SpellDefinition,
@@ -43,26 +44,42 @@ export type GeneratedAction = {
 
 type ClassTraining = {
   skillChoices: number;
+  skillOptions: string[];
   armor: string[];
   weapons: string[];
   masteryChoices: number;
 };
 
 const classTraining: Record<string, ClassTraining> = {
-  barbarian: { skillChoices: 2, armor: ["Light Armor", "Medium Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 2 },
-  bard: { skillChoices: 3, armor: ["Light Armor"], weapons: ["Simple Weapons"], masteryChoices: 0 },
-  priest: { skillChoices: 2, armor: ["Light Armor", "Medium Armor", "Shield"], weapons: ["Simple Weapons"], masteryChoices: 0 },
-  warrior: { skillChoices: 2, armor: ["Light Armor", "Medium Armor", "Heavy Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 3 },
-  monk: { skillChoices: 2, armor: [], weapons: ["Simple Weapons", "Martial Melee Weapons (Light)"], masteryChoices: 2 },
-  paladin: { skillChoices: 2, armor: ["Light Armor", "Medium Armor", "Heavy Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 2 },
-  hunter: { skillChoices: 3, armor: ["Light Armor", "Medium Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 2 },
-  rogue: { skillChoices: 4, armor: ["Light Armor"], weapons: ["Simple Weapons", "Martial Weapons (Finesse or Light)"], masteryChoices: 2 },
-  sorcerer: { skillChoices: 2, armor: [], weapons: ["Simple Weapons"], masteryChoices: 0 },
-  mage: { skillChoices: 2, armor: [], weapons: ["Simple Weapons"], masteryChoices: 0 },
+  barbarian: { skillChoices: 2, skillOptions: ["Animal Handling", "Athletics", "Intimidation", "Nature", "Perception", "Survival"], armor: ["Light Armor", "Medium Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 2 },
+  bard: { skillChoices: 3, skillOptions: [], armor: ["Light Armor"], weapons: ["Simple Weapons"], masteryChoices: 0 },
+  priest: { skillChoices: 2, skillOptions: ["History", "Insight", "Medicine", "Persuasion", "Religion"], armor: ["Light Armor", "Medium Armor", "Shield"], weapons: ["Simple Weapons"], masteryChoices: 0 },
+  warrior: { skillChoices: 2, skillOptions: ["Acrobatics", "Animal Handling", "Athletics", "History", "Insight", "Intimidation", "Perception", "Persuasion", "Survival"], armor: ["Light Armor", "Medium Armor", "Heavy Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 3 },
+  monk: { skillChoices: 2, skillOptions: ["Acrobatics", "Athletics", "History", "Insight", "Religion", "Stealth"], armor: [], weapons: ["Simple Weapons", "Martial Melee Weapons (Light)"], masteryChoices: 2 },
+  paladin: { skillChoices: 2, skillOptions: ["Athletics", "Insight", "Intimidation", "Medicine", "Persuasion", "Religion"], armor: ["Light Armor", "Medium Armor", "Heavy Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 2 },
+  hunter: { skillChoices: 3, skillOptions: ["Animal Handling", "Athletics", "Insight", "Investigation", "Nature", "Perception", "Stealth", "Survival"], armor: ["Light Armor", "Medium Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 2 },
+  rogue: { skillChoices: 4, skillOptions: ["Acrobatics", "Athletics", "Deception", "Insight", "Intimidation", "Investigation", "Perception", "Persuasion", "Sleight of Hand", "Stealth"], armor: ["Light Armor"], weapons: ["Simple Weapons", "Martial Weapons (Finesse or Light)"], masteryChoices: 2 },
+  sorcerer: { skillChoices: 2, skillOptions: ["Arcana", "Deception", "Insight", "Intimidation", "Persuasion", "Religion"], armor: [], weapons: ["Simple Weapons"], masteryChoices: 0 },
+  mage: { skillChoices: 2, skillOptions: ["Arcana", "History", "Insight", "Investigation", "Medicine", "Nature", "Religion"], armor: [], weapons: ["Simple Weapons"], masteryChoices: 0 },
 };
 
 export function classTrainingFor(className: string): ClassTraining {
-  return classTraining[className.trim().toLowerCase()] ?? { skillChoices: 2, armor: [], weapons: [], masteryChoices: 0 };
+  return classTraining[className.trim().toLowerCase()] ?? { skillChoices: 2, skillOptions: [], armor: [], weapons: [], masteryChoices: 0 };
+}
+
+export function featPrerequisiteIssues(feat: FeatDefinition, character: CharacterData) {
+  const prerequisite = feat.prerequisite?.trim();
+  if (!prerequisite) return [];
+  const issues: string[] = [];
+  const level = prerequisite.match(/level\s*(\d+)\+?/i);
+  if (level && character.level < Number(level[1])) issues.push(`Requires level ${level[1]}.`);
+  for (const [ability, label] of Object.entries({ strength: "Strength", agility: "Agility", stamina: "Stamina", intellect: "Intellect", spirit: "Spirit", charisma: "Charisma" }) as Array<[AbilityKey, string]>) {
+    const match = prerequisite.match(new RegExp(`${label}\\s*(?:score\\s*)?(\\d+)\\+?`, "i"));
+    if (match && character.abilities[ability] < Number(match[1])) issues.push(`Requires ${label} ${match[1]}.`);
+  }
+  if (/spellcasting|ability to cast/i.test(prerequisite) && !spellcastingAbilityForClass(character.className, character.subclassName ?? "")) issues.push("Requires spellcasting.");
+  if (/martial weapon/i.test(prerequisite) && !character.weaponProficiencies.some((entry) => /martial/i.test(entry))) issues.push("Requires Martial Weapon proficiency.");
+  return issues;
 }
 
 const fullCasterSlots = [
