@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0
+
+- Promoted the tested 1.0 release candidate to the first stable release.
+- Includes versioned saves and recovery, complete guided creation and advancement, living-sheet play tools, rules-aware actions and equipment, PDF export, desktop update controls, diagnostics, and automated release gates.
+
 ## 1.0.0-rc.1
 
 - Added Settings & Updates with manual checks, download progress, restart-to-install, data-folder access, release notes, and privacy-safe diagnostics.
