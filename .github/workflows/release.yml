@@ -38,6 +38,24 @@ jobs:
 
       - name: Build Windows release
         run: pnpm release:win
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+
+      - name: Verify signing policy and create checksum
+        shell: pwsh
+        run: |
+          $package = Get-Content package.json | ConvertFrom-Json
+          $installer = Get-Item "release/Azeroth-Archives-Setup-$($package.version).exe"
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          Write-Host "Authenticode status: $($signature.Status)"
+          if ($env:WINDOWS_REQUIRE_SIGNING -eq "true" -and $signature.Status -ne "Valid") {
+            throw "A valid Authenticode signature is required for this release."
+          }
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash *$($installer.Name)" | Set-Content "$($installer.FullName).sha256" -Encoding ascii
+        env:
+          WINDOWS_REQUIRE_SIGNING: ${{ secrets.WINDOWS_REQUIRE_SIGNING }}
 
       - name: Publish GitHub release
         shell: pwsh
@@ -47,12 +65,17 @@ jobs:
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title $package.version --generate-notes
+            if ($package.version -match "-") {
+              gh release create $tag --title $package.version --generate-notes --prerelease
+            } else {
+              gh release create $tag --title $package.version --generate-notes
+            }
           }
 
           $releaseAssets = @(
             (Get-Item "release/Azeroth-Archives-Setup-$($package.version).exe").FullName
             (Get-Item "release/Azeroth-Archives-Setup-$($package.version).exe.blockmap").FullName
+            (Get-Item "release/Azeroth-Archives-Setup-$($package.version).exe.sha256").FullName
             (Get-Item "release/latest.yml").FullName
           )
           & gh release upload $tag $releaseAssets --clobber
@@ -60,7 +83,11 @@ jobs:
             throw "GitHub release asset upload failed."
           }
 
-          gh release edit $tag --title $package.version --draft=false --prerelease=false
+          if ($package.version -match "-") {
+            gh release edit $tag --title $package.version --draft=false --prerelease --latest=false
+          } else {
+            gh release edit $tag --title $package.version --draft=false --prerelease=false --latest
+          }
           if ($LASTEXITCODE -ne 0) {
             throw "GitHub release publication failed."
           }

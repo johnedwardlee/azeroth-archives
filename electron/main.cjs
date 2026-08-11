@@ -1,9 +1,15 @@
-const { app, BrowserWindow, dialog, ipcMain, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, session, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const UPDATE_HOSTS = new Set(["api.github.com", "github.com"]);
+let updateStatus = { state: "idle", version: null, percent: 0, message: "Updates are checked automatically." };
+
+function publishUpdateStatus(patch) {
+  updateStatus = { ...updateStatus, ...patch };
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send("updates:status", updateStatus);
+}
 
 function isAllowedNetworkRequest(requestUrl) {
   const devUrl = process.env.AZEROTH_DEV_URL;
@@ -147,6 +153,34 @@ ipcMain.handle("storage:replace", async (_event, replacement) => {
   return store;
 });
 
+ipcMain.handle("app:info", () => ({
+  version: app.getVersion(),
+  platform: `${process.platform} ${process.arch}`,
+  packaged: app.isPackaged,
+  dataPath: dataPath(),
+  backupPath: backupPath(),
+}));
+
+ipcMain.handle("app:open-data-folder", () => shell.openPath(app.getPath("userData")));
+ipcMain.handle("app:open-release-notes", () => shell.openExternal("https://github.com/johnedwardlee/azeroth-archives/releases"));
+ipcMain.handle("updates:status", () => updateStatus);
+ipcMain.handle("updates:check", async () => {
+  if (!app.isPackaged) {
+    publishUpdateStatus({ state: "development", message: "Update checks run in installed builds." });
+    return updateStatus;
+  }
+  publishUpdateStatus({ state: "checking", percent: 0, message: "Checking GitHub for updates…" });
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    publishUpdateStatus({ state: "error", message: error instanceof Error ? error.message : "Update check failed." });
+  }
+  return updateStatus;
+});
+ipcMain.handle("updates:install", () => {
+  if (updateStatus.state === "ready") autoUpdater.quitAndInstall(false, true);
+});
+
 ipcMain.handle("dialog:save-pdf", async (_event, filename, bytes) => {
   const result = await dialog.showSaveDialog({
     title: "Save character sheet",
@@ -200,11 +234,18 @@ function configureAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  autoUpdater.on("checking-for-update", () => publishUpdateStatus({ state: "checking", percent: 0, message: "Checking GitHub for updates…" }));
+  autoUpdater.on("update-available", (info) => publishUpdateStatus({ state: "downloading", version: info.version, percent: 0, message: `Downloading Azeroth Archives ${info.version}…` }));
+  autoUpdater.on("update-not-available", (info) => publishUpdateStatus({ state: "current", version: info.version, percent: 100, message: "Azeroth Archives is up to date." }));
+  autoUpdater.on("download-progress", (progress) => publishUpdateStatus({ state: "downloading", percent: Math.round(progress.percent), message: `Downloading update… ${Math.round(progress.percent)}%` }));
+
   autoUpdater.on("error", (error) => {
     console.error("Automatic update failed:", error);
+    publishUpdateStatus({ state: "error", message: error.message || "Automatic update failed." });
   });
 
   autoUpdater.on("update-downloaded", async (updateInfo) => {
+    publishUpdateStatus({ state: "ready", version: updateInfo.version, percent: 100, message: `Azeroth Archives ${updateInfo.version} is ready to install.` });
     const options = {
       type: "info",
       title: "Update ready",

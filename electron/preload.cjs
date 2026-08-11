@@ -9,4 +9,15 @@ contextBridge.exposeInMainWorld("azerothDesktop", {
   replaceStore: (store) => ipcRenderer.invoke("storage:replace", store),
   savePdf: (filename, bytes) => ipcRenderer.invoke("dialog:save-pdf", filename, bytes),
   saveJson: (filename, contents) => ipcRenderer.invoke("dialog:save-json", filename, contents),
+  getAppInfo: () => ipcRenderer.invoke("app:info"),
+  openDataFolder: () => ipcRenderer.invoke("app:open-data-folder"),
+  openReleaseNotes: () => ipcRenderer.invoke("app:open-release-notes"),
+  getUpdateStatus: () => ipcRenderer.invoke("updates:status"),
+  checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+  installUpdate: () => ipcRenderer.invoke("updates:install"),
+  onUpdateStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("updates:status", listener);
+    return () => ipcRenderer.removeListener("updates:status", listener);
+  },
 });

@@ -27,6 +27,7 @@ import { FeatManager, InventoryManager, SessionTracker, SpellbookManager } from 
 import { CombatManager, SKILLS } from "./combat-sheet";
 import { ActionDashboard } from "./action-dashboard";
 import { CreationGuide } from "./creation-guide";
+import { SettingsPanel } from "./settings-panel";
 import { DescriptionPicker } from "./description-picker";
 import bundledWarcraftPackJson from "../content-packs/warcraft5e-campaign.w5e?raw";
 import packageMetadata from "../package.json";
@@ -336,6 +337,7 @@ export function CharacterManager() {
   const [saving, setSaving] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showRoster, setShowRoster] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [menuCharacterId, setMenuCharacterId] = useState<string | null>(null);
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [levelUpHpGain, setLevelUpHpGain] = useState(1);
@@ -1009,7 +1011,7 @@ export function CharacterManager() {
           <button className="button button-quiet" onClick={() => setShowLibrary(true)}><LibraryBig size={16} /><span>Content library</span><b>{content.length}</b></button>
           <button className="button button-outline" onClick={exportPdf}><Download size={16} /><span>Export PDF</span></button>
           <button className="button button-primary" onClick={saveCharacter} disabled={saving}><Save size={16} />{saving ? "Saving" : "Save character"}</button>
-          <span className="avatar-button" role="img" title="All data is stored on this device" aria-label="Stored locally"><HardDrive size={19} /></span>
+          <button className="avatar-button" title="Settings, updates, and local data" aria-label="Open settings" onClick={() => setShowSettings(true)}><HardDrive size={19} /></button>
         </div>
       </header>
 
@@ -1205,6 +1207,8 @@ export function CharacterManager() {
           </div>
         </section>
       </div>}
+
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
       <div className={`drawer-scrim ${showLibrary || showRoster ? "visible" : ""}`} onClick={() => { setShowLibrary(false); setShowRoster(false); }} />
       <aside className={`library-drawer ${showLibrary ? "is-open" : ""}`} aria-hidden={!showLibrary}>
