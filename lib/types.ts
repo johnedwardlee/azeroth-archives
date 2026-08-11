@@ -130,6 +130,30 @@ export type InventoryItem = {
   consumable?: boolean;
   attuned?: boolean;
   container?: string;
+  equipmentSlot?: EquipmentSlot;
+};
+
+export type EquipmentSlot = "none" | "main-hand" | "off-hand" | "two-hands" | "armor" | "worn";
+
+export type AdvancementChoiceKind = "skill" | "expertise" | "weapon-mastery" | "fighting-style" | "metamagic" | "spell" | "other";
+
+export type AdvancementChoice = {
+  id: string;
+  featureId?: string;
+  featureName: string;
+  level: number;
+  kind: AdvancementChoiceKind;
+  selections: string[];
+};
+
+export type ActiveEffect = {
+  id: string;
+  name: string;
+  source: string;
+  duration: "rounds" | "minutes" | "until-rest" | "manual";
+  remaining?: number;
+  concentration?: boolean;
+  condition?: string;
 };
 
 export type CharacterAttack = {
@@ -208,12 +232,22 @@ export type CharacterData = {
   savingThrowProficiencies: AbilityKey[];
   skillProficiencies: string[];
   skillExpertise: string[];
+  classSkillChoices: string[];
+  languages: string[];
+  toolProficiencies: string[];
+  armorProficiencies: string[];
+  weaponProficiencies: string[];
+  weaponMasteries: string[];
+  advancementChoices: AdvancementChoice[];
+  abilityScoresConfirmed: boolean;
+  startingEquipmentConfirmed: boolean;
   attacks: CharacterAttack[];
   features: RulesFeature[];
   feats: TrackedFeat[];
   spells: TrackedSpell[];
   spellSlots: Record<string, SpellSlotState>;
   concentratingSpellId?: string;
+  activeEffects: ActiveEffect[];
   inventory: InventoryItem[];
   currency: CurrencyState;
   resources: CharacterResource[];

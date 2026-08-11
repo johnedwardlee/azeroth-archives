@@ -25,6 +25,8 @@ import {
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { FeatManager, InventoryManager, SessionTracker, SpellbookManager } from "./living-sheet";
 import { CombatManager, SKILLS } from "./combat-sheet";
+import { ActionDashboard } from "./action-dashboard";
+import { CreationGuide } from "./creation-guide";
 import { DescriptionPicker } from "./description-picker";
 import bundledWarcraftPackJson from "../content-packs/warcraft5e-campaign.w5e?raw";
 import packageMetadata from "../package.json";
@@ -32,6 +34,10 @@ import {
   calculateArmorClass,
   calculateEffectiveSpeed,
   calculateEncumbrance,
+  advancementPromptsForFeatures,
+  classTrainingFor,
+  METAMAGIC_OPTIONS,
+  isEquipmentProficient,
   conditionEffectText,
   preparedSpellLimitFor,
   progressionSpellSlots,
@@ -44,6 +50,7 @@ import {
   abilityModifier,
   proficiencyForLevel,
   type AbilityKey,
+  type AdvancementChoice,
   type AncestryDefinition,
   type BackgroundDefinition,
   type CharacterData,
@@ -52,7 +59,7 @@ import {
   type RulesFeature,
 } from "../lib/types";
 
-type Tab = "overview" | "features" | "combat" | "spells" | "equipment" | "notes";
+type Tab = "overview" | "features" | "actions" | "combat" | "spells" | "equipment" | "notes";
 type OfflineStore = { version: 1; characters: CharacterData[]; packs: ContentPack[] };
 
 const abilityKeys = Object.keys(ABILITY_LABELS) as AbilityKey[];
@@ -137,12 +144,22 @@ function newCharacter(): CharacterData {
     savingThrowProficiencies: [],
     skillProficiencies: [],
     skillExpertise: [],
+    classSkillChoices: [],
+    languages: [],
+    toolProficiencies: [],
+    armorProficiencies: [],
+    weaponProficiencies: [],
+    weaponMasteries: [],
+    advancementChoices: [],
+    abilityScoresConfirmed: false,
+    startingEquipmentConfirmed: false,
     attacks: [],
     features: [],
     feats: [],
     spells: [],
     spellSlots: {},
     concentratingSpellId: undefined,
+    activeEffects: [],
     inventory: [],
     currency: { copper: 0, silver: 0, gold: 15 },
     resources: [],
@@ -177,11 +194,29 @@ function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
     savingThrowProficiencies: Array.isArray(value.savingThrowProficiencies) ? value.savingThrowProficiencies : [],
     skillProficiencies: Array.isArray(value.skillProficiencies) ? value.skillProficiencies : [],
     skillExpertise: Array.isArray(value.skillExpertise) ? value.skillExpertise : [],
+    classSkillChoices: Array.isArray(value.classSkillChoices) ? value.classSkillChoices : [],
+    languages: Array.isArray(value.languages) ? value.languages : [],
+    toolProficiencies: Array.isArray(value.toolProficiencies) ? value.toolProficiencies : [],
+    armorProficiencies: Array.isArray(value.armorProficiencies) ? value.armorProficiencies : [],
+    weaponProficiencies: Array.isArray(value.weaponProficiencies) ? value.weaponProficiencies : [],
+    weaponMasteries: Array.isArray(value.weaponMasteries) ? value.weaponMasteries : [],
+    advancementChoices: Array.isArray(value.advancementChoices) ? value.advancementChoices.filter((choice) => choice && typeof choice.featureName === "string" && Array.isArray(choice.selections)) : [],
+    abilityScoresConfirmed: Boolean(value.abilityScoresConfirmed),
+    startingEquipmentConfirmed: Boolean(value.startingEquipmentConfirmed),
     attacks: Array.isArray(value.attacks) ? value.attacks.map((attack) => ({ ...attack, damageBonus: Number(attack.damageBonus) || 0 })) : [],
     feats: Array.isArray(value.feats) ? value.feats : [],
     spells: Array.isArray(value.spells) ? value.spells : [],
     spellSlots: value.spellSlots && typeof value.spellSlots === "object" ? value.spellSlots : {},
     concentratingSpellId: typeof value.concentratingSpellId === "string" ? value.concentratingSpellId : undefined,
+    activeEffects: Array.isArray(value.activeEffects) ? value.activeEffects.filter((effect) => effect && typeof effect.name === "string").map((effect) => ({
+      ...effect,
+      id: typeof effect.id === "string" && effect.id ? effect.id : crypto.randomUUID(),
+      source: typeof effect.source === "string" ? effect.source : "Manual",
+      duration: (["rounds", "minutes", "until-rest", "manual"] as const).includes(effect.duration) ? effect.duration : "manual",
+      remaining: effect.remaining === undefined ? undefined : Math.max(0, Number(effect.remaining) || 0),
+      concentration: Boolean(effect.concentration),
+      condition: typeof effect.condition === "string" ? effect.condition : undefined,
+    })) : [],
     inventory: Array.isArray(value.inventory) ? value.inventory.map((item) => ({
       ...item,
       charges: item.charges === undefined ? undefined : Math.max(0, Number(item.charges) || 0),
@@ -190,6 +225,7 @@ function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
       consumable: Boolean(item.consumable),
       attuned: Boolean(item.attuned),
       container: typeof item.container === "string" ? item.container : "",
+      equipmentSlot: (["none", "main-hand", "off-hand", "two-hands", "armor", "worn"] as const).includes(item.equipmentSlot ?? "none") ? item.equipmentSlot : "none",
     })) : [],
     currency: { ...defaults.currency, ...(value.currency ?? {}) },
     resources: Array.isArray(value.resources)
@@ -219,6 +255,9 @@ function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
     conditionImmunities: Array.isArray(value.conditionImmunities) ? value.conditionImmunities : [],
     savingThrowBonuses: value.savingThrowBonuses && typeof value.savingThrowBonuses === "object" ? value.savingThrowBonuses : {},
   };
+  const training = classTrainingFor(normalized.className);
+  if (!normalized.armorProficiencies.length) normalized.armorProficiencies = training.armor;
+  if (!normalized.weaponProficiencies.length) normalized.weaponProficiencies = training.weapons;
   const progressionSlots = syncProgressionSpellSlots(normalized.spellSlots, normalized.className, normalized.subclassName ?? "", normalized.level);
   return {
     ...normalized,
@@ -280,6 +319,7 @@ export function CharacterManager() {
   const [levelUpChoice, setLevelUpChoice] = useState<"abilities" | "feat">("abilities");
   const [levelUpAbilities, setLevelUpAbilities] = useState<[AbilityKey, AbilityKey]>(["strength", "stamina"]);
   const [levelUpFeatId, setLevelUpFeatId] = useState("");
+  const [levelUpSelections, setLevelUpSelections] = useState<Record<string, string[]>>({});
   const [deleteTarget, setDeleteTarget] = useState<CharacterData | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const characterFileInput = useRef<HTMLInputElement>(null);
@@ -340,8 +380,13 @@ export function CharacterManager() {
   const plannedClassFeatures = selectedClass?.levelFeatures[String(plannedLevel)] ?? [];
   const plannedSubclassFeatures = selectedSubclass?.levelFeatures[String(plannedLevel)] ?? [];
   const plannedFeatures = [...plannedClassFeatures, ...plannedSubclassFeatures];
+  const advancementPrompts = useMemo(() => advancementPromptsForFeatures(plannedFeatures, character.className), [plannedFeatures, character.className]);
   const hasAdvancementChoice = plannedFeatures.some((feature) => /Ability Score Improvement/i.test(feature.name));
   const needsSubclass = !selectedSubclass && Boolean(selectedClass?.subclasses?.some((item) => (item.levelFeatures[String(plannedLevel)] ?? []).length));
+  const advancementChoicesComplete = advancementPrompts.every((prompt) => {
+    const selections = levelUpSelections[prompt.id] ?? [];
+    return selections.length === prompt.count && selections.every(Boolean) && new Set(selections).size === selections.length;
+  });
   const encumbrance = useMemo(() => calculateEncumbrance(character.inventory, character.abilities.strength), [character.inventory, character.abilities.strength]);
   const effectiveArmor = useMemo(() => calculateArmorClass(character, equipment), [character, equipment]);
   const effectiveSpeed = useMemo(() => calculateEffectiveSpeed(character, encumbrance, equipment), [character, encumbrance, equipment]);
@@ -416,14 +461,24 @@ export function CharacterManager() {
 
   function applyClass(name: string) {
     const selectedClass = classes.find((item) => item.name === name);
+    const training = classTrainingFor(name);
     const classFeatureNames = new Set(classes.flatMap((item) => Object.values(item.levelFeatures).flat().map((feature) => feature.name)));
     const subclassFeatureNames = new Set(classes.flatMap((item) => (item.subclasses ?? []).flatMap((subclass) => Object.values(subclass.levelFeatures).flat().map((feature) => feature.name))));
     const progressionSlots = syncProgressionSpellSlots(character.spellSlots, name, "", character.level);
     const startingHp = selectedClass && character.level === 1 ? Math.max(1, selectedClass.hitDie + abilityModifier(character.abilities.stamina)) : null;
+    const retainedSkills = [...new Set([...character.skillProficiencies.filter((skill) => !character.classSkillChoices.includes(skill)), ...(selectedBackground?.skills ?? [])])];
+    const fightingStyleIds = new Set(feats.filter((feat) => feat.category.toLowerCase() === "fighting style").map((feat) => feat.id));
     patchCharacter({
       className: name,
       subclassName: "",
       savingThrowProficiencies: selectedClass?.savingThrowProficiencies ?? character.savingThrowProficiencies,
+      classSkillChoices: [],
+      skillProficiencies: retainedSkills,
+      armorProficiencies: training.armor,
+      weaponProficiencies: training.weapons,
+      weaponMasteries: [],
+      advancementChoices: character.advancementChoices.filter((choice) => choice.kind === "other"),
+      feats: character.feats.filter((feat) => !fightingStyleIds.has(feat.id)),
       features: [
         ...character.features.filter((feature) => !classFeatureNames.has(feature.name) && !subclassFeatureNames.has(feature.name)),
         ...Object.entries(selectedClass?.levelFeatures ?? {})
@@ -459,12 +514,19 @@ export function CharacterManager() {
     const previousBackgroundSkills = new Set(previousBackground?.skills ?? []);
     const skillProficiencies = [
       ...character.skillProficiencies.filter((skill) => !previousBackgroundSkills.has(skill)),
+      ...character.classSkillChoices,
       ...(selectedBackground?.skills ?? []),
     ];
+    const previousTools = new Set(previousBackground?.toolProficiencies ?? []);
+    const toolProficiencies = [...character.toolProficiencies.filter((tool) => !previousTools.has(tool)), ...(selectedBackground?.toolProficiencies ?? [])];
+    const selectedFeat = selectedBackground?.featId ? feats.find((feat) => feat.id === selectedBackground.featId) : undefined;
     patchCharacter({
       background: name,
       skillProficiencies: [...new Set(skillProficiencies)],
       skillExpertise: character.skillExpertise.filter((skill) => skillProficiencies.includes(skill)),
+      toolProficiencies: [...new Set(toolProficiencies)],
+      startingEquipmentConfirmed: false,
+      feats: [...character.feats.filter((feat) => feat.id !== previousBackground?.featId), ...(selectedFeat && !character.feats.some((feat) => feat.id === selectedFeat.id) ? [selectedFeat] : [])],
       features: [
         ...character.features.filter((feature) => !backgroundFeatureNames.has(feature.name)),
         ...(selectedBackground?.feature ? [selectedBackground.feature] : []),
@@ -589,11 +651,38 @@ export function CharacterManager() {
     setLevelUpChoice("abilities");
     setLevelUpAbilities([selectedClass.primaryAbility, "stamina"]);
     setLevelUpFeatId("");
+    setLevelUpSelections(Object.fromEntries(advancementPrompts.map((prompt) => {
+      const saved = character.advancementChoices.find((choice) => choice.featureId === prompt.featureId && choice.level === character.level + 1 && choice.kind === prompt.kind);
+      return [prompt.id, saved?.selections ?? Array.from({ length: prompt.count }, () => "")];
+    })));
     setShowLevelUp(true);
   }
 
+  function advancementOptions(prompt: (typeof advancementPrompts)[number]) {
+    if (prompt.kind === "skill") return SKILLS.map((skill) => ({ value: skill.name, label: skill.name }));
+    if (prompt.kind === "expertise") return character.skillProficiencies.filter((skill) => !character.skillExpertise.includes(skill)).map((skill) => ({ value: skill, label: skill }));
+    if (prompt.kind === "weapon-mastery") return equipment.filter((item) => Boolean(item.damage) && isEquipmentProficient(character, item)).map((item) => ({ value: item.name, label: `${item.name}${item.mastery ? ` — ${item.mastery}` : ""}` }));
+    if (prompt.kind === "fighting-style") return feats.filter((feat) => feat.category.toLowerCase() === "fighting style" && !character.feats.some((known) => known.id === feat.id)).map((feat) => ({ value: feat.id, label: feat.name }));
+    if (prompt.kind === "metamagic") return METAMAGIC_OPTIONS.map((option) => ({ value: option, label: option }));
+    if (prompt.kind === "spell") {
+      const feature = plannedFeatures.find((item) => item.id === prompt.featureId || item.name === prompt.featureName);
+      const allLists = /can come from|spell list or any combination/i.test(feature?.description ?? "");
+      const maxSpellLevel = Math.max(0, ...Object.entries(progressionSpellSlots(character.className, character.subclassName ?? "", plannedLevel) ?? {}).filter(([, maximum]) => maximum > 0).map(([level]) => Number(level)));
+      return spells.filter((spell) => (allLists || spell.classes.some((className) => className.toLowerCase() === character.className.toLowerCase())) && (prompt.label === "Cantrip" ? spell.level === 0 : spell.level <= maxSpellLevel) && !character.spells.some((known) => known.id === spell.id)).map((spell) => ({ value: spell.id, label: `${spell.name}${spell.level ? ` (Level ${spell.level})` : " (Cantrip)"}` }));
+    }
+    return [];
+  }
+
+  function setAdvancementSelection(promptId: string, index: number, value: string) {
+    setLevelUpSelections((current) => {
+      const selections = [...(current[promptId] ?? [])];
+      selections[index] = value;
+      return { ...current, [promptId]: selections };
+    });
+  }
+
   function confirmLevelUp() {
-    if (character.level >= 20 || !selectedClass || needsSubclass) return;
+    if (character.level >= 20 || !selectedClass || needsSubclass || !advancementChoicesComplete) return;
     const nextLevel = character.level + 1;
     const newFeatures = selectedClass?.levelFeatures[String(nextLevel)] ?? [];
     const newSubclassFeatures = selectedSubclass?.levelFeatures[String(nextLevel)] ?? [];
@@ -603,6 +692,21 @@ export function CharacterManager() {
     }
     const selectedFeat = hasAdvancementChoice && levelUpChoice === "feat" ? feats.find((feat) => feat.id === levelUpFeatId) : undefined;
     if (hasAdvancementChoice && levelUpChoice === "feat" && !selectedFeat) return;
+    const choiceRecords: AdvancementChoice[] = advancementPrompts.map((prompt) => ({
+      id: crypto.randomUUID(),
+      featureId: prompt.featureId,
+      featureName: prompt.featureName,
+      level: nextLevel,
+      kind: prompt.kind,
+      selections: levelUpSelections[prompt.id] ?? [],
+    }));
+    const chosenSkillProficiencies = choiceRecords.filter((choice) => choice.kind === "skill").flatMap((choice) => choice.selections);
+    const chosenExpertise = choiceRecords.filter((choice) => choice.kind === "expertise").flatMap((choice) => choice.selections);
+    const chosenMasteries = choiceRecords.filter((choice) => choice.kind === "weapon-mastery").flatMap((choice) => choice.selections);
+    const chosenFeatIds = choiceRecords.filter((choice) => choice.kind === "fighting-style").flatMap((choice) => choice.selections);
+    const chosenSpellIds = choiceRecords.filter((choice) => choice.kind === "spell").flatMap((choice) => choice.selections);
+    const chosenFeats = feats.filter((feat) => chosenFeatIds.includes(feat.id) && !character.feats.some((known) => known.id === feat.id));
+    const chosenSpells = spells.filter((spell) => chosenSpellIds.includes(spell.id) && !character.spells.some((known) => known.id === spell.id)).map((spell) => ({ ...spell, prepared: true }));
     const progressionSlots = syncProgressionSpellSlots(character.spellSlots, character.className, character.subclassName ?? "", nextLevel);
     patchCharacter({
       level: nextLevel,
@@ -612,9 +716,14 @@ export function CharacterManager() {
       proficiencyBonus: proficiencyForLevel(nextLevel),
       hitDiceTotal: nextLevel,
       abilities,
+      skillProficiencies: [...new Set([...character.skillProficiencies, ...chosenSkillProficiencies])],
+      skillExpertise: [...new Set([...character.skillExpertise, ...chosenExpertise])],
+      weaponMasteries: [...new Set([...character.weaponMasteries, ...chosenMasteries])],
+      advancementChoices: [...character.advancementChoices.filter((choice) => !(choice.level === nextLevel && choiceRecords.some((record) => record.featureId === choice.featureId && record.kind === choice.kind))), ...choiceRecords],
       resources: syncAutomaticResources(character.resources, character.className, nextLevel, abilities),
       ...(progressionSlots ? { spellSlots: progressionSlots } : {}),
-      feats: selectedFeat && !character.feats.some((feat) => feat.id === selectedFeat.id) ? [...character.feats, selectedFeat] : character.feats,
+      feats: uniqueById([...character.feats, ...(selectedFeat && !character.feats.some((feat) => feat.id === selectedFeat.id) ? [selectedFeat] : []), ...chosenFeats]),
+      spells: uniqueById([...character.spells, ...chosenSpells]),
       features: [...character.features, ...[...newFeatures, ...newSubclassFeatures].filter((feature) => !character.features.some((existing) => existing.name === feature.name))],
     });
     setShowLevelUp(false);
@@ -755,7 +864,15 @@ export function CharacterManager() {
     }));
     addLivingSection("FEATS", character.feats.map((feat) => ({ name: feat.name, detail: `${feat.category}${feat.prerequisite ? ` · ${feat.prerequisite}` : ""}\n${feat.description}` })));
     addLivingSection("SPELLBOOK", character.spells.map((spell) => ({ name: `${spell.prepared ? "Prepared · " : ""}${spell.name}`, detail: `${spell.level ? `Level ${spell.level}` : "Cantrip"} ${spell.school} · ${spell.castingTime} · ${spell.range} · ${spell.duration}` })));
-    addLivingSection("EQUIPMENT", character.inventory.map((item) => ({ name: `${item.equipped ? "Equipped · " : ""}${item.quantity}× ${item.name}`, detail: [item.category, item.weight, item.cost, item.attuned ? "Attuned" : "", item.ammunition !== undefined ? `${item.ammunition} ammunition` : "", item.maximumCharges !== undefined ? `${item.charges ?? 0}/${item.maximumCharges} charges` : "", item.container ? `In ${item.container}` : "", item.notes].filter(Boolean).join(" · ") })));
+    addLivingSection("EQUIPMENT", character.inventory.map((item) => ({ name: `${item.equipped ? "Equipped · " : ""}${item.quantity}× ${item.name}`, detail: [item.category, item.equipmentSlot && item.equipmentSlot !== "none" ? item.equipmentSlot.replace("-", " ") : "", item.weight, item.cost, item.attuned ? "Attuned" : "", item.ammunition !== undefined ? `${item.ammunition} ammunition` : "", item.maximumCharges !== undefined ? `${item.charges ?? 0}/${item.maximumCharges} charges` : "", item.container ? `In ${item.container}` : "", item.notes].filter(Boolean).join(" · ") })));
+    addLivingSection("TRAINING & CHOICES", [
+      { name: "Armor", detail: character.armorProficiencies.join(", ") || "None" },
+      { name: "Weapons", detail: character.weaponProficiencies.join(", ") || "None" },
+      { name: "Weapon masteries", detail: character.weaponMasteries.join(", ") || "None" },
+      { name: "Languages", detail: character.languages.join(", ") || "None" },
+      { name: "Tools", detail: character.toolProficiencies.join(", ") || "None" },
+      ...character.advancementChoices.map((choice) => ({ name: `${choice.featureName} · Level ${choice.level}`, detail: choice.selections.join(", ") })),
+    ]);
     addLivingSection("CLASS RESOURCES", character.resources.map((resource) => ({ name: resource.name, detail: `${resource.current}/${resource.maximum} · ${resource.recovery === "short" ? "Short or Long Rest" : resource.recovery === "short-one" ? "One use on Short Rest; all on Long Rest" : resource.recovery === "long" ? "Long Rest" : "Manual recovery"}` })));
     addLivingSection("DEFENSES", [
       { name: "Resistances", detail: character.damageResistances.join(", ") || "None" },
@@ -764,6 +881,7 @@ export function CharacterManager() {
       { name: "Condition immunities", detail: character.conditionImmunities.join(", ") || "None" },
     ]);
     addLivingSection("ENCUMBRANCE", [{ name: `${encumbrance.totalWeight}/${encumbrance.carryingCapacity} lb. · ${encumbrance.label}`, detail: encumbrance.penalty }]);
+    addLivingSection("ACTIVE EFFECTS", character.activeEffects.map((effect) => ({ name: `${effect.concentration ? "Concentration · " : ""}${effect.name}`, detail: `${effect.source} · ${effect.duration === "rounds" ? `${effect.remaining} rounds` : effect.duration === "minutes" ? `${effect.remaining} minutes` : effect.duration === "until-rest" ? "Until rest" : "Manual"}${effect.condition ? ` · ${effect.condition}` : ""}` })));
     if (spellcastingAbility) {
       const spellcastingModifier = abilityModifier(character.abilities[spellcastingAbility]);
       const spellAttack = spellcastingModifier + character.proficiencyBonus;
@@ -866,7 +984,7 @@ export function CharacterManager() {
         </div>
 
         <nav className="tabs" aria-label="Character sections">
-          {(["overview", "features", "combat", "spells", "equipment", "notes"] as Tab[]).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "combat" && character.attacks.length ? ` ${character.attacks.length}` : ""}{item === "spells" && character.spells.length ? ` ${character.spells.length}` : ""}{item === "equipment" && character.inventory.length ? ` ${character.inventory.length}` : ""}</button>)}
+          {(["overview", "features", "actions", "combat", "spells", "equipment", "notes"] as Tab[]).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "combat" && character.attacks.length ? ` ${character.attacks.length}` : ""}{item === "spells" && character.spells.length ? ` ${character.spells.length}` : ""}{item === "equipment" && character.inventory.length ? ` ${character.inventory.length}` : ""}</button>)}
         </nav>
 
         {tab === "overview" && (
@@ -901,6 +1019,7 @@ export function CharacterManager() {
                 <button className="text-button" onClick={() => setTab("features")}>View all features <span>→</span></button>
               </div>
             </section>
+            <CreationGuide character={character} patchCharacter={patchCharacter} backgroundSkills={selectedBackground?.skills ?? []} startingEquipment={selectedBackground?.equipment} feats={feats} equipment={equipment} />
             <SessionTracker character={character} patchCharacter={patchCharacter} hitDie={selectedClass?.hitDie ?? 8} />
           </div>
         )}
@@ -918,9 +1037,11 @@ export function CharacterManager() {
           </div>
         )}
 
+        {tab === "actions" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} />}
+
         {tab === "combat" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 
-        {tab === "spells" && <SpellbookManager catalog={spells} character={character} patchCharacter={patchCharacter} spellcastingAbility={spellcastingAbility} />}
+        {tab === "spells" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingAbility={spellcastingAbility} />}
 
         {tab === "equipment" && <InventoryManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 
@@ -964,6 +1085,11 @@ export function CharacterManager() {
               <small>Select the same ability twice for +2. Ability Score Improvements cannot raise a score above 20.</small>
             </div> : <label className="advancement-feat">Feat<select value={levelUpFeatId} onChange={(event) => setLevelUpFeatId(event.target.value)}><option value="">Choose an eligible feat</option>{feats.filter((feat) => !character.feats.some((known) => known.id === feat.id)).map((feat) => <option key={feat.id} value={feat.id}>{feat.name}{feat.prerequisite ? ` — ${feat.prerequisite}` : ""}</option>)}</select><small>Prerequisites are shown for review; the app does not override the GM’s eligibility ruling.</small></label>}
           </div>}
+          {advancementPrompts.length > 0 && <div className="advancement-prompts"><span className="eyebrow">Feature choices</span>{advancementPrompts.map((prompt) => {
+            const options = advancementOptions(prompt);
+            const selections = levelUpSelections[prompt.id] ?? Array.from({ length: prompt.count }, () => "");
+            return <div className="advancement-prompt" key={prompt.id}><strong>{prompt.featureName}</strong><small>Choose {prompt.count} {prompt.label.toLowerCase()}{prompt.count === 1 ? "" : "s"}.</small><div>{Array.from({ length: prompt.count }, (_, index) => <label key={index}>{prompt.label} {index + 1}<select aria-label={`${prompt.featureName} ${prompt.label} ${index + 1}`} value={selections[index] ?? ""} onChange={(event) => setAdvancementSelection(prompt.id, index, event.target.value)}><option value="">Choose…</option>{options.map((option) => <option disabled={selections.some((selection, selectedIndex) => selectedIndex !== index && selection === option.value)} value={option.value} key={option.value}>{option.label}</option>)}</select></label>)}</div>{!options.length && <p>No eligible options are currently available. Review existing proficiencies or imported content.</p>}</div>;
+          })}{!advancementChoicesComplete && <p className="level-up-warning">Complete each feature choice before advancing.</p>}</div>}
           {progressionSpellSlots(character.className, character.subclassName ?? "", plannedLevel) && <p className="progression-note">Spell slots will update automatically for level {plannedLevel}. Prepared spell limit: {preparedSpellLimitFor(character.className, character.subclassName ?? "", plannedLevel) ?? "—"}.</p>}
           <div className="level-up-features">
             <span className="eyebrow">Features gained</span>
@@ -973,7 +1099,7 @@ export function CharacterManager() {
           </div>
           <div className="level-up-actions">
             <button className="button button-outline" onClick={() => setShowLevelUp(false)}>Cancel</button>
-            <button className="button button-primary" disabled={needsSubclass || (hasAdvancementChoice && levelUpChoice === "feat" && !levelUpFeatId)} onClick={confirmLevelUp}><Sparkles size={15} />Apply level {plannedLevel}</button>
+            <button className="button button-primary" disabled={needsSubclass || !advancementChoicesComplete || (hasAdvancementChoice && levelUpChoice === "feat" && !levelUpFeatId)} onClick={confirmLevelUp}><Sparkles size={15} />Apply level {plannedLevel}</button>
           </div>
         </section>
       </div>}

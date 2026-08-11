@@ -13,6 +13,7 @@ import {
   attackFromEquipment,
   conditionRollEffects,
   DAMAGE_TYPES,
+  isEquipmentProficient,
   rollDiceFormula,
   resolvedRollMode,
   type RollKind,
@@ -148,7 +149,7 @@ export function CombatManager({
   function addWeapon() {
     const weapon = equipmentById.get(weaponId);
     if (!weapon) return;
-    const attack = attackFromEquipment(weapon);
+    const attack = attackFromEquipment(weapon, isEquipmentProficient(character, weapon), character.weaponMasteries.includes(weapon.name));
     patchCharacter({ attacks: [...character.attacks, attack] });
     setWeaponId("");
   }
@@ -222,18 +223,22 @@ export function CombatManager({
         </div>
         <div className="attack-list">
           {character.attacks.map((attack) => {
-            const attackModifier = abilityModifier(character.abilities[attack.ability]) + (attack.proficient ? character.proficiencyBonus : 0) + attack.bonus;
+            const definition = attack.contentId ? equipmentById.get(attack.contentId) : undefined;
+            const ruleProficient = definition ? isEquipmentProficient(character, definition) : attack.proficient;
+            const masteryActive = definition ? character.weaponMasteries.includes(definition.name) : false;
+            const attackModifier = abilityModifier(character.abilities[attack.ability]) + (ruleProficient ? character.proficiencyBonus : 0) + attack.bonus;
             return <article key={attack.id}>
               <div className="attack-card-heading"><input aria-label="Attack name" value={attack.name} onChange={(event) => updateAttack(attack.id, { name: event.target.value })} /><button className="attack-roll" onClick={() => rollAttack(attack, attackModifier)}><Dices size={14} />{signed(attackModifier)}</button><button className="icon-button danger" aria-label={`Remove ${attack.name}`} onClick={() => patchCharacter({ attacks: character.attacks.filter((item) => item.id !== attack.id) })}><Trash2 size={14} /></button></div>
               <div className="attack-fields">
                 <label>Ability<select value={attack.ability} onChange={(event) => updateAttack(attack.id, { ability: event.target.value as AbilityKey })}>{abilityKeys.map((ability) => <option key={ability} value={ability}>{ABILITY_LABELS[ability]}</option>)}</select></label>
-                <label className="attack-check"><input type="checkbox" checked={attack.proficient} onChange={(event) => updateAttack(attack.id, { proficient: event.target.checked })} />Proficient</label>
+                <label className="attack-check"><input type="checkbox" checked={ruleProficient} disabled={Boolean(definition)} onChange={(event) => updateAttack(attack.id, { proficient: event.target.checked })} />Proficient</label>
                 <label>Other bonus<input type="number" value={attack.bonus} onChange={(event) => updateAttack(attack.id, { bonus: Number(event.target.value) || 0 })} /></label>
                 <label>Damage<input value={attack.damage} onChange={(event) => updateAttack(attack.id, { damage: event.target.value })} /></label>
                 <label>Type<input value={attack.damageType} onChange={(event) => updateAttack(attack.id, { damageType: event.target.value })} /></label>
                 <label>Damage bonus<input type="number" value={attack.damageBonus} onChange={(event) => updateAttack(attack.id, { damageBonus: Number(event.target.value) || 0 })} /></label>
               </div>
               <div className="damage-roll-actions"><button onClick={() => rollAttackDamage(attack)}>Roll damage</button><button onClick={() => rollAttackDamage(attack, true)}>Critical</button></div>
+              {definition && <div className={`weapon-rule-status ${ruleProficient ? "" : "warning"}`}><span>{ruleProficient ? `Trained: ${definition.category}` : `No proficiency: ${definition.category}`}</span>{definition.mastery && <span>{masteryActive ? `Mastery active: ${definition.mastery}` : `Mastery not selected: ${definition.mastery}`}</span>}</div>}
               <input className="attack-notes" value={attack.notes} onChange={(event) => updateAttack(attack.id, { notes: event.target.value })} placeholder="Range, mastery, ammunition, or special rules" />
             </article>;
           })}

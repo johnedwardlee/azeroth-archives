@@ -5,6 +5,7 @@ import {
   ABILITY_LABELS,
   abilityModifier,
   type AbilityKey,
+  type ActiveEffect,
   type CharacterData,
   type EquipmentDefinition,
   type FeatDefinition,
@@ -13,15 +14,22 @@ import {
   type SpellSlotState,
 } from "../lib/types";
 import {
+  activeEffectFromSpell,
   attackFromEquipment,
   calculateArmorClass,
   calculateEffectiveSpeed,
   calculateEncumbrance,
+  concentrationSave,
   conditionEffectText,
+  defaultEquipmentSlot,
   DAMAGE_TYPES,
   extractDiceFormula,
+  equipmentRequiresAttunement,
+  equipmentRuleWarnings,
   formatPounds,
+  hasUnproficientArmor,
   preparedSpellLimitFor,
+  isEquipmentProficient,
   resolveIncomingDamage,
   rollDiceFormula,
 } from "../lib/character-rules";
@@ -66,16 +74,23 @@ export function SessionTracker({ character, patchCharacter, hitDie }: { characte
   const [hitDiceToSpend, setHitDiceToSpend] = useState(1);
   const [hitDiceFeedback, setHitDiceFeedback] = useState("");
   const [condition, setCondition] = useState("");
+  const [effectName, setEffectName] = useState("");
+  const [effectDuration, setEffectDuration] = useState<ActiveEffect["duration"]>("rounds");
+  const [effectRemaining, setEffectRemaining] = useState(1);
+  const [effectCondition, setEffectCondition] = useState("");
 
   function takeDamage() {
     const resolution = resolveIncomingDamage(hpAmount, damageType, character);
     const amount = resolution.adjusted;
     const absorbed = Math.min(character.temporaryHp, amount);
+    const concentration = (character.concentratingSpellId || character.activeEffects.some((effect) => effect.concentration)) && amount > 0 ? concentrationSave(character, amount) : null;
+    const concentrationLost = Boolean(concentration && !concentration.success);
     patchCharacter({
       temporaryHp: character.temporaryHp - absorbed,
       currentHp: Math.max(0, character.currentHp - (amount - absorbed)),
+      ...(concentrationLost ? { concentratingSpellId: undefined, activeEffects: character.activeEffects.filter((effect) => !effect.concentration) } : {}),
     });
-    setHpFeedback(`${hpAmount} ${damageType} → ${amount} damage. ${resolution.reason}${absorbed ? `; ${absorbed} absorbed by temporary HP` : ""}.`);
+    setHpFeedback(`${hpAmount} ${damageType} → ${amount} damage. ${resolution.reason}${absorbed ? `; ${absorbed} absorbed by temporary HP` : ""}.${concentration ? ` Concentration DC ${concentration.dc}: ${concentration.rolls.join("/")} + ${concentration.modifier} = ${concentration.total} — ${concentration.success ? "maintained" : "lost"}.` : ""}`);
   }
 
   function heal() {
@@ -97,6 +112,7 @@ export function SessionTracker({ character, patchCharacter, hitDie }: { characte
         Object.entries(character.spellSlots).map(([level, slot]) => [level, { ...slot, used: 0 }]),
       ),
       concentratingSpellId: undefined,
+      activeEffects: character.activeEffects.filter((effect) => effect.duration === "manual"),
       resources: character.resources.map((resource) => resource.recovery === "manual" ? resource : { ...resource, current: resource.maximum }),
       exhaustionLevel,
       conditions: exhaustionLevel ? character.conditions : character.conditions.filter((item) => item !== "Exhaustion"),
@@ -108,6 +124,7 @@ export function SessionTracker({ character, patchCharacter, hitDie }: { characte
       resources: character.resources.map((resource) => resource.recovery === "short"
         ? { ...resource, current: resource.maximum }
         : resource.recovery === "short-one" ? { ...resource, current: Math.min(resource.maximum, resource.current + 1) } : resource),
+      activeEffects: character.activeEffects.filter((effect) => effect.duration !== "until-rest"),
     });
   }
 
@@ -160,6 +177,44 @@ export function SessionTracker({ character, patchCharacter, hitDie }: { characte
         ? [...new Set([...character.conditions, "Exhaustion"])]
         : character.conditions.filter((item) => item !== "Exhaustion"),
     });
+  }
+
+  function endEffect(id: string) {
+    const effect = character.activeEffects.find((entry) => entry.id === id);
+    if (!effect) return;
+    patchCharacter({
+      activeEffects: character.activeEffects.filter((entry) => entry.id !== id),
+      conditions: effect.condition ? character.conditions.filter((condition) => condition !== effect.condition) : character.conditions,
+      ...(effect.concentration ? { concentratingSpellId: undefined } : {}),
+    });
+  }
+
+  function advanceEffects(rounds: number, minutes = 0) {
+    const expired: ActiveEffect[] = [];
+    const activeEffects = character.activeEffects.flatMap((effect) => {
+      if (!(["rounds", "minutes"] as const).includes(effect.duration as "rounds" | "minutes") || effect.remaining === undefined) return [effect];
+      const elapsed = effect.duration === "minutes" ? minutes : rounds;
+      if (!elapsed) return [effect];
+      const remaining = effect.remaining - elapsed;
+      if (remaining <= 0) { expired.push(effect); return []; }
+      return [{ ...effect, remaining }];
+    });
+    const expiredConditions = new Set(expired.map((effect) => effect.condition).filter((condition): condition is string => Boolean(condition)));
+    patchCharacter({
+      activeEffects,
+      conditions: character.conditions.filter((condition) => !expiredConditions.has(condition)),
+      ...(expired.some((effect) => effect.concentration) ? { concentratingSpellId: undefined } : {}),
+    });
+  }
+
+  function addEffect() {
+    const name = effectName.trim() || effectCondition;
+    if (!name) return;
+    const effect: ActiveEffect = { id: crypto.randomUUID(), name, source: "Manual", duration: effectDuration, ...(effectDuration === "rounds" || effectDuration === "minutes" ? { remaining: Math.max(1, effectRemaining) } : {}), ...(effectCondition ? { condition: effectCondition } : {}) };
+    patchCharacter({ activeEffects: [...character.activeEffects, effect], conditions: effectCondition && !character.conditions.includes(effectCondition) ? [...character.conditions, effectCondition] : character.conditions });
+    setEffectName("");
+    setEffectCondition("");
+    setEffectRemaining(1);
   }
 
   function addResource() {
@@ -242,6 +297,12 @@ export function SessionTracker({ character, patchCharacter, hitDie }: { characte
         </article>)}</div>
         {!character.resources.length && <p className="class-resource-empty">Add a reusable tracker for Rage, Focus, Channel Divinity, Sorcery Points, or another limited class feature.</p>}
       </div>
+      <div className="active-effect-panel">
+        <div className="class-resource-heading"><div><span className="eyebrow">Turn tracking</span><h3>Active effects</h3></div><div className="effect-advance"><button onClick={() => advanceEffects(1)}>Next round</button><button onClick={() => advanceEffects(10, 1)}>+1 minute</button></div></div>
+        <div className="effect-add-row"><input aria-label="Effect name" value={effectName} onChange={(event) => setEffectName(event.target.value)} placeholder="Effect name" /><select aria-label="Effect condition" value={effectCondition} onChange={(event) => setEffectCondition(event.target.value)}><option value="">No condition</option>{CONDITIONS.filter((item) => !character.conditionImmunities.some((immune) => immune.toLowerCase() === item.toLowerCase())).map((item) => <option key={item}>{item}</option>)}</select><select aria-label="Effect duration" value={effectDuration} onChange={(event) => setEffectDuration(event.target.value as ActiveEffect["duration"])}><option value="rounds">Rounds</option><option value="minutes">Minutes</option><option value="until-rest">Until rest</option><option value="manual">Manual</option></select>{(effectDuration === "rounds" || effectDuration === "minutes") && <input aria-label="Effect duration amount" type="number" min="1" value={effectRemaining} onChange={(event) => setEffectRemaining(Math.max(1, Number(event.target.value) || 1))} />}<button onClick={addEffect}><Plus size={14} />Add effect</button></div>
+        <div className="active-effect-list">{character.activeEffects.map((effect) => <article className={effect.concentration ? "concentration" : ""} key={effect.id}><Sparkles size={15} /><div><strong>{effect.name}</strong><span>{effect.source}{effect.condition ? ` · ${effect.condition}` : ""}</span></div><b>{effect.duration === "rounds" ? `${effect.remaining} rd` : effect.duration === "minutes" ? `${effect.remaining} min` : effect.duration === "until-rest" ? "Until rest" : "Manual"}</b>{effect.concentration && <small>Concentration</small>}<button aria-label={`End ${effect.name}`} onClick={() => endEffect(effect.id)}>×</button></article>)}</div>
+        {!character.activeEffects.length && <p className="class-resource-empty">Cast a duration spell or add an effect to track its expiration here.</p>}
+      </div>
     </section>
   );
 }
@@ -271,7 +332,7 @@ export function FeatManager({ catalog, character, patchCharacter }: { catalog: F
   );
 }
 
-export function SpellbookManager({ catalog, character, patchCharacter, spellcastingAbility }: { catalog: SpellDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; spellcastingAbility: AbilityKey | null }) {
+export function SpellbookManager({ catalog, equipmentCatalog, character, patchCharacter, spellcastingAbility }: { catalog: SpellDefinition[]; equipmentCatalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; spellcastingAbility: AbilityKey | null }) {
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -297,6 +358,7 @@ export function SpellbookManager({ catalog, character, patchCharacter, spellcast
   const spellSaveDc = spellAttackBonus === null ? null : 8 + spellAttackBonus;
   const preparedLimit = preparedSpellLimitFor(character.className, character.subclassName ?? "", character.level);
   const preparedCount = character.spells.filter((spell) => spell.level > 0 && spell.prepared).length;
+  const spellcastingBlocked = hasUnproficientArmor(character, equipmentCatalog);
 
   function addSpell() {
     const spell = catalog.find((item) => item.id === selectedId);
@@ -334,9 +396,14 @@ export function SpellbookManager({ catalog, character, patchCharacter, spellcast
           },
         }
       : character.spellSlots;
-    const requiresConcentration = /(?:^C(?:,|\b)|concentration)/i.test(spell.duration);
+    const effect = activeEffectFromSpell(spell);
+    const requiresConcentration = Boolean(effect?.concentration);
+    const activeEffects = effect
+      ? [...character.activeEffects.filter((activeEffect) => !(requiresConcentration && activeEffect.concentration)), effect]
+      : character.activeEffects;
     patchCharacter({
       spellSlots,
+      activeEffects,
       ...(requiresConcentration ? { concentratingSpellId: spell.id } : {}),
     });
     setLastCast(asRitual
@@ -365,12 +432,13 @@ export function SpellbookManager({ catalog, character, patchCharacter, spellcast
           <div><span>Prepared</span><strong>{preparedCount}{preparedLimit !== null ? ` / ${preparedLimit}` : ""}</strong></div>
         </div>
         {!spellcastingAbility && <p className="spellcasting-note">This class has no default spellcasting ability. Known spells can still be tracked and cast.</p>}
+        {spellcastingBlocked && <p className="spellcasting-note equipment-blocked">Spellcasting is blocked while wearing armor or a shield without proficiency.</p>}
         <div className="slot-grid">{Array.from({ length: 9 }, (_, index) => index + 1).map((level) => { const slot = character.spellSlots[String(level)] ?? { maximum: 0, used: 0 }; return <div className="slot-row" key={level}><strong>{level}</strong><label>Max <input aria-label={`Level ${level} maximum spell slots`} type="number" min="0" max="20" value={slot.maximum} onChange={(event) => updateSlot(level, { maximum: Number(event.target.value) })} /></label><span>{slot.maximum - slot.used} left</span><button disabled={slot.used <= 0} onClick={() => updateSlot(level, { used: slot.used - 1 })}>−</button><button disabled={slot.used >= slot.maximum} onClick={() => updateSlot(level, { used: slot.used + 1 })}>Use</button></div>; })}</div>
       </section>
 
       <section className="panel spell-list-panel">
         <div className="section-heading"><div><span className="eyebrow">Known magic</span><h2>Spellbook</h2></div><span className="count-chip">{character.spells.length}</span></div>
-        {concentratingSpell && <div className="concentration-banner"><Sparkles size={16} /><div><span>Concentrating</span><strong>{concentratingSpell.name}</strong></div><button onClick={() => patchCharacter({ concentratingSpellId: undefined })}>End</button></div>}
+        {concentratingSpell && <div className="concentration-banner"><Sparkles size={16} /><div><span>Concentrating</span><strong>{concentratingSpell.name}</strong></div><button onClick={() => patchCharacter({ concentratingSpellId: undefined, activeEffects: character.activeEffects.filter((effect) => !effect.concentration) })}>End</button></div>}
         {lastCast && <div className="cast-feedback" role="status">{lastCast}<button aria-label="Dismiss casting message" onClick={() => setLastCast("")}>×</button></div>}
         {spellRollResult && <div className="cast-feedback spell-roll-feedback" role="status">{spellRollResult}<button aria-label="Dismiss spell roll" onClick={() => setSpellRollResult("")}>×</button></div>}
         <div className="catalog-add-row spell-add"><DescriptionPicker ariaLabel="Available spells" value={selectedId} placeholder="Choose a spell" onChange={setSelectedId} options={available.map((spell) => ({ value: spell.id, label: spell.name, meta: `${spell.level ? `Level ${spell.level}` : "Cantrip"} · ${spell.school} · ${spell.classes.join(", ")}`, description: `${spell.castingTime} · ${spell.range} · ${spell.duration}\n\n${spell.description}` }))} /><button className="button button-primary" disabled={!selectedId} onClick={addSpell}><Plus size={15} />Learn</button><label className="inline-check"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />All classes</label></div>
@@ -379,10 +447,10 @@ export function SpellbookManager({ catalog, character, patchCharacter, spellcast
           const slotLevels = availableSlotLevels(spell);
           const selectedCastLevel = castLevels[spell.id] && slotLevels.includes(castLevels[spell.id]) ? castLevels[spell.id] : slotLevels[0];
           const preparedToCast = spell.level === 0 || spell.prepared;
-          const canCast = spell.level === 0 || (preparedToCast && selectedCastLevel !== undefined);
+          const canCast = !spellcastingBlocked && (spell.level === 0 || (preparedToCast && selectedCastLevel !== undefined));
           const formula = extractDiceFormula(spell.description);
           const atPreparedLimit = preparedLimit !== null && preparedCount >= preparedLimit;
-          return <article key={spell.id} className={spell.prepared ? "prepared" : ""}><div className="spell-card-top"><div><span>{spell.level ? `Level ${spell.level} ${spell.school}` : `${spell.school} cantrip`}</span><h3>{spell.name}</h3></div><label><input type="checkbox" checked={spell.prepared} disabled={!spell.prepared && spell.level > 0 && atPreparedLimit} onChange={(event) => patchCharacter({ spells: character.spells.map((item) => item.id === spell.id ? { ...item, prepared: event.target.checked } : item) })} />Prepared</label><button className="icon-button danger" aria-label={`Forget ${spell.name}`} onClick={() => patchCharacter({ spells: character.spells.filter((item) => item.id !== spell.id), ...(character.concentratingSpellId === spell.id ? { concentratingSpellId: undefined } : {}) })}><Trash2 size={14} /></button></div><div className="spell-meta"><span>{spell.castingTime}</span><span>{spell.range}</span><span>{spell.duration}</span>{spell.components && <span>{spell.components}</span>}{spell.ritual && <span>Ritual</span>}</div><p>{spell.description}</p><div className="spell-card-actions">{spell.level > 0 && slotLevels.length > 0 && <select aria-label={`${spell.name} casting level`} value={selectedCastLevel} onChange={(event) => setCastLevels((current) => ({ ...current, [spell.id]: Number(event.target.value) }))}>{slotLevels.map((level) => <option key={level} value={level}>Level {level}{level > spell.level ? " (upcast)" : ""}</option>)}</select>}<button className="button button-primary" disabled={!canCast} onClick={() => castSpell(spell, false, selectedCastLevel)}>{!preparedToCast ? "Not prepared" : canCast ? spell.level === 0 ? "Cast cantrip" : "Cast" : "No slot available"}</button>{spell.ritual && <button className="button button-outline" onClick={() => castSpell(spell, true)}>Cast ritual</button>}{formula && <button className="button button-outline" onClick={() => rollSpellEffect(spell)}>Roll {formula}</button>}</div></article>;
+          return <article key={spell.id} className={spell.prepared ? "prepared" : ""}><div className="spell-card-top"><div><span>{spell.level ? `Level ${spell.level} ${spell.school}` : `${spell.school} cantrip`}</span><h3>{spell.name}</h3></div><label><input type="checkbox" checked={spell.prepared} disabled={!spell.prepared && spell.level > 0 && atPreparedLimit} onChange={(event) => patchCharacter({ spells: character.spells.map((item) => item.id === spell.id ? { ...item, prepared: event.target.checked } : item) })} />Prepared</label><button className="icon-button danger" aria-label={`Forget ${spell.name}`} onClick={() => patchCharacter({ spells: character.spells.filter((item) => item.id !== spell.id), ...(character.concentratingSpellId === spell.id ? { concentratingSpellId: undefined, activeEffects: character.activeEffects.filter((effect) => !effect.concentration) } : {}) })}><Trash2 size={14} /></button></div><div className="spell-meta"><span>{spell.castingTime}</span><span>{spell.range}</span><span>{spell.duration}</span>{spell.components && <span>{spell.components}</span>}{spell.ritual && <span>Ritual</span>}</div><p>{spell.description}</p><div className="spell-card-actions">{spell.level > 0 && slotLevels.length > 0 && <select aria-label={`${spell.name} casting level`} value={selectedCastLevel} onChange={(event) => setCastLevels((current) => ({ ...current, [spell.id]: Number(event.target.value) }))}>{slotLevels.map((level) => <option key={level} value={level}>Level {level}{level > spell.level ? " (upcast)" : ""}</option>)}</select>}<button className="button button-primary" disabled={!canCast} onClick={() => castSpell(spell, false, selectedCastLevel)}>{spellcastingBlocked ? "Armor blocks casting" : !preparedToCast ? "Not prepared" : canCast ? spell.level === 0 ? "Cast cantrip" : "Cast" : "No slot available"}</button>{spell.ritual && <button className="button button-outline" disabled={spellcastingBlocked} onClick={() => castSpell(spell, true)}>Cast ritual</button>}{formula && <button className="button button-outline" onClick={() => rollSpellEffect(spell)}>Roll {formula}</button>}</div></article>;
         })}</div>
         {!visibleSpells.length && <div className="empty-state compact">No spells here yet. Learn one from the imported content library.</div>}
       </section>
@@ -417,6 +485,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
   const effectiveArmor = calculateArmorClass({ ...character, inventory: visibleInventory }, catalog);
   const effectiveSpeed = calculateEffectiveSpeed(character, encumbrance, catalog);
   const attunedCount = visibleInventory.filter((item) => item.attuned).length;
+  const equipmentWarnings = visibleInventory.flatMap((item) => equipmentRuleWarnings({ ...character, inventory: visibleInventory }, item, catalog).map((warning) => `${item.name}: ${warning}`));
 
   function addCatalogItem() {
     const definition = catalog.find((item) => item.id === selectedId);
@@ -426,7 +495,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
       patchCharacter({ inventory: character.inventory.map((item) => item.id === existing.id ? { ...item, quantity: item.quantity + 1 } : item) });
     } else {
       const itemId = crypto.randomUUID();
-      patchCharacter({ inventory: [...character.inventory, { id: itemId, contentId: definition.id, name: definition.name, category: definition.category, quantity: 1, equipped: false, notes: "", weight: definition.weight, cost: definition.cost }] });
+      patchCharacter({ inventory: [...character.inventory, { id: itemId, contentId: definition.id, name: definition.name, category: definition.category, quantity: 1, equipped: false, notes: "", weight: definition.weight, cost: definition.cost, equipmentSlot: "none" }] });
       setExpandedIds((current) => [...current, itemId]);
     }
     setSelectedId("");
@@ -435,7 +504,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
   function addCustomItem() {
     const name = customName.trim();
     if (!name) return;
-    const item: InventoryItem = { id: crypto.randomUUID(), name, category: "Custom", quantity: 1, equipped: false, notes: "" };
+    const item: InventoryItem = { id: crypto.randomUUID(), name, category: "Custom", quantity: 1, equipped: false, notes: "", equipmentSlot: "none" };
     patchCharacter({ inventory: [...character.inventory, item] });
     setExpandedIds((current) => [...current, item.id]);
     setCustomName("");
@@ -471,13 +540,13 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
     let attacks = character.attacks;
     if (definition?.damage) {
       if (equipped && !attacks.some((attack) => attack.contentId === definition.id)) {
-        attacks = [...attacks, attackFromEquipment(definition)];
+        attacks = [...attacks, attackFromEquipment(definition, isEquipmentProficient(character, definition), character.weaponMasteries.includes(definition.name))];
       } else if (!equipped) {
         attacks = attacks.filter((attack) => attack.contentId !== definition.id);
       }
     }
     patchCharacter({
-      inventory: character.inventory.map((inventoryItem) => inventoryItem.id === item.id ? { ...inventoryItem, equipped } : inventoryItem),
+      inventory: character.inventory.map((inventoryItem) => inventoryItem.id === item.id ? { ...inventoryItem, equipped, ...(equipped && (!inventoryItem.equipmentSlot || inventoryItem.equipmentSlot === "none") ? { equipmentSlot: defaultEquipmentSlot(definition) } : {}) } : inventoryItem),
       attacks,
     });
   }
@@ -497,6 +566,8 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
           <div><span>Armor Class</span><strong>{effectiveArmor.value}</strong><small>{effectiveArmor.source}</small></div>
           <div><span>Effective speed</span><strong>{effectiveSpeed.value} ft.</strong><small>{effectiveSpeed.effects.length ? effectiveSpeed.effects.join(" · ") : "No movement penalties"}</small></div>
         </div>
+        <div className="training-summary"><strong>Training</strong><span>{[...character.armorProficiencies, ...character.weaponProficiencies].join(" · ") || "No equipment proficiencies recorded"}</span></div>
+        {equipmentWarnings.length > 0 && <div className="equipment-warning-summary"><AlertTriangle size={15} /><div><strong>Equipment warnings</strong>{equipmentWarnings.map((warning) => <p key={warning}>{warning}</p>)}</div></div>}
         <div className={`encumbrance-summary ${encumbrance.level}`}>
           <div className="encumbrance-heading">
             <div><span>Listed weight</span><strong>{formatPounds(totalWeight)} <small>/ {formatPounds(carryingCapacity)} lb.</small></strong></div>
@@ -521,10 +592,15 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
           {visibleInventory.map((item) => {
             const expanded = expandedIds.includes(item.id);
             const preview = item.rulesDescription || item.notes || "No description or notes yet.";
+            const definition = item.contentId ? catalogById.get(item.contentId) : undefined;
+            const warnings = equipmentRuleWarnings({ ...character, inventory: visibleInventory }, item, catalog);
+            const proficient = definition ? isEquipmentProficient(character, definition) : true;
+            const requiresAttunement = definition ? equipmentRequiresAttunement(definition) : false;
+            const masteryActive = definition ? character.weaponMasteries.includes(definition.name) : false;
             return (
-              <article key={item.id} className={`${item.equipped ? "equipped " : ""}${expanded ? "expanded" : ""}`}>
+              <article key={item.id} className={`${item.equipped ? "equipped " : ""}${warnings.length ? "has-warning " : ""}${expanded ? "expanded" : ""}`}>
                 <label className="equip-check"><input type="checkbox" checked={item.equipped} onChange={(event) => setEquipped(item, event.target.checked)} /><span>Equipped</span></label>
-                <div className="inventory-name"><h3>{item.name}</h3><span>{item.category}{item.cost ? ` · ${item.cost}` : ""}{item.weight ? ` · ${item.weight}` : ""}{item.container ? ` · in ${item.container}` : ""}</span><div className="inventory-status-chips">{item.attuned && <b>Attuned</b>}{item.ammunition !== undefined && <b>{item.ammunition} ammo</b>}{item.maximumCharges !== undefined && <b>{item.charges ?? 0}/{item.maximumCharges} charges</b>}{item.consumable && <b>Consumable</b>}</div><p className="inventory-description-preview">{preview}</p></div>
+                <div className="inventory-name"><h3>{item.name}</h3><span>{item.category}{item.cost ? ` · ${item.cost}` : ""}{item.weight ? ` · ${item.weight}` : ""}{item.container ? ` · in ${item.container}` : ""}</span><div className="inventory-status-chips">{item.equipmentSlot && item.equipmentSlot !== "none" && <b>{item.equipmentSlot.replace("-", " ")}</b>}{definition?.damage && <b className={proficient ? "proficient-chip" : "warning-chip"}>{proficient ? "Proficient" : "Not proficient"}</b>}{masteryActive && <b>Mastery: {definition?.mastery}</b>}{requiresAttunement && <b className={!item.attuned ? "warning-chip" : ""}>{item.attuned ? "Attuned" : "Attunement required"}</b>}{item.attuned && !requiresAttunement && <b>Attuned</b>}{item.ammunition !== undefined && <b>{item.ammunition} ammo</b>}{item.maximumCharges !== undefined && <b>{item.charges ?? 0}/{item.maximumCharges} charges</b>}{item.consumable && <b>Consumable</b>}</div><p className="inventory-description-preview">{preview}</p>{warnings.map((warning) => <small className="inventory-warning" key={warning}>{warning}</small>)}</div>
                 <label className="quantity-field">Qty <input aria-label={`${item.name} quantity`} type="number" min="0" value={item.quantity} onChange={(event) => updateItem(item.id, { quantity: Math.max(0, Number(event.target.value)) })} /></label>
                 <button className="inventory-expand" aria-label={`${expanded ? "Hide" : "Show"} details for ${item.name}`} aria-expanded={expanded} onClick={() => toggleItem(item.id)}><span>{expanded ? "Hide" : "Details"}</span><ChevronDown size={15} /></button>
                 <button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => patchCharacter({ inventory: character.inventory.filter((value) => value.id !== item.id), attacks: item.contentId ? character.attacks.filter((attack) => attack.contentId !== item.contentId) : character.attacks })}><Trash2 size={14} /></button>
@@ -533,6 +609,7 @@ export function InventoryManager({ catalog, character, patchCharacter }: { catal
                   <div className="inventory-detail-fields">
                     {!item.contentId && <label><span>Listed weight</span><input aria-label={`${item.name} listed weight`} value={item.weight ?? ""} onChange={(event) => updateItem(item.id, { weight: event.target.value })} placeholder="For example, 5 lb." /></label>}
                     <div className="equipment-usage-grid">
+                      <label><span>Equipment slot</span><select aria-label={`${item.name} equipment slot`} value={item.equipmentSlot ?? "none"} onChange={(event) => updateItem(item.id, { equipmentSlot: event.target.value as InventoryItem["equipmentSlot"] })}><option value="none">Not assigned</option><option value="main-hand">Main hand</option><option value="off-hand">Off hand</option><option value="two-hands">Two hands</option><option value="armor">Armor</option><option value="worn">Worn / carried</option></select></label>
                       <label><span>Container</span><input aria-label={`${item.name} container`} value={item.container ?? ""} onChange={(event) => updateItem(item.id, { container: event.target.value })} placeholder="Backpack, pouch…" /></label>
                       <label><span>Ammunition</span><input aria-label={`${item.name} ammunition`} type="number" min="0" value={item.ammunition ?? ""} onChange={(event) => updateItem(item.id, { ammunition: event.target.value === "" ? undefined : Number(event.target.value) })} placeholder="Not tracked" /></label>
                       <label><span>Charges</span><input aria-label={`${item.name} charges`} type="number" min="0" value={item.charges ?? ""} onChange={(event) => updateItem(item.id, { charges: event.target.value === "" ? undefined : Number(event.target.value) })} placeholder="Current" /></label>

@@ -1,11 +1,15 @@
 import {
   abilityModifier,
   type AbilityKey,
+  type AdvancementChoiceKind,
+  type ActiveEffect,
   type CharacterAttack,
   type CharacterData,
   type CharacterResource,
   type EquipmentDefinition,
   type InventoryItem,
+  type RulesFeature,
+  type SpellDefinition,
   type SpellSlotState,
 } from "./types";
 
@@ -14,6 +18,52 @@ export type RollKind = "ability" | "attack" | "save";
 export type RollMode = "normal" | "advantage" | "disadvantage";
 
 export const DAMAGE_TYPES = ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"];
+export const METAMAGIC_OPTIONS = ["Careful Spell", "Distant Spell", "Empowered Spell", "Extended Spell", "Heightened Spell", "Quickened Spell", "Seeking Spell", "Subtle Spell", "Transmuted Spell", "Twinned Spell"];
+
+export type AdvancementPrompt = {
+  id: string;
+  featureId?: string;
+  featureName: string;
+  kind: AdvancementChoiceKind;
+  count: number;
+  label: string;
+};
+
+export type GeneratedAction = {
+  id: string;
+  name: string;
+  timing: "action" | "bonus" | "reaction" | "passive";
+  source: string;
+  description: string;
+  resourceId?: string;
+  resourceCost?: number;
+  spellId?: string;
+  inventoryId?: string;
+};
+
+type ClassTraining = {
+  skillChoices: number;
+  armor: string[];
+  weapons: string[];
+  masteryChoices: number;
+};
+
+const classTraining: Record<string, ClassTraining> = {
+  barbarian: { skillChoices: 2, armor: ["Light Armor", "Medium Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 2 },
+  bard: { skillChoices: 3, armor: ["Light Armor"], weapons: ["Simple Weapons"], masteryChoices: 0 },
+  priest: { skillChoices: 2, armor: ["Light Armor", "Medium Armor", "Shield"], weapons: ["Simple Weapons"], masteryChoices: 0 },
+  warrior: { skillChoices: 2, armor: ["Light Armor", "Medium Armor", "Heavy Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 3 },
+  monk: { skillChoices: 2, armor: [], weapons: ["Simple Weapons", "Martial Melee Weapons (Light)"], masteryChoices: 2 },
+  paladin: { skillChoices: 2, armor: ["Light Armor", "Medium Armor", "Heavy Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 2 },
+  hunter: { skillChoices: 3, armor: ["Light Armor", "Medium Armor", "Shield"], weapons: ["Simple Weapons", "Martial Weapons"], masteryChoices: 2 },
+  rogue: { skillChoices: 4, armor: ["Light Armor"], weapons: ["Simple Weapons", "Martial Weapons (Finesse or Light)"], masteryChoices: 2 },
+  sorcerer: { skillChoices: 2, armor: [], weapons: ["Simple Weapons"], masteryChoices: 0 },
+  mage: { skillChoices: 2, armor: [], weapons: ["Simple Weapons"], masteryChoices: 0 },
+};
+
+export function classTrainingFor(className: string): ClassTraining {
+  return classTraining[className.trim().toLowerCase()] ?? { skillChoices: 2, armor: [], weapons: [], masteryChoices: 0 };
+}
 
 const fullCasterSlots = [
   [], [2], [3], [4, 2], [4, 3], [4, 3, 2], [4, 3, 3], [4, 3, 3, 1], [4, 3, 3, 2], [4, 3, 3, 3, 1],
@@ -215,6 +265,142 @@ export function preparedSpellLimitFor(className: string, subclassName: string, l
   return null;
 }
 
+function writtenCount(text: string, fallback = 1) {
+  const match = text.match(/\b(one|two|three|four|five|six|\d+)\b/i)?.[1]?.toLowerCase();
+  const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+  return match ? ((words[match] ?? Number(match)) || fallback) : fallback;
+}
+
+export function advancementPromptsForFeatures(features: RulesFeature[], className: string): AdvancementPrompt[] {
+  const training = classTrainingFor(className);
+  return features.flatMap<AdvancementPrompt>((feature): AdvancementPrompt[] => {
+    const name = feature.name.toLowerCase();
+    const description = feature.description;
+    const base = { featureId: feature.id, featureName: feature.name };
+    if (name.includes("fighting style")) return [{ ...base, id: `${feature.id ?? feature.name}-fighting-style`, kind: "fighting-style" as const, count: 1, label: "Fighting Style feat" }];
+    if (name === "weapon mastery") return [{ ...base, id: `${feature.id ?? feature.name}-weapon-mastery`, kind: "weapon-mastery" as const, count: Math.max(1, training.masteryChoices), label: "Mastered weapon" }];
+    if (name === "expertise") return [{ ...base, id: `${feature.id ?? feature.name}-expertise`, kind: "expertise" as const, count: /\bone\b/i.test(description) ? 1 : 2, label: "Expertise skill" }];
+    if (name === "metamagic") return [{ ...base, id: `${feature.id ?? feature.name}-metamagic`, kind: "metamagic" as const, count: 2, label: "Metamagic option" }];
+    const learned = description.match(/\blearn\s+(one|two|three|four|five|six|\d+)\s+(?:\w+\s+)?(cantrips|spells)\b/i);
+    if (learned) return [{ ...base, id: `${feature.id ?? feature.name}-spells`, kind: "spell" as const, count: writtenCount(learned[1]), label: learned[2].toLowerCase() === "cantrips" ? "Cantrip" : "Spell" }];
+    if (/proficiency (?:with|in).+skill.+choice|skill(?:s)? of your choice/i.test(description)) {
+      const count = /three skills/i.test(description) ? 3 : /two skills/i.test(description) ? 2 : 1;
+      return [{ ...base, id: `${feature.id ?? feature.name}-skill`, kind: "skill" as const, count, label: "Skill proficiency" }];
+    }
+    return [];
+  });
+}
+
+export function equipmentRequiresAttunement(item: EquipmentDefinition) {
+  return /requires attunement|attunement required/i.test(item.description ?? "");
+}
+
+export function equipmentAttunementRequirement(item: EquipmentDefinition) {
+  return item.description?.match(/requires attunement(?: by (?:a|an) )?([^.;)]+)/i)?.[1]?.trim() ?? "";
+}
+
+export function defaultEquipmentSlot(item?: EquipmentDefinition): InventoryItem["equipmentSlot"] {
+  if (!item) return "worn";
+  if (/armor/i.test(item.category)) return "armor";
+  if (/shield/i.test(item.category)) return "off-hand";
+  if (item.damage && item.properties?.some((property) => /two-handed/i.test(property))) return "two-hands";
+  if (item.damage) return "main-hand";
+  return "worn";
+}
+
+export function isEquipmentProficient(character: CharacterData, item: EquipmentDefinition) {
+  const category = item.category.toLowerCase();
+  if (/light armor|medium armor|heavy armor|shield/.test(category)) {
+    return character.armorProficiencies.some((entry) => entry.toLowerCase() === item.category.toLowerCase());
+  }
+  if (!item.damage) return true;
+  if (category.includes("simple")) return character.weaponProficiencies.some((entry) => entry.toLowerCase().includes("simple"));
+  if (category.includes("martial")) {
+    if (character.weaponProficiencies.some((entry) => entry.toLowerCase() === "martial weapons")) return true;
+    const properties = (item.properties ?? []).join(" ").toLowerCase();
+    if (character.weaponProficiencies.some((entry) => entry.toLowerCase().includes("finesse or light"))) return /finesse|light/.test(properties);
+    if (character.weaponProficiencies.some((entry) => entry.toLowerCase().includes("martial melee weapons (light)"))) return category.includes("melee") && /light/.test(properties);
+    return false;
+  }
+  return character.weaponProficiencies.some((entry) => category.includes(entry.toLowerCase().replace(/ weapons?$/, "")));
+}
+
+export function equipmentRuleWarnings(character: CharacterData, item: InventoryItem, catalog: EquipmentDefinition[]) {
+  const definition = item.contentId ? catalog.find((entry) => entry.id === item.contentId) : undefined;
+  const warnings: string[] = [];
+  if (!item.equipped) return warnings;
+  if (definition && !isEquipmentProficient(character, definition)) warnings.push(`Not proficient with ${definition.category}.`);
+  if (definition && equipmentRequiresAttunement(definition) && !item.attuned) warnings.push("Requires attunement before use.");
+  const attunementRequirement = definition ? equipmentAttunementRequirement(definition) : "";
+  if (attunementRequirement && !attunementRequirement.toLowerCase().includes(character.className.toLowerCase())) warnings.push(`Attunement prerequisite: ${attunementRequirement}; verify eligibility.`);
+  const slot = item.equipmentSlot ?? defaultEquipmentSlot(definition);
+  const otherEquipped = character.inventory.filter((entry) => entry.id !== item.id && entry.equipped);
+  if (["main-hand", "off-hand", "armor"].includes(slot ?? "") && otherEquipped.some((entry) => (entry.equipmentSlot ?? defaultEquipmentSlot(entry.contentId ? catalog.find((definition) => definition.id === entry.contentId) : undefined)) === slot)) warnings.push(`${slot?.replace("-", " ")} is already occupied.`);
+  if (slot === "two-hands" && otherEquipped.some((entry) => ["main-hand", "off-hand", "two-hands"].includes(entry.equipmentSlot ?? defaultEquipmentSlot(entry.contentId ? catalog.find((definition) => definition.id === entry.contentId) : undefined) ?? ""))) warnings.push("Two-handed use conflicts with another held item.");
+  if (["main-hand", "off-hand"].includes(slot ?? "") && otherEquipped.some((entry) => (entry.equipmentSlot ?? defaultEquipmentSlot(entry.contentId ? catalog.find((definition) => definition.id === entry.contentId) : undefined)) === "two-hands")) warnings.push("A two-handed item is already equipped.");
+  return warnings;
+}
+
+export function hasUnproficientArmor(character: CharacterData, catalog: EquipmentDefinition[]) {
+  return character.inventory.some((item) => {
+    const definition = item.equipped && item.contentId ? catalog.find((entry) => entry.id === item.contentId) : undefined;
+    return Boolean(definition && /armor|shield/i.test(definition.category) && !isEquipmentProficient(character, definition));
+  });
+}
+
+function actionTiming(text: string): GeneratedAction["timing"] {
+  if (/bonus action/i.test(text)) return "bonus";
+  if (/\breaction\b/i.test(text)) return "reaction";
+  if (/as an? (?:magic |attack )?action|take the (?:magic |attack )?action/i.test(text)) return "action";
+  return "passive";
+}
+
+export function generatedCharacterActions(character: CharacterData, catalog: EquipmentDefinition[]): GeneratedAction[] {
+  const featureActions = [...character.features, ...character.feats].map((feature, index) => {
+    const resource = character.resources.find((entry) => feature.description.toLowerCase().includes(entry.name.toLowerCase()) || feature.name.toLowerCase() === entry.name.toLowerCase());
+    const costMatch = feature.description.match(/(?:expend|spend)\s+(?:one|a|an|(\d+))\s+(?:use of (?:your )?)?([A-Za-z ]+?)(?:\.|,| to| point)/i);
+    return {
+      id: `feature-${feature.id ?? `${feature.name}-${index}`}`,
+      name: feature.name,
+      timing: actionTiming(feature.description),
+      source: "Feature",
+      description: feature.description,
+      resourceId: resource?.id,
+      resourceCost: resource ? Math.max(1, Number(costMatch?.[1]) || 1) : undefined,
+    } satisfies GeneratedAction;
+  });
+  const spellActions = character.spells.filter((spell) => spell.level === 0 || spell.prepared).map((spell) => ({
+    id: `spell-${spell.id}`,
+    name: spell.name,
+    timing: /bonus action/i.test(spell.castingTime) ? "bonus" as const : /reaction/i.test(spell.castingTime) ? "reaction" as const : "action" as const,
+    source: `Spell · ${spell.level ? `Level ${spell.level}` : "Cantrip"}`,
+    description: spell.description,
+    spellId: spell.id,
+  }));
+  const attackActions = character.attacks.map((attack) => ({ id: `attack-${attack.id}`, name: attack.name, timing: "action" as const, source: "Attack", description: `${attack.damage} ${attack.damageType}${attack.notes ? ` · ${attack.notes}` : ""}` }));
+  const itemActions = character.inventory.filter((item) => item.equipped && (item.consumable || item.maximumCharges !== undefined)).map((item) => ({ id: `item-${item.id}`, name: item.name, timing: "action" as const, source: "Equipment", description: item.notes || "Use this equipped item.", inventoryId: item.id }));
+  return [...attackActions, ...spellActions, ...featureActions, ...itemActions];
+}
+
+export function activeEffectFromSpell(spell: SpellDefinition): ActiveEffect | null {
+  if (/instantaneous/i.test(spell.duration)) return null;
+  const concentration = /concentration|^c(?:,|\b)/i.test(spell.duration);
+  const roundMatch = spell.duration.match(/(\d+)\s+round/i);
+  const minuteMatch = spell.duration.match(/(\d+)\s+minute/i);
+  const hourMatch = spell.duration.match(/(\d+)\s+hour/i);
+  const rounds = roundMatch ? Number(roundMatch[1]) : minuteMatch ? Number(minuteMatch[1]) * 10 : hourMatch ? Number(hourMatch[1]) * 600 : undefined;
+  return { id: crypto.randomUUID(), name: spell.name, source: "Spell", duration: rounds ? "rounds" : "manual", remaining: rounds, concentration };
+}
+
+export function concentrationSave(character: CharacterData, damage: number) {
+  const dc = Math.max(10, Math.floor(Math.max(0, damage) / 2));
+  const modifier = abilityModifier(character.abilities.stamina) + (character.savingThrowProficiencies.includes("stamina") ? character.proficiencyBonus : 0) + (character.savingThrowBonuses.stamina ?? 0);
+  const advantage = character.feats.some((feat) => /war caster/i.test(feat.name));
+  const rolls = advantage ? [Math.floor(Math.random() * 20) + 1, Math.floor(Math.random() * 20) + 1] : [Math.floor(Math.random() * 20) + 1];
+  const roll = Math.max(...rolls);
+  return { dc, modifier, rolls, total: roll + modifier, success: roll + modifier >= dc, advantage };
+}
+
 function automaticResourcesFor(className: string, level: number, abilities: CharacterData["abilities"]): CharacterResource[] {
   const normalizedClass = className.trim().toLowerCase();
   const templates: Array<Omit<CharacterResource, "id" | "current">> = [];
@@ -286,19 +472,19 @@ export function resolveIncomingDamage(amount: number, damageType: string, charac
   };
 }
 
-export function attackFromEquipment(item: EquipmentDefinition): CharacterAttack {
+export function attackFromEquipment(item: EquipmentDefinition, proficient = true, masteryActive = false): CharacterAttack {
   const usesAgility = item.category.toLowerCase().includes("ranged") || item.properties?.some((property) => property.toLowerCase() === "finesse");
   return {
     id: crypto.randomUUID(),
     contentId: item.id,
     name: item.name,
     ability: usesAgility ? "agility" : "strength",
-    proficient: true,
+    proficient,
     bonus: 0,
     damage: item.damage ?? "",
     damageType: item.damageType ?? "",
     damageBonus: 0,
-    notes: [item.properties?.join(", "), item.mastery ? `Mastery: ${item.mastery}` : ""].filter(Boolean).join(" · "),
+    notes: [item.properties?.join(", "), item.mastery ? `${masteryActive ? "Mastery" : "Mastery not selected"}: ${item.mastery}` : ""].filter(Boolean).join(" · "),
   };
 }
 
@@ -312,6 +498,7 @@ export function conditionRollEffects(character: CharacterData, kind: RollKind, a
   if (kind === "save" && ability === "agility" && conditions.has("Restrained")) reasons.push("Restrained");
   if (encumbranceDisadvantage(character, kind, ability)) reasons.push("Heavily encumbered");
   if (kind === "ability" && skillName === "Stealth" && equippedArmorEffects(character, catalog).stealthDisadvantage) reasons.push("Equipped armor");
+  if (hasUnproficientArmor(character, catalog) && (kind === "attack" || ability === "strength" || ability === "agility")) reasons.push("Armor without proficiency");
   return {
     forcedDisadvantage: reasons.length > 0,
     reasons,
