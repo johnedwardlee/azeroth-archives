@@ -124,6 +124,12 @@ export type InventoryItem = {
   notes: string;
   weight?: string;
   cost?: string;
+  charges?: number;
+  maximumCharges?: number;
+  ammunition?: number;
+  consumable?: boolean;
+  attuned?: boolean;
+  container?: string;
 };
 
 export type CharacterAttack = {
@@ -135,6 +141,7 @@ export type CharacterAttack = {
   bonus: number;
   damage: string;
   damageType: string;
+  damageBonus: number;
   notes: string;
 };
 
@@ -149,7 +156,7 @@ export type CurrencyState = {
   gold: number;
 };
 
-export type ResourceRecovery = "short" | "long" | "manual";
+export type ResourceRecovery = "short" | "short-one" | "long" | "manual";
 
 export type CharacterResource = {
   id: string;
@@ -157,6 +164,8 @@ export type CharacterResource = {
   current: number;
   maximum: number;
   recovery: ResourceRecovery;
+  automatic?: boolean;
+  source?: string;
 };
 
 export type ContentPack = {
@@ -215,6 +224,11 @@ export type CharacterData = {
   deathSaveFailures: number;
   conditions: string[];
   exhaustionLevel: number;
+  damageResistances: string[];
+  damageVulnerabilities: string[];
+  damageImmunities: string[];
+  conditionImmunities: string[];
+  savingThrowBonuses: Partial<Record<AbilityKey, number>>;
   notes: string;
   createdAt: string;
   updatedAt: string;

@@ -33,6 +33,10 @@ import {
   calculateEffectiveSpeed,
   calculateEncumbrance,
   conditionEffectText,
+  preparedSpellLimitFor,
+  progressionSpellSlots,
+  syncAutomaticResources,
+  syncProgressionSpellSlots,
   spellcastingAbilityForClass,
 } from "../lib/character-rules";
 import {
@@ -149,6 +153,11 @@ function newCharacter(): CharacterData {
     deathSaveFailures: 0,
     conditions: [],
     exhaustionLevel: 0,
+    damageResistances: [],
+    damageVulnerabilities: [],
+    damageImmunities: [],
+    conditionImmunities: [],
+    savingThrowBonuses: {},
     notes: "",
     createdAt: now,
     updatedAt: now,
@@ -158,21 +167,30 @@ function newCharacter(): CharacterData {
 function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
   const defaults = newCharacter();
   const maximumHitDice = Math.max(1, Number(value.hitDiceTotal ?? value.level ?? 1));
-  return {
+  const normalized: CharacterData = {
     ...defaults,
     ...value,
+    abilities: { ...defaults.abilities, ...(value.abilities ?? {}) },
     portraitDataUrl: typeof value.portraitDataUrl === "string" && value.portraitDataUrl.startsWith("data:image/") ? value.portraitDataUrl : undefined,
     subclassName: value.subclassName ?? "",
     temporaryHp: Math.max(0, Number(value.temporaryHp ?? 0)),
     savingThrowProficiencies: Array.isArray(value.savingThrowProficiencies) ? value.savingThrowProficiencies : [],
     skillProficiencies: Array.isArray(value.skillProficiencies) ? value.skillProficiencies : [],
     skillExpertise: Array.isArray(value.skillExpertise) ? value.skillExpertise : [],
-    attacks: Array.isArray(value.attacks) ? value.attacks : [],
+    attacks: Array.isArray(value.attacks) ? value.attacks.map((attack) => ({ ...attack, damageBonus: Number(attack.damageBonus) || 0 })) : [],
     feats: Array.isArray(value.feats) ? value.feats : [],
     spells: Array.isArray(value.spells) ? value.spells : [],
     spellSlots: value.spellSlots && typeof value.spellSlots === "object" ? value.spellSlots : {},
     concentratingSpellId: typeof value.concentratingSpellId === "string" ? value.concentratingSpellId : undefined,
-    inventory: Array.isArray(value.inventory) ? value.inventory : [],
+    inventory: Array.isArray(value.inventory) ? value.inventory.map((item) => ({
+      ...item,
+      charges: item.charges === undefined ? undefined : Math.max(0, Number(item.charges) || 0),
+      maximumCharges: item.maximumCharges === undefined ? undefined : Math.max(0, Number(item.maximumCharges) || 0),
+      ammunition: item.ammunition === undefined ? undefined : Math.max(0, Number(item.ammunition) || 0),
+      consumable: Boolean(item.consumable),
+      attuned: Boolean(item.attuned),
+      container: typeof item.container === "string" ? item.container : "",
+    })) : [],
     currency: { ...defaults.currency, ...(value.currency ?? {}) },
     resources: Array.isArray(value.resources)
       ? value.resources.filter((resource) => resource && typeof resource.name === "string").map((resource) => {
@@ -182,7 +200,9 @@ function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
             name: resource.name.trim() || "Class resource",
             current: Math.max(0, Math.min(maximum, Number(resource.current) || 0)),
             maximum,
-            recovery: (["short", "long", "manual"] as const).includes(resource.recovery) ? resource.recovery : "long",
+            recovery: (["short", "short-one", "long", "manual"] as const).includes(resource.recovery) ? resource.recovery : "long",
+            automatic: Boolean(resource.automatic),
+            source: typeof resource.source === "string" ? resource.source : undefined,
           };
         })
       : [],
@@ -193,6 +213,17 @@ function normalizeCharacter(value: Partial<CharacterData>): CharacterData {
     deathSaveFailures: Math.max(0, Math.min(3, Number(value.deathSaveFailures ?? 0))),
     conditions: Array.isArray(value.conditions) ? value.conditions : [],
     exhaustionLevel: Math.max(0, Math.min(6, Number(value.exhaustionLevel ?? (value.conditions?.includes("Exhaustion") ? 1 : 0)))),
+    damageResistances: Array.isArray(value.damageResistances) ? value.damageResistances : [],
+    damageVulnerabilities: Array.isArray(value.damageVulnerabilities) ? value.damageVulnerabilities : [],
+    damageImmunities: Array.isArray(value.damageImmunities) ? value.damageImmunities : [],
+    conditionImmunities: Array.isArray(value.conditionImmunities) ? value.conditionImmunities : [],
+    savingThrowBonuses: value.savingThrowBonuses && typeof value.savingThrowBonuses === "object" ? value.savingThrowBonuses : {},
+  };
+  const progressionSlots = syncProgressionSpellSlots(normalized.spellSlots, normalized.className, normalized.subclassName ?? "", normalized.level);
+  return {
+    ...normalized,
+    ...(progressionSlots ? { spellSlots: progressionSlots } : {}),
+    resources: syncAutomaticResources(normalized.resources, normalized.className, normalized.level, normalized.abilities),
   };
 }
 
@@ -246,6 +277,9 @@ export function CharacterManager() {
   const [menuCharacterId, setMenuCharacterId] = useState<string | null>(null);
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [levelUpHpGain, setLevelUpHpGain] = useState(1);
+  const [levelUpChoice, setLevelUpChoice] = useState<"abilities" | "feat">("abilities");
+  const [levelUpAbilities, setLevelUpAbilities] = useState<[AbilityKey, AbilityKey]>(["strength", "stamina"]);
+  const [levelUpFeatId, setLevelUpFeatId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<CharacterData | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const characterFileInput = useRef<HTMLInputElement>(null);
@@ -306,12 +340,12 @@ export function CharacterManager() {
   const plannedClassFeatures = selectedClass?.levelFeatures[String(plannedLevel)] ?? [];
   const plannedSubclassFeatures = selectedSubclass?.levelFeatures[String(plannedLevel)] ?? [];
   const plannedFeatures = [...plannedClassFeatures, ...plannedSubclassFeatures];
+  const hasAdvancementChoice = plannedFeatures.some((feature) => /Ability Score Improvement/i.test(feature.name));
   const needsSubclass = !selectedSubclass && Boolean(selectedClass?.subclasses?.some((item) => (item.levelFeatures[String(plannedLevel)] ?? []).length));
   const encumbrance = useMemo(() => calculateEncumbrance(character.inventory, character.abilities.strength), [character.inventory, character.abilities.strength]);
   const effectiveArmor = useMemo(() => calculateArmorClass(character, equipment), [character, equipment]);
-  const effectiveSpeed = useMemo(() => calculateEffectiveSpeed(character, encumbrance), [character, encumbrance]);
-  const spellcastingAbility = spellcastingAbilityForClass(character.className, character.subclassName, selectedClass?.primaryAbility);
-
+  const effectiveSpeed = useMemo(() => calculateEffectiveSpeed(character, encumbrance, equipment), [character, encumbrance, equipment]);
+  const spellcastingAbility = spellcastingAbilityForClass(character.className, character.subclassName ?? "", selectedClass?.primaryAbility);
   useEffect(() => {
     const load = window.azerothDesktop?.load() ?? Promise.resolve(readBrowserStore());
     load.then((store) => {
@@ -364,7 +398,8 @@ export function CharacterManager() {
   }
 
   function updateAbility(key: AbilityKey, value: number) {
-    patchCharacter({ abilities: { ...character.abilities, [key]: Math.max(1, Math.min(30, value || 1)) } });
+    const abilities = { ...character.abilities, [key]: Math.max(1, Math.min(30, value || 1)) };
+    patchCharacter({ abilities, resources: syncAutomaticResources(character.resources, character.className, character.level, abilities) });
   }
 
   function applyAncestry(name: string) {
@@ -383,6 +418,8 @@ export function CharacterManager() {
     const selectedClass = classes.find((item) => item.name === name);
     const classFeatureNames = new Set(classes.flatMap((item) => Object.values(item.levelFeatures).flat().map((feature) => feature.name)));
     const subclassFeatureNames = new Set(classes.flatMap((item) => (item.subclasses ?? []).flatMap((subclass) => Object.values(subclass.levelFeatures).flat().map((feature) => feature.name))));
+    const progressionSlots = syncProgressionSpellSlots(character.spellSlots, name, "", character.level);
+    const startingHp = selectedClass && character.level === 1 ? Math.max(1, selectedClass.hitDie + abilityModifier(character.abilities.stamina)) : null;
     patchCharacter({
       className: name,
       subclassName: "",
@@ -393,12 +430,16 @@ export function CharacterManager() {
           .filter(([level]) => Number(level) <= character.level)
           .flatMap(([, features]) => features),
       ],
+      spellSlots: progressionSlots ?? {},
+      resources: syncAutomaticResources(character.resources, name, character.level, character.abilities),
+      ...(startingHp !== null ? { maxHp: startingHp, currentHp: startingHp, hitDiceTotal: 1, hitDiceUsed: 0 } : {}),
     });
   }
 
   function applySubclass(name: string) {
     const selectedSubclass = subclasses.find((item) => item.name === name);
     const subclassFeatureNames = new Set(classes.flatMap((item) => (item.subclasses ?? []).flatMap((subclass) => Object.values(subclass.levelFeatures).flat().map((feature) => feature.name))));
+    const progressionSlots = syncProgressionSpellSlots(character.spellSlots, character.className, name, character.level);
     patchCharacter({
       subclassName: name,
       features: [
@@ -407,6 +448,7 @@ export function CharacterManager() {
           .filter(([level]) => Number(level) <= character.level)
           .flatMap(([, features]) => features),
       ],
+      ...(progressionSlots ? { spellSlots: progressionSlots } : {}),
     });
   }
 
@@ -544,6 +586,9 @@ export function CharacterManager() {
     }
     const staminaBonus = abilityModifier(character.abilities.stamina);
     setLevelUpHpGain(Math.max(1, Math.floor(selectedClass.hitDie / 2) + 1 + staminaBonus));
+    setLevelUpChoice("abilities");
+    setLevelUpAbilities([selectedClass.primaryAbility, "stamina"]);
+    setLevelUpFeatId("");
     setShowLevelUp(true);
   }
 
@@ -552,6 +597,13 @@ export function CharacterManager() {
     const nextLevel = character.level + 1;
     const newFeatures = selectedClass?.levelFeatures[String(nextLevel)] ?? [];
     const newSubclassFeatures = selectedSubclass?.levelFeatures[String(nextLevel)] ?? [];
+    const abilities = { ...character.abilities };
+    if (hasAdvancementChoice && levelUpChoice === "abilities") {
+      for (const ability of levelUpAbilities) abilities[ability] = Math.min(20, abilities[ability] + 1);
+    }
+    const selectedFeat = hasAdvancementChoice && levelUpChoice === "feat" ? feats.find((feat) => feat.id === levelUpFeatId) : undefined;
+    if (hasAdvancementChoice && levelUpChoice === "feat" && !selectedFeat) return;
+    const progressionSlots = syncProgressionSpellSlots(character.spellSlots, character.className, character.subclassName ?? "", nextLevel);
     patchCharacter({
       level: nextLevel,
       experience: 0,
@@ -559,6 +611,10 @@ export function CharacterManager() {
       currentHp: character.currentHp + levelUpHpGain,
       proficiencyBonus: proficiencyForLevel(nextLevel),
       hitDiceTotal: nextLevel,
+      abilities,
+      resources: syncAutomaticResources(character.resources, character.className, nextLevel, abilities),
+      ...(progressionSlots ? { spellSlots: progressionSlots } : {}),
+      feats: selectedFeat && !character.feats.some((feat) => feat.id === selectedFeat.id) ? [...character.feats, selectedFeat] : character.feats,
       features: [...character.features, ...[...newFeatures, ...newSubclassFeatures].filter((feature) => !character.features.some((existing) => existing.name === feature.name))],
     });
     setShowLevelUp(false);
@@ -683,7 +739,7 @@ export function CharacterManager() {
     };
     addLivingSection("SAVING THROWS", abilityKeys.map((ability) => {
       const proficient = character.savingThrowProficiencies.includes(ability);
-      const modifier = abilityModifier(character.abilities[ability]) + (proficient ? character.proficiencyBonus : 0);
+      const modifier = abilityModifier(character.abilities[ability]) + (proficient ? character.proficiencyBonus : 0) + (character.savingThrowBonuses[ability] ?? 0);
       return { name: `${proficient ? "Proficient · " : ""}${ABILITY_LABELS[ability]}`, detail: `${modifier >= 0 ? "+" : ""}${modifier}` };
     }));
     addLivingSection("SKILLS", SKILLS.map((skill) => {
@@ -694,12 +750,19 @@ export function CharacterManager() {
     }));
     addLivingSection("ATTACKS", character.attacks.map((attack) => {
       const modifier = abilityModifier(character.abilities[attack.ability]) + (attack.proficient ? character.proficiencyBonus : 0) + attack.bonus;
-      return { name: attack.name, detail: `Attack ${modifier >= 0 ? "+" : ""}${modifier} · ${attack.damage || "—"} ${attack.damageType}${attack.notes ? ` · ${attack.notes}` : ""}` };
+      const damageModifier = abilityModifier(character.abilities[attack.ability]) + attack.damageBonus;
+      return { name: attack.name, detail: `Attack ${modifier >= 0 ? "+" : ""}${modifier} · ${attack.damage || "—"}${damageModifier ? ` ${damageModifier >= 0 ? "+" : ""}${damageModifier}` : ""} ${attack.damageType}${attack.notes ? ` · ${attack.notes}` : ""}` };
     }));
     addLivingSection("FEATS", character.feats.map((feat) => ({ name: feat.name, detail: `${feat.category}${feat.prerequisite ? ` · ${feat.prerequisite}` : ""}\n${feat.description}` })));
     addLivingSection("SPELLBOOK", character.spells.map((spell) => ({ name: `${spell.prepared ? "Prepared · " : ""}${spell.name}`, detail: `${spell.level ? `Level ${spell.level}` : "Cantrip"} ${spell.school} · ${spell.castingTime} · ${spell.range} · ${spell.duration}` })));
-    addLivingSection("EQUIPMENT", character.inventory.map((item) => ({ name: `${item.equipped ? "Equipped · " : ""}${item.quantity}× ${item.name}`, detail: [item.category, item.weight, item.cost, item.notes].filter(Boolean).join(" · ") })));
-    addLivingSection("CLASS RESOURCES", character.resources.map((resource) => ({ name: resource.name, detail: `${resource.current}/${resource.maximum} · ${resource.recovery === "short" ? "Short or Long Rest" : resource.recovery === "long" ? "Long Rest" : "Manual recovery"}` })));
+    addLivingSection("EQUIPMENT", character.inventory.map((item) => ({ name: `${item.equipped ? "Equipped · " : ""}${item.quantity}× ${item.name}`, detail: [item.category, item.weight, item.cost, item.attuned ? "Attuned" : "", item.ammunition !== undefined ? `${item.ammunition} ammunition` : "", item.maximumCharges !== undefined ? `${item.charges ?? 0}/${item.maximumCharges} charges` : "", item.container ? `In ${item.container}` : "", item.notes].filter(Boolean).join(" · ") })));
+    addLivingSection("CLASS RESOURCES", character.resources.map((resource) => ({ name: resource.name, detail: `${resource.current}/${resource.maximum} · ${resource.recovery === "short" ? "Short or Long Rest" : resource.recovery === "short-one" ? "One use on Short Rest; all on Long Rest" : resource.recovery === "long" ? "Long Rest" : "Manual recovery"}` })));
+    addLivingSection("DEFENSES", [
+      { name: "Resistances", detail: character.damageResistances.join(", ") || "None" },
+      { name: "Vulnerabilities", detail: character.damageVulnerabilities.join(", ") || "None" },
+      { name: "Damage immunities", detail: character.damageImmunities.join(", ") || "None" },
+      { name: "Condition immunities", detail: character.conditionImmunities.join(", ") || "None" },
+    ]);
     addLivingSection("ENCUMBRANCE", [{ name: `${encumbrance.totalWeight}/${encumbrance.carryingCapacity} lb. · ${encumbrance.label}`, detail: encumbrance.penalty }]);
     if (spellcastingAbility) {
       const spellcastingModifier = abilityModifier(character.abilities[spellcastingAbility]);
@@ -838,7 +901,7 @@ export function CharacterManager() {
                 <button className="text-button" onClick={() => setTab("features")}>View all features <span>→</span></button>
               </div>
             </section>
-            <SessionTracker character={character} patchCharacter={patchCharacter} />
+            <SessionTracker character={character} patchCharacter={patchCharacter} hitDie={selectedClass?.hitDie ?? 8} />
           </div>
         )}
 
@@ -892,6 +955,16 @@ export function CharacterManager() {
             <div><span>Proficiency</span><strong>+{proficiencyForLevel(plannedLevel)}</strong></div>
             <label><span>Hit points gained</span><input type="number" min="1" max="99" value={levelUpHpGain} onChange={(event) => setLevelUpHpGain(Math.max(1, Math.min(99, Number(event.target.value) || 1)))} /></label>
           </div>
+          {hasAdvancementChoice && <div className="advancement-choice">
+            <span className="eyebrow">Ability Score Improvement choice</span>
+            <div className="advancement-choice-tabs"><button className={levelUpChoice === "abilities" ? "active" : ""} onClick={() => setLevelUpChoice("abilities")}>Increase abilities</button><button className={levelUpChoice === "feat" ? "active" : ""} onClick={() => setLevelUpChoice("feat")}>Choose a feat</button></div>
+            {levelUpChoice === "abilities" ? <div className="advancement-abilities">
+              <label>First +1<select value={levelUpAbilities[0]} onChange={(event) => setLevelUpAbilities([event.target.value as AbilityKey, levelUpAbilities[1]])}>{abilityKeys.map((ability) => <option key={ability} value={ability}>{ABILITY_LABELS[ability]} ({character.abilities[ability]})</option>)}</select></label>
+              <label>Second +1<select value={levelUpAbilities[1]} onChange={(event) => setLevelUpAbilities([levelUpAbilities[0], event.target.value as AbilityKey])}>{abilityKeys.map((ability) => <option key={ability} value={ability}>{ABILITY_LABELS[ability]} ({character.abilities[ability]})</option>)}</select></label>
+              <small>Select the same ability twice for +2. Ability Score Improvements cannot raise a score above 20.</small>
+            </div> : <label className="advancement-feat">Feat<select value={levelUpFeatId} onChange={(event) => setLevelUpFeatId(event.target.value)}><option value="">Choose an eligible feat</option>{feats.filter((feat) => !character.feats.some((known) => known.id === feat.id)).map((feat) => <option key={feat.id} value={feat.id}>{feat.name}{feat.prerequisite ? ` — ${feat.prerequisite}` : ""}</option>)}</select><small>Prerequisites are shown for review; the app does not override the GM’s eligibility ruling.</small></label>}
+          </div>}
+          {progressionSpellSlots(character.className, character.subclassName ?? "", plannedLevel) && <p className="progression-note">Spell slots will update automatically for level {plannedLevel}. Prepared spell limit: {preparedSpellLimitFor(character.className, character.subclassName ?? "", plannedLevel) ?? "—"}.</p>}
           <div className="level-up-features">
             <span className="eyebrow">Features gained</span>
             {plannedFeatures.map((feature) => <article key={feature.id ?? feature.name}><div className="level-up-feature-title"><strong>{feature.name}</strong>{featureOrigin(feature) && <small className="feature-origin">{featureOrigin(feature)}</small>}</div><p>{feature.description}</p></article>)}
@@ -900,7 +973,7 @@ export function CharacterManager() {
           </div>
           <div className="level-up-actions">
             <button className="button button-outline" onClick={() => setShowLevelUp(false)}>Cancel</button>
-            <button className="button button-primary" disabled={needsSubclass} onClick={confirmLevelUp}><Sparkles size={15} />Apply level {plannedLevel}</button>
+            <button className="button button-primary" disabled={needsSubclass || (hasAdvancementChoice && levelUpChoice === "feat" && !levelUpFeatId)} onClick={confirmLevelUp}><Sparkles size={15} />Apply level {plannedLevel}</button>
           </div>
         </section>
       </div>}

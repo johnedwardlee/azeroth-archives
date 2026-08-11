@@ -3,13 +3,37 @@ import {
   type AbilityKey,
   type CharacterAttack,
   type CharacterData,
+  type CharacterResource,
   type EquipmentDefinition,
   type InventoryItem,
+  type SpellSlotState,
 } from "./types";
 
 export type EncumbranceLevel = "unencumbered" | "encumbered" | "heavily-encumbered" | "over-capacity";
 export type RollKind = "ability" | "attack" | "save";
 export type RollMode = "normal" | "advantage" | "disadvantage";
+
+export const DAMAGE_TYPES = ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"];
+
+const fullCasterSlots = [
+  [], [2], [3], [4, 2], [4, 3], [4, 3, 2], [4, 3, 3], [4, 3, 3, 1], [4, 3, 3, 2], [4, 3, 3, 3, 1],
+  [4, 3, 3, 3, 2], [4, 3, 3, 3, 2, 1], [4, 3, 3, 3, 2, 1], [4, 3, 3, 3, 2, 1, 1], [4, 3, 3, 3, 2, 1, 1],
+  [4, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1, 1],
+  [4, 3, 3, 3, 3, 1, 1, 1, 1], [4, 3, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 3, 2, 2, 1, 1],
+];
+
+const halfCasterSlots = [
+  [], [2], [2], [3], [3], [4, 2], [4, 2], [4, 3], [4, 3], [4, 3, 2], [4, 3, 2], [4, 3, 3], [4, 3, 3],
+  [4, 3, 3, 1], [4, 3, 3, 1], [4, 3, 3, 2], [4, 3, 3, 2], [4, 3, 3, 3, 1], [4, 3, 3, 3, 1], [4, 3, 3, 3, 2], [4, 3, 3, 3, 2],
+];
+
+const thirdCasterSlots = [
+  [], [], [], [2], [3], [3], [3], [4, 2], [4, 2], [4, 2], [4, 3], [4, 3], [4, 3], [4, 3, 2], [4, 3, 2], [4, 3, 2], [4, 3, 3], [4, 3, 3], [4, 3, 3], [4, 3, 3, 1], [4, 3, 3, 1],
+];
+
+const standardPrepared = [0, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22];
+const sorcererPrepared = [0, 2, 4, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22];
+const halfCasterPrepared = [0, 2, 3, 4, 5, 6, 6, 7, 7, 9, 9, 10, 10, 11, 11, 12, 12, 14, 14, 15, 15];
 
 const spellcastingAbilities: Record<string, AbilityKey> = {
   bard: "charisma",
@@ -109,14 +133,36 @@ export function calculateArmorClass(character: CharacterData, catalog: Equipment
   };
 }
 
-export function calculateEffectiveSpeed(character: CharacterData, encumbrance = calculateEncumbrance(character.inventory, character.abilities.strength)) {
+export function equippedArmorEffects(character: CharacterData, catalog: EquipmentDefinition[]) {
+  const catalogById = new Map(catalog.map((item) => [item.id, item]));
+  const equippedArmor = character.inventory
+    .filter((item) => item.equipped && item.contentId)
+    .map((item) => catalogById.get(item.contentId!))
+    .filter((item): item is EquipmentDefinition => Boolean(item && /armor/i.test(item.category)));
+  const strengthRequirements = equippedArmor.map((item) => ({
+    item,
+    required: Number(item.description?.match(/Strength:\s*(?:Str(?:ength)?\s*)?(\d+)/i)?.[1] ?? 0),
+  }));
+  const unmetStrength = strengthRequirements.find(({ required }) => required > character.abilities.strength);
+  const stealthDisadvantage = equippedArmor.some((item) => /Stealth:\s*Disadvantage/i.test(item.description ?? ""));
+  return {
+    speedPenalty: unmetStrength ? 10 : 0,
+    strengthRequirement: unmetStrength?.required ?? 0,
+    strengthArmorName: unmetStrength?.item.name ?? "",
+    stealthDisadvantage,
+  };
+}
+
+export function calculateEffectiveSpeed(character: CharacterData, encumbrance = calculateEncumbrance(character.inventory, character.abilities.strength), catalog: EquipmentDefinition[] = []) {
   const exhaustionPenalty = Math.max(0, Math.min(6, character.exhaustionLevel || 0)) * 5;
+  const armorEffects = equippedArmorEffects(character, catalog);
   const stoppedBy = character.conditions.find((condition) => zeroSpeedConditions.has(condition));
   const overCapacity = encumbrance.level === "over-capacity";
-  const value = stoppedBy || overCapacity ? 0 : Math.max(0, character.speed - encumbrance.speedPenalty - exhaustionPenalty);
+  const value = stoppedBy || overCapacity ? 0 : Math.max(0, character.speed - encumbrance.speedPenalty - exhaustionPenalty - armorEffects.speedPenalty);
   const effects = [
     encumbrance.speedPenalty ? `Encumbrance −${encumbrance.speedPenalty} ft.` : "",
     exhaustionPenalty ? `Exhaustion −${exhaustionPenalty} ft.` : "",
+    armorEffects.speedPenalty ? `${armorEffects.strengthArmorName} requires Strength ${armorEffects.strengthRequirement}: −10 ft.` : "",
     stoppedBy ? `${stoppedBy}: Speed 0` : "",
     overCapacity ? "Over capacity: Speed 0" : "",
   ].filter(Boolean);
@@ -132,6 +178,114 @@ export function spellcastingAbilityForClass(className: string, subclassName = ""
   return spellcastingAbilities[normalizedClass] ?? fallback ?? null;
 }
 
+export function progressionSpellSlots(className: string, subclassName: string, level: number) {
+  const normalizedClass = className.trim().toLowerCase();
+  const normalizedSubclass = subclassName.trim().toLowerCase();
+  const safeLevel = Math.max(1, Math.min(20, level));
+  const progression = ["bard", "priest", "sorcerer", "mage"].includes(normalizedClass)
+    ? fullCasterSlots
+    : ["paladin", "hunter"].includes(normalizedClass)
+      ? halfCasterSlots
+      : (normalizedClass === "warrior" && normalizedSubclass.includes("eldritch knight")) || (normalizedClass === "rogue" && normalizedSubclass.includes("arcane trickster"))
+        ? thirdCasterSlots
+        : null;
+  if (!progression) return null;
+  return Object.fromEntries((progression[safeLevel] ?? []).map((maximum, index) => [String(index + 1), maximum]));
+}
+
+export function syncProgressionSpellSlots(current: Record<string, SpellSlotState>, className: string, subclassName: string, level: number) {
+  const progression = progressionSpellSlots(className, subclassName, level);
+  if (!progression) return null;
+  return Object.fromEntries(Object.entries(progression).map(([slotLevel, maximum]) => [slotLevel, {
+    maximum,
+    used: Math.min(maximum, current[slotLevel]?.used ?? 0),
+  }]));
+}
+
+export function preparedSpellLimitFor(className: string, subclassName: string, level: number) {
+  const normalizedClass = className.trim().toLowerCase();
+  const normalizedSubclass = subclassName.trim().toLowerCase();
+  const safeLevel = Math.max(1, Math.min(20, level));
+  if (["bard", "priest", "mage"].includes(normalizedClass)) return standardPrepared[safeLevel];
+  if (normalizedClass === "sorcerer") return sorcererPrepared[safeLevel];
+  if (["paladin", "hunter"].includes(normalizedClass)) return halfCasterPrepared[safeLevel];
+  if ((normalizedClass === "warrior" && normalizedSubclass.includes("eldritch knight")) || (normalizedClass === "rogue" && normalizedSubclass.includes("arcane trickster"))) {
+    return Math.max(3, Math.ceil(safeLevel / 3) + 2);
+  }
+  return null;
+}
+
+function automaticResourcesFor(className: string, level: number, abilities: CharacterData["abilities"]): CharacterResource[] {
+  const normalizedClass = className.trim().toLowerCase();
+  const templates: Array<Omit<CharacterResource, "id" | "current">> = [];
+  const add = (name: string, maximum: number, recovery: CharacterResource["recovery"]) => templates.push({ name, maximum, recovery, automatic: true, source: className });
+  if (normalizedClass === "barbarian") add("Rage", level >= 17 ? 6 : level >= 12 ? 5 : level >= 6 ? 4 : level >= 3 ? 3 : 2, "short-one");
+  if (normalizedClass === "bard") add("Bardic Inspiration", Math.max(1, abilityModifier(abilities.charisma)), level >= 5 ? "short" : "long");
+  if (normalizedClass === "priest" && level >= 2) add("Channel Faith", level >= 18 ? 4 : level >= 6 ? 3 : 2, "short-one");
+  if (normalizedClass === "warrior") add("Second Wind", level >= 10 ? 4 : level >= 4 ? 3 : 2, "short-one");
+  if (normalizedClass === "monk" && level >= 2) add("Focus Points", level, "short");
+  if (normalizedClass === "paladin") {
+    add("Lay on Hands", level * 5, "long");
+    if (level >= 3) add("Channel Faith", 2, "short-one");
+  }
+  if (normalizedClass === "hunter") add("Favored Enemy", level >= 17 ? 6 : level >= 13 ? 5 : level >= 9 ? 4 : level >= 5 ? 3 : 2, "long");
+  if (normalizedClass === "sorcerer") {
+    add("Innate Sorcery", 2, "long");
+    if (level >= 2) add("Sorcery Points", level, "long");
+  }
+  if (normalizedClass === "mage") add("Arcane Recovery", 1, "long");
+  return templates.map((template) => ({ ...template, id: crypto.randomUUID(), current: template.maximum }));
+}
+
+export function syncAutomaticResources(resources: CharacterResource[], className: string, level: number, abilities: CharacterData["abilities"]) {
+  const templates = automaticResourcesFor(className, level, abilities);
+  const templateNames = new Set(templates.map((template) => template.name.toLowerCase()));
+  const result = resources.filter((resource) => !resource.automatic || templateNames.has(resource.name.toLowerCase()));
+  for (const template of templates) {
+    const index = result.findIndex((resource) => resource.name.toLowerCase() === template.name.toLowerCase());
+    if (index < 0) {
+      result.push(template);
+      continue;
+    }
+    const current = result[index];
+    const gained = Math.max(0, template.maximum - current.maximum);
+    result[index] = { ...current, ...template, id: current.id, current: Math.min(template.maximum, current.current + gained) };
+  }
+  return result;
+}
+
+export function extractDiceFormula(text: string) {
+  return text.match(/\b\d+d\d+(?:\s*[+-]\s*\d+)?\b/i)?.[0]?.replace(/\s+/g, "") ?? null;
+}
+
+export function rollDiceFormula(formula: string, critical = false, extraModifier = 0) {
+  const match = formula.trim().match(/^(\d+)d(\d+)(?:\s*([+-])\s*(\d+))?$/i);
+  if (!match) return null;
+  const baseDice = Math.max(1, Math.min(100, Number(match[1])));
+  const sides = Math.max(2, Math.min(1000, Number(match[2])));
+  const diceCount = critical ? baseDice * 2 : baseDice;
+  const rolls = Array.from({ length: diceCount }, () => Math.floor(Math.random() * sides) + 1);
+  const formulaModifier = match[3] ? (match[3] === "-" ? -1 : 1) * Number(match[4]) : 0;
+  const modifier = formulaModifier + extraModifier;
+  return { formula, rolls, modifier, total: rolls.reduce((sum, roll) => sum + roll, 0) + modifier, critical };
+}
+
+export function resolveIncomingDamage(amount: number, damageType: string, character: CharacterData) {
+  const safeAmount = Math.max(0, Math.floor(amount || 0));
+  const normalizedType = damageType.trim().toLowerCase();
+  const has = (values: string[]) => values.some((value) => value.toLowerCase() === normalizedType);
+  const immune = has(character.damageImmunities);
+  const resistant = has(character.damageResistances);
+  const vulnerable = has(character.damageVulnerabilities);
+  const multiplier = immune ? 0 : resistant === vulnerable ? 1 : resistant ? 0.5 : 2;
+  const adjusted = multiplier === 0.5 ? Math.floor(safeAmount / 2) : safeAmount * multiplier;
+  return {
+    adjusted,
+    multiplier,
+    reason: immune ? `Immune to ${damageType}` : resistant && vulnerable ? "Resistance and vulnerability cancel" : resistant ? `Resistance to ${damageType}` : vulnerable ? `Vulnerable to ${damageType}` : "No damage modifier",
+  };
+}
+
 export function attackFromEquipment(item: EquipmentDefinition): CharacterAttack {
   const usesAgility = item.category.toLowerCase().includes("ranged") || item.properties?.some((property) => property.toLowerCase() === "finesse");
   return {
@@ -143,11 +297,12 @@ export function attackFromEquipment(item: EquipmentDefinition): CharacterAttack 
     bonus: 0,
     damage: item.damage ?? "",
     damageType: item.damageType ?? "",
+    damageBonus: 0,
     notes: [item.properties?.join(", "), item.mastery ? `Mastery: ${item.mastery}` : ""].filter(Boolean).join(" · "),
   };
 }
 
-export function conditionRollEffects(character: CharacterData, kind: RollKind, ability?: AbilityKey) {
+export function conditionRollEffects(character: CharacterData, kind: RollKind, ability?: AbilityKey, skillName = "", catalog: EquipmentDefinition[] = []) {
   const conditions = new Set(character.conditions);
   const reasons: string[] = [];
   if (kind === "attack" && conditions.has("Blinded")) reasons.push("Blinded");
@@ -156,6 +311,7 @@ export function conditionRollEffects(character: CharacterData, kind: RollKind, a
   if (kind === "attack" && conditions.has("Restrained")) reasons.push("Restrained");
   if (kind === "save" && ability === "agility" && conditions.has("Restrained")) reasons.push("Restrained");
   if (encumbranceDisadvantage(character, kind, ability)) reasons.push("Heavily encumbered");
+  if (kind === "ability" && skillName === "Stealth" && equippedArmorEffects(character, catalog).stealthDisadvantage) reasons.push("Equipped armor");
   return {
     forcedDisadvantage: reasons.length > 0,
     reasons,
