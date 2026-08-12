@@ -107,4 +107,17 @@ describe("character save migrations", () => {
     expect(character.conditions).toContain("Stunned");
     expect(character.attacks[0].inventoryItemId).toBe("dagger-one");
   });
+
+  it("keeps feat spells separate from overlapping class spell lists", () => {
+    const character = normalizeCharacter({
+      id: "feat-spell-owner",
+      name: "Feat Spell Owner",
+      className: "Paladin",
+      classLevels: [{ className: "Paladin", level: 1 }],
+      spells: [{ id: "bless", name: "Bless", level: 1, school: "Enchantment", classes: ["Priest", "Paladin"], castingTime: "Action", range: "30 feet", components: "V", duration: "1 minute", description: "Bless.", prepared: true, className: "Paladin", sourceFeatId: "magic-initiate", castingAbility: "spirit" }],
+      featSpellcastingChoices: [{ featId: "magic-initiate", spellList: "Priest", ability: "spirit", cantripIds: [], levelOneSpellId: "bless", freeCastUsed: false }],
+    });
+    expect(character.spells[0]).toMatchObject({ sourceFeatId: "magic-initiate", castingAbility: "spirit" });
+    expect(character.spells[0].className).toBeUndefined();
+  });
 });

@@ -33,10 +33,12 @@ import {
   formatPounds,
   hasUnproficientArmor,
   isEquipmentProficient,
+  progressionSpellSlots,
   resolveIncomingDamage,
   rollDiceFormula,
   spellListsGrantedByFeats,
   spellMatchesLists,
+  startingSpellRequirementsFor,
   syncEffectConditions,
 } from "../lib/character-rules";
 
@@ -126,6 +128,7 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
       concentratingSpellId: undefined,
       activeEffects,
       resources: character.resources.map((resource) => resource.recovery === "manual" ? resource : { ...resource, current: resource.maximum }),
+      featSpellcastingChoices: character.featSpellcastingChoices.map((choice) => ({ ...choice, freeCastUsed: false })),
       exhaustionLevel,
       conditions: exhaustionLevel ? [...new Set([...effectConditions, "Exhaustion"])] : effectConditions.filter((item) => item !== "Exhaustion"),
     });
@@ -343,14 +346,14 @@ export function FeatManager({ catalog, character, patchCharacter }: { catalog: F
       <div className="section-heading"><div><span className="eyebrow">Character choices</span><h2>Feats</h2></div><span className="count-chip">{character.feats.length}</span></div>
       <div className="catalog-add-row"><DescriptionPicker ariaLabel="Available feats" value={selectedId} placeholder="Choose an available feat" onChange={setSelectedId} options={available.map((feat) => ({ value: feat.id, label: feat.name, meta: [feat.category, feat.prerequisite].filter(Boolean).join(" · "), description: feat.description }))} /><button className="button button-primary" disabled={!selectedId} onClick={addFeat}><Plus size={15} />Add feat</button></div>
       <div className="tracker-card-list">
-        {visibleFeats.map((feat) => { const issues = featPrerequisiteIssues(feat, character); return <article className={issues.length ? "has-warning" : ""} key={feat.id}><div><span>{feat.category}</span><h3>{feat.name}</h3>{feat.prerequisite && <small>{feat.prerequisite}</small>}{issues.map((issue) => <small className="feat-warning" key={issue}><AlertTriangle size={11} />{issue} GM override allowed.</small>)}<p>{feat.description}</p></div><button className="icon-button danger" aria-label={`Remove ${feat.name}`} onClick={() => patchCharacter({ feats: character.feats.filter((item) => item.id !== feat.id) })}><Trash2 size={14} /></button></article>; })}
+        {visibleFeats.map((feat) => { const issues = featPrerequisiteIssues(feat, character); return <article className={issues.length ? "has-warning" : ""} key={feat.id}><div><span>{feat.category}</span><h3>{feat.name}</h3>{feat.prerequisite && <small>{feat.prerequisite}</small>}{issues.map((issue) => <small className="feat-warning" key={issue}><AlertTriangle size={11} />{issue} GM override allowed.</small>)}<p>{feat.description}</p></div><button className="icon-button danger" aria-label={`Remove ${feat.name}`} onClick={() => patchCharacter({ feats: character.feats.filter((item) => item.id !== feat.id), featSpellcastingChoices: character.featSpellcastingChoices.filter((choice) => choice.featId !== feat.id), spells: character.spells.filter((spell) => spell.sourceFeatId !== feat.id) })}><Trash2 size={14} /></button></article>; })}
         {!character.feats.length && <div className="empty-state compact">No feats selected yet.</div>}
       </div>
     </section>
   );
 }
 
-export function SpellbookManager({ catalog, equipmentCatalog, character, patchCharacter, spellcastingProfiles }: { catalog: SpellDefinition[]; equipmentCatalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; spellcastingProfiles: SpellcastingProfile[] }) {
+export function SpellbookManager({ catalog, equipmentCatalog, character, patchCharacter, spellcastingProfiles, creationLocked = false }: { catalog: SpellDefinition[]; equipmentCatalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; spellcastingProfiles: SpellcastingProfile[]; creationLocked?: boolean }) {
   const [selectedId, setSelectedId] = useState("");
   const [selectedOwner, setSelectedOwner] = useState("");
   const [query, setQuery] = useState("");
@@ -360,8 +363,17 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
   const [spellRollResult, setSpellRollResult] = useState("");
   const catalogById = useMemo(() => new Map(catalog.map((spell) => [spell.id, spell])), [catalog]);
   const characterClasses = useMemo(() => new Set(character.classLevels.map((entry) => entry.className.toLowerCase())), [character.classLevels]);
-  const featSpellLists = useMemo(() => spellListsGrantedByFeats(character.feats), [character.feats]);
-  const classCatalog = useMemo(() => catalog.filter((spell) => showAll || spell.classes.some((name) => characterClasses.has(name.toLowerCase())) || spellMatchesLists(spell, featSpellLists)), [catalog, showAll, characterClasses, featSpellLists]);
+  const magicInitiateFeat = character.feats.find((feat) => feat.id === "magic-initiate");
+  const featSpellLists = useMemo(() => magicInitiateFeat ? spellListsGrantedByFeats([magicInitiateFeat]) : [], [magicInitiateFeat]);
+  const magicInitiateChoice = character.featSpellcastingChoices.find((choice) => choice.featId === magicInitiateFeat?.id);
+  const classSpellLimits = useMemo(() => new Map(character.classLevels.map((entry) => {
+    const slots = progressionSpellSlots(entry.className, entry.subclassName ?? "", entry.level) ?? {};
+    return [entry.className.toLowerCase(), Math.max(0, ...Object.entries(slots).filter(([, maximum]) => maximum > 0).map(([level]) => Number(level)))];
+  })), [character.classLevels]);
+  const classCatalog = useMemo(() => catalog.filter((spell) => showAll || spell.classes.some((name) => {
+    const maximumLevel = classSpellLimits.get(name.toLowerCase());
+    return characterClasses.has(name.toLowerCase()) && maximumLevel !== undefined && (spell.level === 0 || spell.level <= maximumLevel);
+  })), [catalog, showAll, characterClasses, classSpellLimits]);
   const available = classCatalog
     .filter((spell) => !character.spells.some((known) => known.id === spell.id))
     .sort((left, right) => left.level - right.level || left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
@@ -375,14 +387,44 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
     ? character.spells.find((spell) => spell.id === character.concentratingSpellId)
     : undefined;
   const selectedDefinition = catalog.find((spell) => spell.id === selectedId);
-  const eligibleProfiles = (spell: Pick<SpellDefinition, "classes">) => {
-    const matches = spellcastingProfiles.filter((profile) => spell.classes.some((className) => className.toLowerCase() === profile.className.toLowerCase()));
-    return matches.length ? matches : spellcastingProfiles;
+  const eligibleProfiles = (spell: Pick<TrackedSpell, "classes" | "sourceFeatId">) => {
+    if (spell.sourceFeatId) return spellcastingProfiles.filter((profile) => profile.sourceFeatId === spell.sourceFeatId);
+    const classProfiles = spellcastingProfiles.filter((profile) => !profile.sourceFeatId);
+    const matches = classProfiles.filter((profile) => spell.classes.some((className) => className.toLowerCase() === profile.className.toLowerCase()));
+    return matches.length ? matches : classProfiles;
   };
   const selectedOwnerOptions = selectedDefinition ? eligibleProfiles(selectedDefinition) : [];
   const ownerForSpell = (spell: TrackedSpell) => spellcastingProfiles.find((profile) => profile.className === spell.className) ?? eligibleProfiles(spell)[0];
   const preparedCountFor = (className: string) => character.spells.filter((spell) => spell.level > 0 && spell.prepared && ownerForSpell(spell)?.className === className).length;
   const spellcastingBlocked = hasUnproficientArmor(character, equipmentCatalog);
+  const startingRequirements = character.classLevels.flatMap((entry) => {
+    const requirement = startingSpellRequirementsFor(entry.className, entry.level);
+    if (!requirement) return [];
+    const owned = character.spells.filter((spell) => spell.className === entry.className);
+    return [{ className: entry.className, requirement, cantrips: owned.filter((spell) => spell.level === 0).length, learned: owned.filter((spell) => spell.level > 0).length, prepared: owned.filter((spell) => spell.level > 0 && spell.prepared).length }];
+  });
+  const magicInitiateCatalog = magicInitiateChoice?.spellList ? catalog.filter((spell) => spellMatchesLists(spell, [magicInitiateChoice.spellList])) : [];
+  const magicInitiateCantrips = magicInitiateCatalog.filter((spell) => spell.level === 0);
+  const magicInitiateLevelOne = magicInitiateCatalog.filter((spell) => spell.level === 1);
+  const pickerOption = (spell: SpellDefinition) => ({ value: spell.id, label: spell.name, meta: `${spell.school} · ${spell.classes.join(", ")}`, description: `${spell.castingTime} · ${spell.range} · ${spell.duration}\n\n${spell.description}` });
+
+  function updateMagicInitiateChoice(patch: Partial<NonNullable<typeof magicInitiateChoice>>) {
+    if (!magicInitiateFeat || creationLocked) return;
+    const current = magicInitiateChoice ?? { featId: magicInitiateFeat.id, spellList: "", ability: undefined, cantripIds: [], levelOneSpellId: undefined, freeCastUsed: false };
+    const listChanged = patch.spellList !== undefined && patch.spellList !== current.spellList;
+    const next = {
+      ...current,
+      ...patch,
+      ...(listChanged ? { cantripIds: [], levelOneSpellId: undefined, freeCastUsed: false } : {}),
+      featId: magicInitiateFeat.id,
+    };
+    const selectedIds = [...next.cantripIds, ...(next.levelOneSpellId ? [next.levelOneSpellId] : [])];
+    const featSpells: TrackedSpell[] = catalog.filter((spell) => selectedIds.includes(spell.id)).map((spell) => ({ ...spell, prepared: true, sourceFeatId: magicInitiateFeat.id, castingAbility: next.ability }));
+    patchCharacter({
+      featSpellcastingChoices: [...character.featSpellcastingChoices.filter((choice) => choice.featId !== magicInitiateFeat.id), next],
+      spells: [...character.spells.filter((spell) => spell.sourceFeatId !== magicInitiateFeat.id && !selectedIds.includes(spell.id)), ...featSpells],
+    });
+  }
 
   function chooseSpell(id: string) {
     const spell = catalog.find((entry) => entry.id === id);
@@ -427,7 +469,9 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
     if (asRitual && spell.level > 0 && !spell.prepared && owner?.className !== "Mage") return;
     const availableLevels = availableSlotLevels(spell);
     const requestedLevel = selectedLevel && availableLevels.includes(selectedLevel) ? selectedLevel : availableLevels[0];
-    const slotLevel = asRitual || spell.level === 0 ? 0 : requestedLevel ?? null;
+    const featChoice = spell.sourceFeatId ? character.featSpellcastingChoices.find((choice) => choice.featId === spell.sourceFeatId) : undefined;
+    const usesFreeFeatCast = !asRitual && spell.level === 1 && Boolean(featChoice && !featChoice.freeCastUsed);
+    const slotLevel = asRitual || spell.level === 0 || usesFreeFeatCast ? 0 : requestedLevel ?? null;
     if (slotLevel === null) return;
     const spellSlots = slotLevel > 0
       ? {
@@ -447,13 +491,16 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
       spellSlots,
       activeEffects,
       conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects),
+      ...(usesFreeFeatCast ? { featSpellcastingChoices: character.featSpellcastingChoices.map((choice) => choice.featId === spell.sourceFeatId ? { ...choice, freeCastUsed: true } : choice) } : {}),
       ...(requiresConcentration ? { concentratingSpellId: spell.id } : {}),
     });
     setLastCast(asRitual
       ? `Cast ${spell.name} as a ritual (no slot used).`
       : slotLevel > 0
         ? `Cast ${spell.name} using a level ${slotLevel} slot.`
-        : `Cast ${spell.name} (cantrip; no slot used).`);
+        : usesFreeFeatCast
+          ? `Cast ${spell.name} using Magic Initiate's free casting.`
+          : `Cast ${spell.name} (cantrip; no slot used).`);
   }
 
   function rollSpellEffect(spell: SpellDefinition) {
@@ -480,23 +527,26 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
 
       <section className="panel spell-list-panel">
         <div className="section-heading"><div><span className="eyebrow">Known magic</span><h2>Spellbook</h2></div><span className="count-chip">{character.spells.length}</span></div>
+        {!!startingRequirements.length && <div className="spell-setup-summary">{startingRequirements.map(({ className, requirement, cantrips, learned, prepared }) => <div key={className}><strong>{className} starting spells</strong><span>Cantrips {cantrips}/{requirement.cantrips} · Level 1+ learned {learned}/{requirement.learned} · Prepared {prepared}/{requirement.prepared}</span></div>)}</div>}
+        {magicInitiateFeat && <div className="magic-initiate-setup"><div><span className="eyebrow">Background feat</span><h3>Magic Initiate setup</h3><p>Choose one list, one casting ability, two cantrips, and one level-1 spell. All three spells must use the same list.</p></div><div className="magic-initiate-grid"><label><span>Spell list</span><select aria-label="Magic Initiate spell list" disabled={creationLocked} value={magicInitiateChoice?.spellList ?? ""} onChange={(event) => updateMagicInitiateChoice({ spellList: event.target.value })}><option value="">Choose one list</option>{featSpellLists.map((list) => <option key={list} value={list}>{list}</option>)}</select></label><label><span>Casting ability</span><select aria-label="Magic Initiate casting ability" disabled={creationLocked} value={magicInitiateChoice?.ability ?? ""} onChange={(event) => updateMagicInitiateChoice({ ability: event.target.value as CharacterData["savingThrowProficiencies"][number] })}><option value="">Choose ability</option>{(["intellect", "spirit", "charisma"] as const).map((ability) => <option key={ability} value={ability}>{ABILITY_LABELS[ability]}</option>)}</select></label><label><span>Cantrip 1</span><DescriptionPicker disabled={creationLocked || !magicInitiateChoice?.spellList} ariaLabel="Magic Initiate cantrip 1" value={magicInitiateChoice?.cantripIds[0] ?? ""} placeholder="Choose first cantrip" onChange={(id) => updateMagicInitiateChoice({ cantripIds: [id, ...(magicInitiateChoice?.cantripIds[1] && magicInitiateChoice.cantripIds[1] !== id ? [magicInitiateChoice.cantripIds[1]] : [])] })} options={magicInitiateCantrips.filter((spell) => spell.id !== magicInitiateChoice?.cantripIds[1]).map(pickerOption)} /></label><label><span>Cantrip 2</span><DescriptionPicker disabled={creationLocked || !magicInitiateChoice?.spellList} ariaLabel="Magic Initiate cantrip 2" value={magicInitiateChoice?.cantripIds[1] ?? ""} placeholder="Choose second cantrip" onChange={(id) => updateMagicInitiateChoice({ cantripIds: [...(magicInitiateChoice?.cantripIds[0] ? [magicInitiateChoice.cantripIds[0]] : []), id] })} options={magicInitiateCantrips.filter((spell) => spell.id !== magicInitiateChoice?.cantripIds[0]).map(pickerOption)} /></label><label className="magic-initiate-level-one"><span>Level-1 spell</span><DescriptionPicker disabled={creationLocked || !magicInitiateChoice?.spellList} ariaLabel="Magic Initiate level 1 spell" value={magicInitiateChoice?.levelOneSpellId ?? ""} placeholder="Choose level-1 spell" onChange={(levelOneSpellId) => updateMagicInitiateChoice({ levelOneSpellId, freeCastUsed: false })} options={magicInitiateLevelOne.map(pickerOption)} /></label></div>{magicInitiateChoice?.levelOneSpellId && <p className="spellcasting-note">Free casting: {magicInitiateChoice.freeCastUsed ? "used; restores on a Long Rest" : "available"}.</p>}</div>}
         {concentratingSpell && <div className="concentration-banner"><Sparkles size={16} /><div><span>Concentrating</span><strong>{concentratingSpell.name}</strong></div><button onClick={() => { const activeEffects = character.activeEffects.filter((effect) => !effect.concentration); patchCharacter({ concentratingSpellId: undefined, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects) }); }}>End</button></div>}
         {lastCast && <div className="cast-feedback" role="status">{lastCast}<button aria-label="Dismiss casting message" onClick={() => setLastCast("")}>×</button></div>}
         {spellRollResult && <div className="cast-feedback spell-roll-feedback" role="status">{spellRollResult}<button aria-label="Dismiss spell roll" onClick={() => setSpellRollResult("")}>×</button></div>}
         <div className={`catalog-add-row spell-add${selectedOwnerOptions.length > 1 ? " has-owner" : ""}`}><DescriptionPicker ariaLabel="Available spells" value={selectedId} placeholder="Choose a spell" onChange={chooseSpell} options={available.map((spell) => ({ value: spell.id, label: spell.name, meta: `${spell.level ? `Level ${spell.level}` : "Cantrip"} · ${spell.school} · ${spell.classes.join(", ")}`, description: `${spell.castingTime} · ${spell.range} · ${spell.duration}\n\n${spell.description}` }))} />{selectedOwnerOptions.length > 1 && <select aria-label="Spellcasting class" value={selectedOwner} onChange={(event) => setSelectedOwner(event.target.value)}>{selectedOwnerOptions.map((profile) => <option key={profile.className} value={profile.className}>{profile.className}</option>)}</select>}<button className="button button-primary" disabled={!selectedId} onClick={addSpell}><Plus size={15} />Learn</button><label className="inline-check"><input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />All classes</label></div>
-        {!!featSpellLists.length && <p className="spellcasting-note">Feat spell access included: {featSpellLists.join(", ")}.</p>}
         <label className="catalog-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search known spells" /></label>
         <div className="spell-card-list">{visibleSpells.map((spell) => {
           const slotLevels = availableSlotLevels(spell);
           const selectedCastLevel = castLevels[spell.id] && slotLevels.includes(castLevels[spell.id]) ? castLevels[spell.id] : slotLevels[0];
           const owner = ownerForSpell(spell);
           const preparedToCast = spell.level === 0 || spell.prepared;
-          const canCast = !spellcastingBlocked && (spell.level === 0 || (preparedToCast && selectedCastLevel !== undefined));
+          const featChoice = spell.sourceFeatId ? character.featSpellcastingChoices.find((choice) => choice.featId === spell.sourceFeatId) : undefined;
+          const freeFeatCast = spell.level === 1 && Boolean(featChoice && !featChoice.freeCastUsed);
+          const canCast = !spellcastingBlocked && (spell.level === 0 || (preparedToCast && (freeFeatCast || selectedCastLevel !== undefined)));
           const formula = extractDiceFormula(spell.description);
           const atPreparedLimit = owner?.preparedLimit !== null && owner?.preparedLimit !== undefined && preparedCountFor(owner.className) >= owner.preparedLimit;
           const canRitualCast = Boolean(spell.ritual && !spellcastingBlocked && (spell.prepared || owner?.className === "Mage"));
           const ownerOptions = eligibleProfiles(spell);
-          return <article key={spell.id} className={spell.prepared ? "prepared" : ""}><div className="spell-card-top"><div><span>{spell.level ? `Level ${spell.level} ${spell.school}` : `${spell.school} cantrip`}</span><h3>{spell.name}</h3></div><label><input type="checkbox" checked={spell.prepared} disabled={!spell.prepared && spell.level > 0 && atPreparedLimit} onChange={(event) => patchCharacter({ spells: character.spells.map((item) => item.id === spell.id ? { ...item, prepared: event.target.checked } : item) })} />Prepared</label><button className="icon-button danger" aria-label={`Forget ${spell.name}`} onClick={() => { const endingConcentration = character.concentratingSpellId === spell.id; const activeEffects = endingConcentration ? character.activeEffects.filter((effect) => !effect.concentration) : character.activeEffects; patchCharacter({ spells: character.spells.filter((item) => item.id !== spell.id), ...(endingConcentration ? { concentratingSpellId: undefined, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects) } : {}) }); }}><Trash2 size={14} /></button></div><div className="spell-meta">{ownerOptions.length > 0 && <label className="spell-owner"><span>Class</span><select aria-label={`${spell.name} spellcasting class`} value={owner?.className ?? ""} onChange={(event) => assignSpellOwner(spell, event.target.value)}>{ownerOptions.map((profile) => <option key={profile.className} value={profile.className}>{profile.className}</option>)}</select></label>}<span>{spell.castingTime}</span><span>{spell.range}</span><span>{spell.duration}</span>{spell.components && <span>{spell.components}</span>}{spell.ritual && <span>Ritual</span>}{owner && <span>{ABILITY_LABELS[owner.ability]} · DC {8 + abilityModifier(character.abilities[owner.ability]) + character.proficiencyBonus}</span>}</div><p>{spell.description}</p><div className="spell-card-actions">{spell.level > 0 && slotLevels.length > 0 && <select aria-label={`${spell.name} casting level`} value={selectedCastLevel} onChange={(event) => setCastLevels((current) => ({ ...current, [spell.id]: Number(event.target.value) }))}>{slotLevels.map((level) => <option key={level} value={level}>Level {level}{level > spell.level ? " (upcast)" : ""}</option>)}</select>}<button className="button button-primary" disabled={!canCast} onClick={() => castSpell(spell, false, selectedCastLevel)}>{spellcastingBlocked ? "Armor blocks casting" : !preparedToCast ? "Not prepared" : canCast ? spell.level === 0 ? "Cast cantrip" : "Cast" : "No slot available"}</button>{spell.ritual && <button className="button button-outline" disabled={!canRitualCast} onClick={() => castSpell(spell, true)}>{canRitualCast ? "Cast ritual" : "Prepare to ritual cast"}</button>}{formula && <button className="button button-outline" onClick={() => rollSpellEffect(spell)}>Roll {formula}</button>}</div></article>;
+          return <article key={spell.id} className={spell.prepared ? "prepared" : ""}><div className="spell-card-top"><div><span>{spell.level ? `Level ${spell.level} ${spell.school}` : `${spell.school} cantrip`}</span><h3>{spell.name}</h3></div><label><input type="checkbox" checked={spell.prepared} disabled={Boolean(spell.sourceFeatId) || (!spell.prepared && spell.level > 0 && atPreparedLimit)} onChange={(event) => patchCharacter({ spells: character.spells.map((item) => item.id === spell.id ? { ...item, prepared: event.target.checked } : item) })} />Prepared</label><button className="icon-button danger" disabled={Boolean(spell.sourceFeatId)} aria-label={`Forget ${spell.name}`} onClick={() => { const endingConcentration = character.concentratingSpellId === spell.id; const activeEffects = endingConcentration ? character.activeEffects.filter((effect) => !effect.concentration) : character.activeEffects; patchCharacter({ spells: character.spells.filter((item) => item.id !== spell.id), ...(endingConcentration ? { concentratingSpellId: undefined, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects) } : {}) }); }}><Trash2 size={14} /></button></div><div className="spell-meta">{spell.sourceFeatId && owner ? <span>Source: {owner.className}</span> : ownerOptions.length > 0 && <label className="spell-owner"><span>Class</span><select aria-label={`${spell.name} spellcasting class`} value={owner?.className ?? ""} onChange={(event) => assignSpellOwner(spell, event.target.value)}>{ownerOptions.map((profile) => <option key={profile.className} value={profile.className}>{profile.className}</option>)}</select></label>}<span>{spell.castingTime}</span><span>{spell.range}</span><span>{spell.duration}</span>{spell.components && <span>{spell.components}</span>}{spell.ritual && <span>Ritual</span>}{owner && <span>{ABILITY_LABELS[owner.ability]} · DC {8 + abilityModifier(character.abilities[owner.ability]) + character.proficiencyBonus}</span>}</div><p>{spell.description}</p><div className="spell-card-actions">{spell.level > 0 && slotLevels.length > 0 && !freeFeatCast && <select aria-label={`${spell.name} casting level`} value={selectedCastLevel} onChange={(event) => setCastLevels((current) => ({ ...current, [spell.id]: Number(event.target.value) }))}>{slotLevels.map((level) => <option key={level} value={level}>Level {level}{level > spell.level ? " (upcast)" : ""}</option>)}</select>}<button className="button button-primary" disabled={!canCast} onClick={() => castSpell(spell, false, selectedCastLevel)}>{spellcastingBlocked ? "Armor blocks casting" : !preparedToCast ? "Not prepared" : canCast ? spell.level === 0 ? "Cast cantrip" : freeFeatCast ? "Cast free" : "Cast" : "No slot available"}</button>{spell.ritual && <button className="button button-outline" disabled={!canRitualCast} onClick={() => castSpell(spell, true)}>{canRitualCast ? "Cast ritual" : "Prepare to ritual cast"}</button>}{formula && <button className="button button-outline" onClick={() => rollSpellEffect(spell)}>Roll {formula}</button>}</div></article>;
         })}</div>
         {!visibleSpells.length && <div className="empty-state compact">No spells here yet. Learn one from the imported content library.</div>}
       </section>

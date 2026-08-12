@@ -80,7 +80,7 @@ function assertCharacter(character) {
   if (character.classLevels.length && totalClassLevel !== character.level) throw new Error("Character class levels must add up to the total level.");
   if (character.hitDiceTotal !== character.level) throw new Error("Character hitDiceTotal must equal the total level.");
 
-  for (const field of ["attacks", "features", "feats", "spells", "activeEffects", "companions", "inventory", "resources", "hitDiceByClass", "advancementChoices", "advancementHistory", "journal"]) {
+  for (const field of ["attacks", "features", "feats", "spells", "featSpellcastingChoices", "activeEffects", "companions", "inventory", "resources", "hitDiceByClass", "advancementChoices", "advancementHistory", "journal"]) {
     if (!Array.isArray(character[field])) throw new Error(`Character ${field} must be a list.`);
   }
   character.inventory.forEach((item, index) => {
@@ -109,6 +109,17 @@ function assertCharacter(character) {
     if (spell.ritual !== undefined && typeof spell.ritual !== "boolean") throw new Error(`Character spells[${index}].ritual must be a boolean.`);
     if (typeof spell.prepared !== "boolean") throw new Error(`Character spells[${index}].prepared must be a boolean.`);
     if (spell.className !== undefined) { requiredString(spell.className, `Character spells[${index}].className`, false); if (!classNames.has(spell.className)) throw new Error(`Character spells[${index}] belongs to a class the character does not have.`); }
+    if (spell.sourceFeatId !== undefined) requiredString(spell.sourceFeatId, `Character spells[${index}].sourceFeatId`, false);
+    if (spell.castingAbility !== undefined && !ABILITIES.includes(spell.castingAbility)) throw new Error(`Character spells[${index}].castingAbility is invalid.`);
+  });
+  character.featSpellcastingChoices.forEach((choice, index) => {
+    if (!record(choice)) throw new Error(`Character featSpellcastingChoices[${index}] must be an object.`);
+    requiredString(choice.featId, `Character featSpellcastingChoices[${index}].featId`, false);
+    requiredString(choice.spellList, `Character featSpellcastingChoices[${index}].spellList`);
+    if (choice.ability !== undefined && !ABILITIES.includes(choice.ability)) throw new Error(`Character featSpellcastingChoices[${index}].ability is invalid.`);
+    stringArray(choice.cantripIds, `Character featSpellcastingChoices[${index}].cantripIds`);
+    if (choice.levelOneSpellId !== undefined) requiredString(choice.levelOneSpellId, `Character featSpellcastingChoices[${index}].levelOneSpellId`, false);
+    if (typeof choice.freeCastUsed !== "boolean") throw new Error(`Character featSpellcastingChoices[${index}].freeCastUsed must be a boolean.`);
   });
 
   if (!record(character.spellSlots)) throw new Error("Character spellSlots must be an object.");

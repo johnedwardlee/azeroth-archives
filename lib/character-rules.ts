@@ -69,6 +69,26 @@ export function spellMatchesLists(spell: Pick<SpellDefinition, "classes">, listN
   return spell.classes.some((className) => allowed.has(normalizedSpellListName(className)));
 }
 
+export function startingSpellRequirementsFor(className: string, level: number) {
+  const normalizedClass = className.trim().toLowerCase();
+  const safeLevel = Math.max(1, Math.min(20, level));
+  const cantripProgression: Record<string, [number, number, number]> = {
+    bard: [2, 3, 4],
+    priest: [3, 4, 5],
+    sorcerer: [4, 5, 6],
+    mage: [3, 4, 5],
+  };
+  const progression = cantripProgression[normalizedClass];
+  const cantrips = progression ? (safeLevel >= 10 ? progression[2] : safeLevel >= 4 ? progression[1] : progression[0]) : 0;
+  const prepared = preparedSpellLimitFor(className, "", safeLevel);
+  if (prepared === null) return null;
+  return {
+    cantrips,
+    learned: normalizedClass === "mage" ? 6 + ((safeLevel - 1) * 2) : prepared,
+    prepared,
+  };
+}
+
 export function isIncapacitated(character: Pick<CharacterData, "conditions">) {
   return character.conditions.some((condition) => incapacitatingConditions.has(condition.trim().toLowerCase()));
 }

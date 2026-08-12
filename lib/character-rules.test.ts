@@ -15,6 +15,7 @@ import {
   resolveIncomingDamage,
   spellListsGrantedByFeats,
   spellMatchesLists,
+  startingSpellRequirementsFor,
   syncEffectConditions,
 } from "./character-rules";
 import { newCharacter } from "../src/character-manager";
@@ -47,6 +48,13 @@ describe("living sheet rules", () => {
     expect(spellMatchesLists({ classes: ["Nature (Druid rules list)"] }, lists)).toBe(true);
     expect(spellMatchesLists({ classes: ["Mage", "Wizard"] }, lists)).toBe(true);
     expect(spellMatchesLists({ classes: ["Paladin"] }, lists)).toBe(false);
+  });
+
+  it("reports starting spell baselines for every core caster", () => {
+    expect(startingSpellRequirementsFor("Paladin", 1)).toEqual({ cantrips: 0, learned: 2, prepared: 2 });
+    expect(startingSpellRequirementsFor("Sorcerer", 1)).toEqual({ cantrips: 4, learned: 2, prepared: 2 });
+    expect(startingSpellRequirementsFor("Mage", 1)).toEqual({ cantrips: 3, learned: 6, prepared: 4 });
+    expect(startingSpellRequirementsFor("Warrior", 1)).toBeNull();
   });
 
   it("exposes only prepared leveled spells as actions and identifies incapacitation", () => {

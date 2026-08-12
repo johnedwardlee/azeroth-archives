@@ -107,6 +107,7 @@ describe("desktop storage", () => {
   it("rejects malformed current-version character data at the desktop boundary", async () => {
     const storage = await testStorage();
     await expect(storage.saveCharacter({ ...validCharacter("bad", "Bad Hero"), abilities: { ...newCharacter().abilities, strength: "lots" } as never })).rejects.toThrow(/abilities\.strength/i);
+    await expect(storage.saveCharacter({ ...validCharacter("bad-feat-spells", "Bad Feat Spells"), featSpellcastingChoices: [{ featId: "magic-initiate", spellList: "Mage", ability: "luck", cantripIds: [], freeCastUsed: false }] as never })).rejects.toThrow(/ability/i);
     await expect(storage.saveCharacter({ ...validCharacter("bad-link", "Bad Link"), attacks: [{ id: "attack", inventoryItemId: "missing-item", name: "Dagger", ability: "agility", proficient: true, bonus: 0, damage: "1d4", damageType: "Piercing", damageBonus: 0, notes: "" }] })).rejects.toThrow(/inventory item/i);
     await expect(storage.replaceStore({ version: STORE_VERSION, characters: [{ ...validCharacter("bad-levels", "Bad Levels"), level: 20, classLevels: [{ className: "Mage", level: 20 }, { className: "Paladin", level: 20 }] }], packs: [], disabledPackIds: [] })).rejects.toThrow(/add up|level/i);
   });

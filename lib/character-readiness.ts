@@ -1,4 +1,4 @@
-import { classTrainingFor, featPrerequisiteIssues, preparedSpellLimitFor, spellcastingAbilityForClass } from "./character-rules";
+import { classTrainingFor, featPrerequisiteIssues, preparedSpellLimitFor, progressionSpellSlots, spellcastingAbilityForClass, spellListsGrantedByFeats, spellMatchesLists, startingSpellRequirementsFor } from "./character-rules";
 import type {
   AncestryDefinition,
   BackgroundDefinition,
@@ -6,6 +6,7 @@ import type {
   CharacterData,
   ClassDefinition,
   FeatDefinition,
+  SpellDefinition,
 } from "./types";
 
 export type ReadinessSeverity = "error" | "warning";
@@ -21,6 +22,7 @@ export type CharacterReadinessContext = {
   classes: ClassDefinition[];
   backgrounds: BackgroundDefinition[];
   feats: FeatDefinition[];
+  spells: SpellDefinition[];
   loadedPackIds: string[];
   campaignProfile?: CampaignProfile;
 };
@@ -88,6 +90,21 @@ export function evaluateCharacterReadiness(character: CharacterData, context: Ch
     const prerequisiteIssues = featPrerequisiteIssues(feat, character);
     if (prerequisiteIssues.length) push(issues, "warning", `feat-prerequisite-${feat.id}`, `Review ${feat.name} prerequisites`, prerequisiteIssues.join(" "));
   }
+  const magicInitiate = character.feats.find((feat) => feat.id === "magic-initiate");
+  if (magicInitiate) {
+    const allowedLists = spellListsGrantedByFeats([magicInitiate]);
+    const choice = character.featSpellcastingChoices.find((entry) => entry.featId === magicInitiate.id);
+    const chosenCantrips = choice?.cantripIds.map((id) => context.spells.find((spell) => spell.id === id));
+    const chosenLevelOne = choice?.levelOneSpellId ? context.spells.find((spell) => spell.id === choice.levelOneSpellId) : undefined;
+    const valid = Boolean(choice
+      && allowedLists.includes(choice.spellList)
+      && choice.ability && ["intellect", "spirit", "charisma"].includes(choice.ability)
+      && choice.cantripIds.length === 2 && new Set(choice.cantripIds).size === 2
+      && chosenCantrips?.every((spell) => spell?.level === 0 && spellMatchesLists(spell, [choice.spellList]))
+      && chosenLevelOne?.level === 1 && spellMatchesLists(chosenLevelOne, [choice.spellList])
+      && [...choice.cantripIds, choice.levelOneSpellId].every((id) => character.spells.some((spell) => spell.id === id && spell.sourceFeatId === magicInitiate.id)));
+    if (!valid) push(issues, "error", "feat-magic-initiate", "Complete Magic Initiate", "Choose one spell list, one casting ability, two different cantrips, and one level-1 spell from that same list on the Spells page.");
+  }
 
   for (const classLevel of character.classLevels) {
     const definition = context.classes.find((entry) => entry.name === classLevel.className);
@@ -97,8 +114,19 @@ export function evaluateCharacterReadiness(character: CharacterData, context: Ch
       push(issues, "error", `subclass-${classLevel.className}`, `Choose a ${classLevel.className} subclass`, `A specialization is required by ${classLevel.className} level ${specializationLevel}.`);
     }
     const castingAbility = spellcastingAbilityForClass(classLevel.className, classLevel.subclassName ?? "", definition.primaryAbility);
-    if (castingAbility && !character.spells.some((spell) => spell.className === classLevel.className)) {
-      push(issues, "warning", `spells-empty-${classLevel.className}`, `No ${classLevel.className} spells recorded`, "Confirm the class has selected all starting cantrips and spells.");
+    const requirements = startingSpellRequirementsFor(classLevel.className, classLevel.level);
+    const classSpells = character.spells.filter((spell) => spell.className === classLevel.className);
+    if (castingAbility && requirements) {
+      const cantrips = classSpells.filter((spell) => spell.level === 0).length;
+      const learned = classSpells.filter((spell) => spell.level > 0).length;
+      const prepared = classSpells.filter((spell) => spell.level > 0 && spell.prepared).length;
+      if (cantrips < requirements.cantrips) push(issues, "error", `spells-cantrips-${classLevel.className}`, `Choose ${classLevel.className} cantrips`, `${cantrips} of ${requirements.cantrips} required cantrips are recorded.`);
+      if (learned < requirements.learned) push(issues, "error", `spells-learned-${classLevel.className}`, `Choose ${classLevel.className} spells`, `${learned} of ${requirements.learned} required level-1+ spells are recorded.`);
+      if (prepared < requirements.prepared) push(issues, "error", `spells-prepared-low-${classLevel.className}`, `Prepare ${classLevel.className} spells`, `${prepared} of ${requirements.prepared} required spells are prepared.`);
+      if (cantrips > requirements.cantrips || (classLevel.level === 1 && learned > requirements.learned)) push(issues, classLevel.level === 1 ? "error" : "warning", `spells-extra-${classLevel.className}`, `Review extra ${classLevel.className} spells`, `The starting baseline is ${requirements.cantrips} cantrips and ${requirements.learned} level-1+ spells.`);
+      const slots = progressionSpellSlots(classLevel.className, classLevel.subclassName ?? "", classLevel.level) ?? {};
+      const maximumSpellLevel = Math.max(0, ...Object.entries(slots).filter(([, maximum]) => maximum > 0).map(([level]) => Number(level)));
+      if (classSpells.some((spell) => spell.level > maximumSpellLevel)) push(issues, "error", `spells-level-${classLevel.className}`, `${classLevel.className} spell level is too high`, `Choose only cantrips and spells up to level ${maximumSpellLevel}.`);
     }
     const preparedLimit = preparedSpellLimitFor(classLevel.className, classLevel.subclassName ?? "", classLevel.level);
     if (preparedLimit !== null) {

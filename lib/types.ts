@@ -174,12 +174,16 @@ export type RuleDefinition = {
 export type TrackedSpell = SpellDefinition & {
   prepared: boolean;
   className?: string;
+  sourceFeatId?: string;
+  castingAbility?: AbilityKey;
 };
 
 export type SpellcastingProfile = {
   className: string;
   ability: AbilityKey;
   preparedLimit: number | null;
+  sourceFeatId?: string;
+  spellList?: string;
 };
 
 export type TrackedFeat = FeatDefinition;
@@ -264,6 +268,15 @@ export type CharacterResource = {
   source?: string;
 };
 
+export type FeatSpellcastingChoice = {
+  featId: string;
+  spellList: string;
+  ability?: AbilityKey;
+  cantripIds: string[];
+  levelOneSpellId?: string;
+  freeCastUsed: boolean;
+};
+
 export type AdvancementSnapshot = {
   level: number;
   className: string;
@@ -285,6 +298,7 @@ export type AdvancementSnapshot = {
   spellSlots: Record<string, SpellSlotState>;
   feats: TrackedFeat[];
   spells: TrackedSpell[];
+  featSpellcastingChoices: FeatSpellcastingChoice[];
   features: RulesFeature[];
 };
 
@@ -360,6 +374,7 @@ export type CharacterData = {
   features: RulesFeature[];
   feats: TrackedFeat[];
   spells: TrackedSpell[];
+  featSpellcastingChoices: FeatSpellcastingChoice[];
   spellSlots: Record<string, SpellSlotState>;
   concentratingSpellId?: string;
   activeEffects: ActiveEffect[];

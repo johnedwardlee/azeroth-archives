@@ -202,6 +202,7 @@ export function newCharacter(): CharacterData {
     features: [],
     feats: [],
     spells: [],
+    featSpellcastingChoices: [],
     spellSlots: {},
     concentratingSpellId: undefined,
     activeEffects: [],
@@ -341,9 +342,10 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
     features: Array.isArray(value.features) ? value.features.filter((feature) => feature && typeof feature.name === "string" && Boolean(feature.name.trim()) && typeof feature.description === "string") : [],
     feats: Array.isArray(value.feats) ? value.feats.filter((feat) => feat && typeof feat.id === "string" && Boolean(feat.id.trim()) && typeof feat.name === "string" && Boolean(feat.name.trim()) && typeof feat.category === "string" && typeof feat.description === "string") : [],
     spells: Array.isArray(value.spells) ? value.spells.filter((spell) => spell && typeof spell.id === "string" && typeof spell.name === "string" && Array.isArray(spell.classes)).map((spell) => {
-      const className = typeof spell.className === "string" && classLevels.some((entry) => entry.className === spell.className)
+      const sourceFeatId = typeof spell.sourceFeatId === "string" ? spell.sourceFeatId : undefined;
+      const className = !sourceFeatId && typeof spell.className === "string" && classLevels.some((entry) => entry.className === spell.className)
         ? spell.className
-        : classLevels.find((entry) => spell.classes.some((name) => typeof name === "string" && name.toLowerCase() === entry.className.toLowerCase()))?.className;
+        : !sourceFeatId ? classLevels.find((entry) => spell.classes.some((name) => typeof name === "string" && name.toLowerCase() === entry.className.toLowerCase()))?.className : undefined;
       const level = finiteNumber(spell.level, 0, 0, 9, true);
       return {
         id: spell.id.trim() || crypto.randomUUID(),
@@ -361,8 +363,18 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
         source: typeof spell.source === "string" ? spell.source : undefined,
         prepared: level === 0 || Boolean(spell.prepared),
         ...(className ? { className } : {}),
+        sourceFeatId,
+        castingAbility: abilityKeys.includes(spell.castingAbility as AbilityKey) ? spell.castingAbility as AbilityKey : undefined,
       };
     }) : [],
+    featSpellcastingChoices: Array.isArray(value.featSpellcastingChoices) ? value.featSpellcastingChoices.filter((choice) => choice && typeof choice.featId === "string").map((choice) => ({
+      featId: choice.featId,
+      spellList: textValue(choice.spellList),
+      ability: abilityKeys.includes(choice.ability as AbilityKey) ? choice.ability as AbilityKey : undefined,
+      cantripIds: stringList(choice.cantripIds).slice(0, 2),
+      levelOneSpellId: typeof choice.levelOneSpellId === "string" ? choice.levelOneSpellId : undefined,
+      freeCastUsed: Boolean(choice.freeCastUsed),
+    })) : [],
     spellSlots: value.spellSlots && typeof value.spellSlots === "object" ? Object.fromEntries(Object.entries(value.spellSlots).flatMap(([level, slot]) => {
       if (!/^[1-9]$/.test(level) || !slot || typeof slot !== "object") return [];
       const maximum = finiteNumber(slot.maximum, 0, 0, 20, true);
@@ -570,7 +582,7 @@ function advancementSnapshot(character: CharacterData): AdvancementSnapshot {
     hitDiceTotal: character.hitDiceTotal, hitDiceUsed: character.hitDiceUsed, hitDiceByClass: character.hitDiceByClass, abilities: character.abilities,
     skillProficiencies: character.skillProficiencies, skillExpertise: character.skillExpertise, weaponMasteries: character.weaponMasteries,
     advancementChoices: character.advancementChoices, resources: character.resources, spellSlots: character.spellSlots,
-    feats: character.feats, spells: character.spells, features: character.features,
+    feats: character.feats, spells: character.spells, featSpellcastingChoices: character.featSpellcastingChoices, features: character.features,
   });
 }
 
@@ -693,15 +705,16 @@ export function CharacterManager() {
   const encumbrance = useMemo(() => calculateEncumbrance(character.inventory, character.abilities.strength, characterCampaignProfile?.encumbranceRule), [character.inventory, character.abilities.strength, characterCampaignProfile?.encumbranceRule]);
   const effectiveArmor = useMemo(() => calculateArmorClass(character, equipment), [character, equipment]);
   const effectiveSpeed = useMemo(() => calculateEffectiveSpeed(character, encumbrance, equipment), [character, encumbrance, equipment]);
-  const spellcastingProfiles = useMemo(() => character.classLevels.flatMap((entry): SpellcastingProfile[] => {
+  const spellcastingProfiles = useMemo(() => [...character.classLevels.flatMap((entry): SpellcastingProfile[] => {
     const ability = spellcastingAbilityForClass(entry.className, entry.subclassName ?? "", classes.find((definition) => definition.name === entry.className)?.primaryAbility);
     return ability ? [{ className: entry.className, ability, preparedLimit: preparedSpellLimitFor(entry.className, entry.subclassName ?? "", entry.level) }] : [];
-  }), [character.classLevels, classes]);
+  }), ...character.featSpellcastingChoices.flatMap((choice): SpellcastingProfile[] => choice.ability && choice.spellList ? [{ className: `Magic Initiate (${choice.spellList})`, ability: choice.ability, preparedLimit: null, sourceFeatId: choice.featId, spellList: choice.spellList }] : [])], [character.classLevels, character.featSpellcastingChoices, classes]);
   const readinessReport = useMemo(() => evaluateCharacterReadiness(character, {
     ancestries,
     classes,
     backgrounds,
     feats,
+    spells,
     loadedPackIds: enabledContent.map((pack) => pack.pack.id),
     campaignProfile: characterCampaignProfile,
   }), [character, ancestries, classes, backgrounds, feats, enabledContent, characterCampaignProfile]);
@@ -982,6 +995,7 @@ export function CharacterManager() {
     const previousTools = new Set(previousBackground?.toolProficiencies ?? []);
     const toolProficiencies = [...character.toolProficiencies.filter((tool) => !previousTools.has(tool)), ...(selectedBackground?.toolProficiencies ?? [])];
     const selectedFeat = selectedBackground?.featId ? feats.find((feat) => feat.id === selectedBackground.featId) : undefined;
+    const removedBackgroundFeatId = previousBackground?.featId && previousBackground.featId !== selectedBackground?.featId ? previousBackground.featId : undefined;
     const resetCreationAbilities = character.level === 1 && !character.abilityScoresConfirmed;
     const inventory = character.inventory.filter((item) => item.source !== "Starting equipment");
     const currency = { ...character.currency, gold: Math.max(0, character.currency.gold - character.startingGold) };
@@ -996,7 +1010,9 @@ export function CharacterManager() {
       inventory,
       currency,
       ...(resetCreationAbilities ? { backgroundAbilityBonuses: {}, abilities: { ...character.baseAbilities } } : {}),
-      feats: [...character.feats.filter((feat) => feat.id !== previousBackground?.featId), ...(selectedFeat && !character.feats.some((feat) => feat.id === selectedFeat.id) ? [selectedFeat] : [])],
+      feats: [...character.feats.filter((feat) => feat.id !== previousBackground?.featId || feat.id === selectedBackground?.featId), ...(selectedFeat && !character.feats.some((feat) => feat.id === selectedFeat.id) ? [selectedFeat] : [])],
+      featSpellcastingChoices: removedBackgroundFeatId ? character.featSpellcastingChoices.filter((choice) => choice.featId !== removedBackgroundFeatId) : character.featSpellcastingChoices,
+      spells: removedBackgroundFeatId ? character.spells.filter((spell) => spell.sourceFeatId !== removedBackgroundFeatId) : character.spells,
       features: [
         ...character.features.filter((feature) => !backgroundFeatureNames.has(feature.name)),
         ...(selectedBackground?.feature ? [selectedBackground.feature] : []),
@@ -1123,7 +1139,7 @@ export function CharacterManager() {
     try {
       setStatus("Building DM review package...");
       const payload = normalizeCharacter({ ...character, id: character.id === "draft" ? crypto.randomUUID() : character.id });
-      const report = evaluateCharacterReadiness(payload, { ancestries, classes, backgrounds, feats, loadedPackIds: enabledContent.map((pack) => pack.pack.id), campaignProfile: characterCampaignProfile });
+      const report = evaluateCharacterReadiness(payload, { ancestries, classes, backgrounds, feats, spells, loadedPackIds: enabledContent.map((pack) => pack.pack.id), campaignProfile: characterCampaignProfile });
       const saved = character.readOnlyReview ? payload : await persistCharacter(payload);
       if (!character.readOnlyReview) {
         setCharacter(saved);
@@ -1939,7 +1955,7 @@ export function CharacterManager() {
 
         {tab === "combat" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 
-          {tab === "spells" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingProfiles={spellcastingProfiles} />}
+          {tab === "spells" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingProfiles={spellcastingProfiles} creationLocked={creationLocked} />}
 
         {tab === "equipment" && <InventoryManager catalog={equipment} character={character} patchCharacter={patchCharacter} encumbranceRule={characterCampaignProfile?.encumbranceRule} attunementLimit={characterCampaignProfile?.attunementLimit} />}
 

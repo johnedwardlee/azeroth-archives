@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.2
+
+- Added guided Magic Initiate setup for its spell list, casting ability, two cantrips, same-list level-1 spell, and free Long Rest casting.
+- Added readiness enforcement and visible progress for starting class cantrips, learned spells, prepared spells, and maximum spell level.
+
 ## 1.2.1
 
 - Fixed feat-granted spell lists so a Paladin with the Faithful Initiate background can select the cantrips and spells provided by Magic Initiate without enabling all class lists.
