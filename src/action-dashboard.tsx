@@ -1,17 +1,33 @@
 import { useMemo, useState } from "react";
-import { Clock3, Search, Sparkles, Zap } from "lucide-react";
+import { Clock3, History, RotateCcw, Search, Sparkles, Star, Zap } from "lucide-react";
+import { recordRecentAction, toggleFavoriteAction } from "../lib/action-history";
 import { activeEffectFromSpell, generatedCharacterActions, hasUnproficientArmor, isIncapacitated, syncEffectConditions, type GeneratedAction } from "../lib/character-rules";
-import type { CharacterData, EquipmentDefinition } from "../lib/types";
+import type { CharacterData, EncumbranceRule, EquipmentDefinition } from "../lib/types";
+import { CombatStatusStrip } from "./combat-status-strip";
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
+type UndoState = { message: string; patch: Partial<CharacterData> };
 
 const timingLabels: Record<GeneratedAction["timing"], string> = { action: "Actions", bonus: "Bonus Actions", reaction: "Reactions", passive: "Passives" };
 
-export function ActionDashboard({ character, patchCharacter, catalog }: { character: CharacterData; patchCharacter: PatchCharacter; catalog: EquipmentDefinition[] }) {
+export function ActionDashboard({ character, patchCharacter, catalog, encumbranceRule = "variant" }: { character: CharacterData; patchCharacter: PatchCharacter; catalog: EquipmentDefinition[]; encumbranceRule?: EncumbranceRule }) {
   const [query, setQuery] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [undoState, setUndoState] = useState<UndoState>();
   const actions = useMemo(() => generatedCharacterActions(character, catalog), [character, catalog]);
+  const byId = useMemo(() => new Map(actions.map((action) => [action.id, action])), [actions]);
   const visible = actions.filter((action) => `${action.name} ${action.source} ${action.description}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const favorites = character.favoriteActionIds.flatMap((id) => byId.get(id) ?? []);
+
+  function snapshotForUndo(message: string): UndoState {
+    return { message, patch: { resources: character.resources, inventory: character.inventory, spellSlots: character.spellSlots, activeEffects: character.activeEffects, conditions: character.conditions, concentratingSpellId: character.concentratingSpellId, recentActions: character.recentActions } };
+  }
+
+  function finishAction(action: GeneratedAction, result: string, changes: Partial<CharacterData> = {}, undoMessage?: string) {
+    setUndoState(undoMessage ? snapshotForUndo(undoMessage) : undefined);
+    patchCharacter({ ...changes, recentActions: recordRecentAction(character, action, result) });
+    setFeedback(result);
+  }
 
   function useAction(action: GeneratedAction) {
     if (action.timing !== "passive" && isIncapacitated(character)) {
@@ -22,8 +38,19 @@ export function ActionDashboard({ character, patchCharacter, catalog }: { charac
       const resource = character.resources.find((entry) => entry.id === action.resourceId);
       const cost = action.resourceCost ?? 1;
       if (!resource || resource.current < cost) { setFeedback(`${action.name}: not enough ${resource?.name ?? "resource"}.`); return; }
-      patchCharacter({ resources: character.resources.map((entry) => entry.id === resource.id ? { ...entry, current: entry.current - cost } : entry) });
-      setFeedback(`${action.name}: spent ${cost} ${resource.name}.`);
+      const result = `${action.name}: spent ${cost} ${resource.name}.`;
+      finishAction(action, result, { resources: character.resources.map((entry) => entry.id === resource.id ? { ...entry, current: entry.current - cost } : entry) }, `Restore ${cost} ${resource.name}`);
+      return;
+    }
+    if (action.attackId) {
+      const ammunition = action.ammunitionItemId ? character.inventory.find((entry) => entry.id === action.ammunitionItemId) : undefined;
+      if (ammunition?.ammunition !== undefined) {
+        if (ammunition.ammunition <= 0) { setFeedback(`${action.name}: no ammunition remaining.`); return; }
+        const result = `${action.name}: attack used; spent one ammunition.`;
+        finishAction(action, result, { inventory: character.inventory.map((entry) => entry.id === ammunition.id ? { ...entry, ammunition: Math.max(0, (entry.ammunition ?? 0) - 1) } : entry) }, "Restore one ammunition");
+      } else {
+        finishAction(action, `${action.name}: attack marked as used.`);
+      }
       return;
     }
     if (action.inventoryId) {
@@ -31,12 +58,10 @@ export function ActionDashboard({ character, patchCharacter, catalog }: { charac
       if (!item) return;
       if (item.maximumCharges !== undefined) {
         if ((item.charges ?? 0) <= 0) { setFeedback(`${item.name} has no charges remaining.`); return; }
-        patchCharacter({ inventory: character.inventory.map((entry) => entry.id === item.id ? { ...entry, charges: (entry.charges ?? 0) - 1 } : entry) });
-        setFeedback(`${item.name}: used one charge.`);
+        finishAction(action, `${item.name}: used one charge.`, { inventory: character.inventory.map((entry) => entry.id === item.id ? { ...entry, charges: (entry.charges ?? 0) - 1 } : entry) }, "Restore one charge");
       } else if (item.consumable) {
         if (item.quantity <= 0) return;
-        patchCharacter({ inventory: item.quantity === 1 ? character.inventory.filter((entry) => entry.id !== item.id) : character.inventory.map((entry) => entry.id === item.id ? { ...entry, quantity: entry.quantity - 1 } : entry) });
-        setFeedback(`${item.name}: used one item.`);
+        finishAction(action, `${item.name}: used one item.`, { inventory: item.quantity === 1 ? character.inventory.filter((entry) => entry.id !== item.id) : character.inventory.map((entry) => entry.id === item.id ? { ...entry, quantity: entry.quantity - 1 } : entry) }, `Restore one ${item.name}`);
       }
       return;
     }
@@ -57,14 +82,24 @@ export function ActionDashboard({ character, patchCharacter, catalog }: { charac
       const activeEffects = effect
         ? [...character.activeEffects.filter((entry) => !(effect.concentration && entry.concentration)), effect]
         : character.activeEffects;
-      patchCharacter({ spellSlots, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects), ...(effect?.concentration ? { concentratingSpellId: spell.id } : {}) });
-      setFeedback(`${spell.name} cast${slotLevel ? ` with a level ${slotLevel} slot` : " as a cantrip"}${effect ? "; effect tracked" : ""}.`);
+      const result = `${spell.name} cast${slotLevel ? ` with a level ${slotLevel} slot` : " as a cantrip"}${effect ? "; effect tracked" : ""}.`;
+      finishAction(action, result, { spellSlots, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects), ...(effect?.concentration ? { concentratingSpellId: spell.id } : {}) }, slotLevel ? `Restore the level ${slotLevel} spell slot` : effect ? `Remove ${spell.name}'s tracked effect` : undefined);
+      return;
     }
+    finishAction(action, `${action.name}: marked as used.`);
+  }
+
+  function undoLastUse() {
+    if (!undoState) return;
+    patchCharacter(undoState.patch);
+    setFeedback(`${undoState.message}.`);
+    setUndoState(undefined);
   }
 
   function canUse(action: GeneratedAction) {
-    if (action.timing !== "passive" && isIncapacitated(character)) return false;
+    if (action.timing === "passive" || isIncapacitated(character)) return false;
     if (action.resourceId) return (character.resources.find((entry) => entry.id === action.resourceId)?.current ?? 0) >= (action.resourceCost ?? 1);
+    if (action.attackId && action.ammunitionItemId) return (character.inventory.find((entry) => entry.id === action.ammunitionItemId)?.ammunition ?? 0) > 0;
     if (action.inventoryId) {
       const item = character.inventory.find((entry) => entry.id === action.inventoryId);
       return item?.maximumCharges !== undefined ? (item.charges ?? 0) > 0 : (item?.quantity ?? 0) > 0;
@@ -77,14 +112,33 @@ export function ActionDashboard({ character, patchCharacter, catalog }: { charac
       if (!spell.prepared) return false;
       return Object.entries(character.spellSlots).some(([level, slot]) => Number(level) >= spell.level && slot.used < slot.maximum);
     }
-    return false;
+    return true;
+  }
+
+  function remainingUseLabel(action: GeneratedAction) {
+    if (action.resourceId) { const resource = character.resources.find((entry) => entry.id === action.resourceId); return resource ? `${resource.current}/${resource.maximum}` : ""; }
+    if (action.ammunitionItemId) { const item = character.inventory.find((entry) => entry.id === action.ammunitionItemId); return item?.ammunition !== undefined ? `${item.ammunition} ammo` : ""; }
+    if (action.inventoryId) { const item = character.inventory.find((entry) => entry.id === action.inventoryId); return item?.maximumCharges !== undefined ? `${item.charges ?? 0}/${item.maximumCharges}` : item?.consumable ? `${item.quantity} left` : ""; }
+    return "";
+  }
+
+  function actionCard(action: GeneratedAction, compact = false) {
+    const favorite = character.favoriteActionIds.includes(action.id);
+    return <article className={compact ? "compact-action-card" : ""} key={action.id}>
+      <div className="action-card-heading"><div><span>{action.source}</span><h4>{action.name}</h4></div><button type="button" className={`favorite-action ${favorite ? "active" : ""}`} aria-label={`${favorite ? "Remove" : "Add"} ${action.name} ${favorite ? "from" : "to"} favorites`} onClick={() => patchCharacter({ favoriteActionIds: toggleFavoriteAction(character.favoriteActionIds, action.id) })}><Star size={15} fill={favorite ? "currentColor" : "none"} /></button></div>
+      {!compact && <p>{action.description}</p>}
+      <div className="action-card-controls">{remainingUseLabel(action) && <span>{remainingUseLabel(action)}</span>}{action.timing !== "passive" && <button disabled={!canUse(action)} onClick={() => useAction(action)}><Sparkles size={13} />{action.spellId ? "Cast" : "Use"}</button>}</div>
+    </article>;
   }
 
   return <div className="action-dashboard">
-    <section className="panel action-dashboard-header"><div className="section-heading"><div><span className="eyebrow">Rules-aware play</span><h2>Action dashboard</h2></div><Zap size={20} /></div><p>Actions are generated from your features, prepared spells, attacks, and equipped items.</p><label className="catalog-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search actions and features" /></label>{feedback && <div className="cast-feedback" role="status">{feedback}<button onClick={() => setFeedback("")}>×</button></div>}</section>
+    <CombatStatusStrip character={character} catalog={catalog} patchCharacter={patchCharacter} encumbranceRule={encumbranceRule} />
+    <section className="panel action-dashboard-header"><div className="section-heading"><div><span className="eyebrow">Rules-aware play</span><h2>Action dashboard</h2></div><Zap size={20} /></div><p>Actions are generated from your features, prepared spells, attacks, and equipped items.</p><label className="catalog-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search actions and features" /></label>{feedback && <div className="cast-feedback" role="status"><span>{feedback}</span>{undoState && <button className="feedback-undo" onClick={undoLastUse}><RotateCcw size={13} />Undo</button>}<button aria-label="Dismiss action message" onClick={() => setFeedback("")}>×</button></div>}</section>
+    <section className="panel quick-action-panel"><div className="action-column-heading"><Star size={15} /><h3>Quick bar</h3><span>{favorites.length}</span></div>{favorites.length ? <div className="quick-action-grid">{favorites.map((action) => actionCard(action, true))}</div> : <p className="action-empty">Pin frequently used actions with the star on any action card.</p>}</section>
+    {character.recentActions.length > 0 && <section className="panel recent-action-panel"><div className="action-column-heading"><History size={15} /><h3>Recently used</h3><span>{character.recentActions.length}</span></div><div className="recent-action-list">{character.recentActions.map((entry) => <button key={`${entry.actionId}-${entry.usedAt}`} disabled={!byId.has(entry.actionId) || !canUse(byId.get(entry.actionId)!)} onClick={() => { const action = byId.get(entry.actionId); if (action) useAction(action); }}><span>{entry.name}</span><small>{entry.result}</small></button>)}</div></section>}
     <div className="action-timing-grid">{(["action", "bonus", "reaction", "passive"] as const).map((timing) => {
       const group = visible.filter((action) => action.timing === timing);
-      return <section className="panel action-column" key={timing}><div className="action-column-heading"><Clock3 size={15} /><h3>{timingLabels[timing]}</h3><span>{group.length}</span></div><div className="action-card-list">{group.map((action) => <article key={action.id}><div><span>{action.source}</span><h4>{action.name}</h4></div><p>{action.description}</p>{(action.resourceId || action.inventoryId || action.spellId) && <button disabled={!canUse(action)} onClick={() => useAction(action)}><Sparkles size={13} />{action.spellId ? "Cast" : "Use"}</button>}</article>)}{!group.length && <p className="action-empty">No {timingLabels[timing].toLowerCase()} found.</p>}</div></section>;
+      return <section className="panel action-column" key={timing}><div className="action-column-heading"><Clock3 size={15} /><h3>{timingLabels[timing]}</h3><span>{group.length}</span></div><div className="action-card-list">{group.map((action) => actionCard(action))}{!group.length && <p className="action-empty">No {timingLabels[timing].toLowerCase()} found.</p>}</div></section>;
     })}</div>
   </div>;
 }

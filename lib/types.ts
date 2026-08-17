@@ -268,6 +268,17 @@ export type CharacterResource = {
   source?: string;
 };
 
+export type ActionTiming = "action" | "bonus" | "reaction" | "passive";
+
+export type RecentActionUse = {
+  actionId: string;
+  name: string;
+  source: string;
+  timing: ActionTiming;
+  result: string;
+  usedAt: string;
+};
+
 export type FeatSpellcastingChoice = {
   featId: string;
   spellList: string;
@@ -333,7 +344,7 @@ export type ContentPack = {
 };
 
 export type CharacterData = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   id: string;
   name: string;
   portraitDataUrl?: string;
@@ -382,6 +393,8 @@ export type CharacterData = {
   inventory: InventoryItem[];
   currency: CurrencyState;
   resources: CharacterResource[];
+  favoriteActionIds: string[];
+  recentActions: RecentActionUse[];
   inspiration: boolean;
   hitDiceTotal: number;
   hitDiceUsed: number;

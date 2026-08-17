@@ -129,6 +129,8 @@ export type GeneratedAction = {
   resourceCost?: number;
   spellId?: string;
   inventoryId?: string;
+  attackId?: string;
+  ammunitionItemId?: string;
 };
 
 type ClassTraining = {
@@ -523,7 +525,10 @@ export function generatedCharacterActions(character: CharacterData, catalog: Equ
     description: spell.description,
     spellId: spell.id,
   }));
-  const attackActions = character.attacks.map((attack) => ({ id: `attack-${attack.id}`, name: attack.name, timing: "action" as const, source: "Attack", description: `${attack.damage} ${attack.damageType}${attack.notes ? ` · ${attack.notes}` : ""}` }));
+  const attackActions = character.attacks.map((attack) => {
+    const inventoryItem = attack.inventoryItemId ? character.inventory.find((item) => item.id === attack.inventoryItemId) : undefined;
+    return { id: `attack-${attack.id}`, name: attack.name, timing: "action" as const, source: "Attack", description: `${attack.damage} ${attack.damageType}${attack.notes ? ` · ${attack.notes}` : ""}`, attackId: attack.id, ...(inventoryItem?.ammunition !== undefined ? { ammunitionItemId: inventoryItem.id } : {}) };
+  });
   const itemActions = character.inventory.filter((item) => item.equipped && (item.consumable || item.maximumCharges !== undefined)).map((item) => ({ id: `item-${item.id}`, name: item.name, timing: "action" as const, source: "Equipment", description: item.notes || "Use this equipped item.", inventoryId: item.id }));
   return [...attackActions, ...spellActions, ...featureActions, ...itemActions];
 }

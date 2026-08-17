@@ -42,7 +42,8 @@ import bundledWarcraftPackJson from "../content-packs/warcraft5e-campaign.w5e?ra
 import packageMetadata from "../package.json";
 import { assertContentPack, contentPackValidationError } from "../lib/content-validation";
 import { normalizeCampaignProfile, parseCampaignProfileFile, serializeCampaignProfile } from "../lib/campaign-profile";
-import { evaluateCharacterReadiness, readinessReportText } from "../lib/character-readiness";
+import { evaluateCharacterReadiness } from "../lib/character-readiness";
+import { createDmReviewExport } from "../lib/dm-review";
 import {
   calculateArmorClass,
   calculateEffectiveSpeed,
@@ -83,7 +84,7 @@ import {
 
 type Tab = "overview" | "features" | "actions" | "combat" | "spells" | "equipment" | "companions" | "notes";
 export const CURRENT_STORE_VERSION = 5 as const;
-export const CURRENT_CHARACTER_SCHEMA_VERSION = 5 as const;
+export const CURRENT_CHARACTER_SCHEMA_VERSION = 6 as const;
 export type OfflineStore = {
   version: 5;
   characters: CharacterData[];
@@ -210,6 +211,8 @@ export function newCharacter(): CharacterData {
     inventory: [],
     currency: { copper: 0, silver: 0, gold: 0 },
     resources: [],
+    favoriteActionIds: [],
+    recentActions: [],
     inspiration: false,
     hitDiceTotal: 1,
     hitDiceUsed: 0,
@@ -442,6 +445,15 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
           };
         })
       : [],
+    favoriteActionIds: stringList(value.favoriteActionIds).slice(0, 24),
+    recentActions: Array.isArray(value.recentActions) ? value.recentActions.filter((entry) => entry && typeof entry.actionId === "string" && typeof entry.name === "string").slice(0, 12).map((entry) => ({
+      actionId: entry.actionId,
+      name: entry.name.trim() || "Action",
+      source: typeof entry.source === "string" ? entry.source : "Character",
+      timing: (["action", "bonus", "reaction", "passive"] as const).includes(entry.timing) ? entry.timing : "action",
+      result: typeof entry.result === "string" ? entry.result : "Used",
+      usedAt: typeof entry.usedAt === "string" ? entry.usedAt : new Date().toISOString(),
+    })) : [],
     inspiration: Boolean(value.inspiration),
     hitDiceTotal: maximumHitDice,
     hitDiceUsed: finiteNumber(value.hitDiceUsed, 0, 0, maximumHitDice, true),
@@ -880,7 +892,7 @@ export function CharacterManager() {
         setStatus("New character draft");
       } else {
         setShowRoster(true);
-        setStatus("Import a player review package or configure the campaign");
+        setStatus("Import a player review file or configure the campaign");
       }
     } catch {
       setStatus("Welcome settings could not be saved");
@@ -1135,9 +1147,9 @@ export function CharacterManager() {
     setStatus("Character creation reopened");
   }
 
-  async function exportDmReviewPackage() {
+  async function exportDmReview() {
     try {
-      setStatus("Building DM review package...");
+      setStatus("Preparing character for DM...");
       const payload = normalizeCharacter({ ...character, id: character.id === "draft" ? crypto.randomUUID() : character.id });
       const report = evaluateCharacterReadiness(payload, { ancestries, classes, backgrounds, feats, spells, loadedPackIds: enabledContent.map((pack) => pack.pack.id), campaignProfile: characterCampaignProfile });
       const saved = character.readOnlyReview ? payload : await persistCharacter(payload);
@@ -1145,34 +1157,16 @@ export function CharacterManager() {
         setCharacter(saved);
         setCharacters((current) => [saved, ...current.filter((entry) => entry.id !== saved.id)]);
       }
-      const { bytes } = await buildPdfArtifact();
-      const safeName = payload.name.trim().replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "character";
-      const reviewJson = JSON.stringify({
-        format: "azeroth-archives-dm-review",
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        campaignProfile: characterCampaignProfile,
-        report,
-        character: payload,
-      }, null, 2);
-      const reportText = readinessReportText(payload, report, characterCampaignProfile?.name);
-      const packageName = `${safeName}-dm-review`;
-      const files = [
-        { name: `${safeName}.azeroth-review.json`, kind: "text" as const, contents: reviewJson },
-        { name: `${safeName}.pdf`, kind: "bytes" as const, contents: Array.from(bytes) },
-        { name: `${safeName}-readiness.txt`, kind: "text" as const, contents: reportText },
-      ];
+      const review = createDmReviewExport(saved, report, characterCampaignProfile);
       if (window.azerothDesktop) {
-        const destination = await window.azerothDesktop.saveReviewPackage(packageName, files);
-        setStatus(destination ? "DM review package saved" : "DM review export canceled");
+        const destination = await window.azerothDesktop.saveReviewJson(review.filename, review.contents);
+        setStatus(destination ? "DM review file saved" : "DM review export canceled");
       } else {
-        downloadBlob(files[0].name, new Blob([reviewJson], { type: "application/json" }));
-        downloadBlob(files[1].name, new Blob([bytes], { type: "application/pdf" }));
-        downloadBlob(files[2].name, new Blob([reportText], { type: "text/plain" }));
-        setStatus("DM review files downloaded");
+        downloadBlob(review.filename, new Blob([review.contents], { type: "application/json" }));
+        setStatus("DM review file downloaded");
       }
     } catch {
-      setStatus("DM review package could not be created");
+      setStatus("DM review file could not be created");
     }
   }
 
@@ -1901,7 +1895,7 @@ export function CharacterManager() {
 
         {tab === "overview" && (
           <div className="overview-grid">
-            <ReadinessPanel report={readinessReport} finalizedAt={character.finalizedAt} readOnlyReview={character.readOnlyReview} campaignName={characterCampaignProfile?.name} onFinalize={finalizeCharacter} onReopen={reopenCharacterCreation} onExportReview={exportDmReviewPackage} />
+            <ReadinessPanel key={`readiness-${character.id}`} characterId={character.id} report={readinessReport} finalizedAt={character.finalizedAt} readOnlyReview={character.readOnlyReview} campaignName={characterCampaignProfile?.name} onFinalize={finalizeCharacter} onReopen={reopenCharacterCreation} onExportReview={exportDmReview} />
             <section className="panel vitals-panel">
               <div className="section-heading"><div><span className="eyebrow">At a glance</span><h2>Combat & vitals</h2></div><Shield size={20} /></div>
               <div className="vital-grid">
@@ -1932,7 +1926,7 @@ export function CharacterManager() {
                 <button className="text-button" onClick={() => setTab("features")}>View all features <span>→</span></button>
               </div>
             </section>
-            <fieldset className="creation-lock-fieldset" disabled={creationLocked}><CreationGuide character={character} patchCharacter={patchCharacter} background={selectedBackground} feats={feats} equipment={equipment} campaignProfile={characterCampaignProfile} /></fieldset>
+            <CreationGuide key={`creation-guide-${character.id}`} character={character} patchCharacter={patchCharacter} background={selectedBackground} feats={feats} equipment={equipment} campaignProfile={characterCampaignProfile} locked={creationLocked} />
             <SessionTracker character={character} patchCharacter={patchCharacter} hitDicePools={hitDicePools} />
             <AdvancementPanel character={character} onRollback={rollbackLatestAdvancement} />
           </div>
@@ -1951,7 +1945,7 @@ export function CharacterManager() {
           </div>
         )}
 
-        {tab === "actions" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} />}
+        {tab === "actions" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} encumbranceRule={characterCampaignProfile?.encumbranceRule} />}
 
         {tab === "combat" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 

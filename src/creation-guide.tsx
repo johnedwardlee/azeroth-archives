@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, Circle, Plus, ShieldCheck, TriangleAlert } from "lucide-react";
 import { classTrainingFor, isEquipmentProficient, syncAutomaticResources } from "../lib/character-rules";
 import { ABILITY_LABELS, type AbilityKey, type AdvancementChoice, type BackgroundDefinition, type CampaignProfile, type CharacterData, type EquipmentDefinition, type FeatDefinition, type InventoryItem } from "../lib/types";
+import { CollapsiblePanel } from "./collapsible-panel";
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
 
@@ -52,7 +53,7 @@ function ChipEditor({ label, values, placeholder, onChange }: { label: string; v
   return <div className="guide-chip-editor"><strong>{label}</strong><div><input value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); add(); } }} placeholder={placeholder} /><button onClick={add} aria-label={`Add ${label}`}><Plus size={13} /></button></div><span>{values.map((item) => <button key={item} onClick={() => onChange(values.filter((value) => value !== item))}>{item} ×</button>)}</span></div>;
 }
 
-export function CreationGuide({ character, patchCharacter, background, feats, equipment, campaignProfile }: { character: CharacterData; patchCharacter: PatchCharacter; background?: BackgroundDefinition; feats: FeatDefinition[]; equipment: EquipmentDefinition[]; campaignProfile?: CampaignProfile }) {
+export function CreationGuide({ character, patchCharacter, background, feats, equipment, campaignProfile, locked = false }: { character: CharacterData; patchCharacter: PatchCharacter; background?: BackgroundDefinition; feats: FeatDefinition[]; equipment: EquipmentDefinition[]; campaignProfile?: CampaignProfile; locked?: boolean }) {
   const training = classTrainingFor(character.className);
   const availableSkills = training.skillOptions.length ? training.skillOptions : SKILLS;
   const backgroundSkills = background?.skills ?? [];
@@ -161,8 +162,8 @@ export function CreationGuide({ character, patchCharacter, background, feats, eq
     patchCharacter({ skillExpertise: selected ? character.skillExpertise.filter((item) => item !== skill) : [...character.skillExpertise, skill] });
   }
 
-  return <section className="panel creation-guide-panel">
-    <div className="section-heading"><div><span className="eyebrow">Guided setup</span><h2>Character creation checklist</h2></div><span className="guide-progress">{completed} / {checklist.length}</span></div>
+  return <CollapsiblePanel className="creation-guide-panel" storageKey={`azeroth-archives:panel:${character.id}:creation-guide`} eyebrow="Guided setup" title="Character creation checklist" summary={<span className="guide-progress">{completed} / {checklist.length} complete</span>}>
+    <fieldset className="creation-lock-fieldset" disabled={locked}>
     <div className="creation-checklist">{checklist.map((item) => <span className={item.done ? "complete" : ""} key={item.label}>{item.done ? <Check size={13} /> : <Circle size={13} />}{item.label}</span>)}</div>
     <div className="guide-sections">
       <div className="guide-section">
@@ -187,5 +188,6 @@ export function CreationGuide({ character, patchCharacter, background, feats, eq
       {hasStartingExpertise && <div className="guide-section"><strong>Starting Expertise <small>{character.skillExpertise.length} / 2</small></strong><div className="guide-option-grid">{character.skillProficiencies.map((skill) => <button className={character.skillExpertise.includes(skill) ? "selected" : ""} disabled={!character.skillExpertise.includes(skill) && character.skillExpertise.length >= 2} onClick={() => toggleExpertise(skill)} key={skill}>{skill}</button>)}</div></div>}
       {training.masteryChoices > 0 && <div className="guide-section"><strong><ShieldCheck size={14} />Weapon Masteries <small>{character.weaponMasteries.length} / {training.masteryChoices}</small></strong><div className="guide-option-grid mastery-options">{weaponOptions.map((weapon) => <button className={character.weaponMasteries.includes(weapon.name) ? "selected" : ""} disabled={!character.weaponMasteries.includes(weapon.name) && character.weaponMasteries.length >= training.masteryChoices} onClick={() => toggleMastery(weapon.name)} key={weapon.id}>{weapon.name}<small>{weapon.mastery ?? "—"}</small></button>)}</div></div>}
     </div>
-  </section>;
+    </fieldset>
+  </CollapsiblePanel>;
 }

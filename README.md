@@ -5,7 +5,7 @@ Azeroth Archives is an offline-first Windows desktop character manager for a cus
 ## Player features
 
 - Guided character creation with class skill and spell counts, standard array, point buy, rolled or manual scores, background ability boosts, starting equipment, Fighting Styles, Expertise, Weapon Masteries, and Magic Initiate choices
-- Portable campaign profiles, first-launch onboarding, readiness validation, protected finalized creation choices, and read-only DM review packages
+- Portable campaign profiles, first-launch onboarding, readiness validation, protected finalized creation choices, and single-file read-only DM reviews
 - Guided single-class or multiclass advancement with rollback history, subclass checks, hit-point increases, feats, ability improvements, Expertise, Metamagic, spell choices, Fighting Styles, and Weapon Masteries
 - Living hit points, temporary hit points, death saves, class-specific hit dice, inspiration, conditions, rests, class resources, concentration, and active effects
 - Rules-aware Actions dashboard generated from features, attacks, prepared spells, and equipped items

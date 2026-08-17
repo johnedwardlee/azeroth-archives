@@ -27,7 +27,7 @@ function assertCharacter(character) {
   if (!record(character)) throw new Error("Character data must be an object.");
   requiredString(character.id, "Character id", false);
   requiredString(character.name, "Character name", false);
-  if (character.schemaVersion !== 5) throw new Error("Character data must be migrated to schema version 5 before it is saved.");
+  if (character.schemaVersion !== 6) throw new Error("Character data must be migrated to schema version 6 before it is saved.");
 
   for (const field of ["playerName", "ancestry", "className", "background", "notes", "createdAt", "updatedAt"]) requiredString(character[field], `Character ${field}`);
   if (character.subclassName !== undefined) requiredString(character.subclassName, "Character subclassName");
@@ -50,6 +50,7 @@ function assertCharacter(character) {
   if (!["standard-array", "point-buy", "rolled", "manual"].includes(character.abilityScoreMethod)) throw new Error("Character abilityScoreMethod is invalid.");
   if (!["", "A", "B"].includes(character.startingEquipmentChoice)) throw new Error("Character startingEquipmentChoice is invalid.");
   for (const field of STRING_ARRAY_FIELDS) stringArray(character[field], `Character ${field}`);
+  stringArray(character.favoriteActionIds, "Character favoriteActionIds");
   stringArray(character.savingThrowProficiencies, "Character savingThrowProficiencies");
   if (character.savingThrowProficiencies.some((ability) => !ABILITIES.includes(ability))) throw new Error("Character savingThrowProficiencies contains an invalid ability.");
 
@@ -83,6 +84,12 @@ function assertCharacter(character) {
   for (const field of ["attacks", "features", "feats", "spells", "featSpellcastingChoices", "activeEffects", "companions", "inventory", "resources", "hitDiceByClass", "advancementChoices", "advancementHistory", "journal"]) {
     if (!Array.isArray(character[field])) throw new Error(`Character ${field} must be a list.`);
   }
+  if (!Array.isArray(character.recentActions)) throw new Error("Character recentActions must be a list.");
+  character.recentActions.forEach((entry, index) => {
+    if (!record(entry)) throw new Error(`Character recentActions[${index}] must be an object.`);
+    for (const field of ["actionId", "name", "source", "result", "usedAt"]) requiredString(entry[field], `Character recentActions[${index}].${field}`, false);
+    if (!["action", "bonus", "reaction", "passive"].includes(entry.timing)) throw new Error(`Character recentActions[${index}].timing is invalid.`);
+  });
   character.inventory.forEach((item, index) => {
     if (!record(item)) throw new Error(`Character inventory[${index}] must be an object.`);
     requiredString(item.id, `Character inventory[${index}].id`, false); requiredString(item.name, `Character inventory[${index}].name`, false); requiredString(item.notes, `Character inventory[${index}].notes`);

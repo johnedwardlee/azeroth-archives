@@ -37,16 +37,16 @@ type PdfColor = [number, number, number];
 
 const PAGE_WIDTH = 612;
 const PAGE_HEIGHT = 792;
-const PARCHMENT: PdfColor = [247, 241, 225];
-const PAPER: PdfColor = [252, 249, 239];
-const NAVY: PdfColor = [22, 46, 69];
-const NAVY_LIGHT: PdfColor = [39, 68, 92];
-const BRASS: PdfColor = [164, 119, 50];
-const BRASS_LIGHT: PdfColor = [205, 171, 105];
-const INK: PdfColor = [31, 43, 51];
-const MUTED: PdfColor = [94, 91, 82];
-const MAP_LINE: PdfColor = [204, 190, 157];
-const RUST: PdfColor = [126, 51, 30];
+const PARCHMENT: PdfColor = [244, 235, 213];
+const PAPER: PdfColor = [255, 250, 238];
+const NAVY: PdfColor = [16, 38, 61];
+const NAVY_LIGHT: PdfColor = [31, 61, 89];
+const BRASS: PdfColor = [172, 121, 42];
+const BRASS_LIGHT: PdfColor = [226, 185, 99];
+const INK: PdfColor = [28, 40, 49];
+const MUTED: PdfColor = [92, 85, 73];
+const MAP_LINE: PdfColor = [205, 186, 145];
+const RUST: PdfColor = [132, 53, 32];
 
 function safeText(value: string) {
   return value
@@ -65,21 +65,27 @@ export async function buildCharacterPdf(model: CharacterPdfModel) {
   const setDraw = (color: PdfColor) => doc.setDrawColor(...color);
   const setText = (color: PdfColor) => doc.setTextColor(...color);
 
-  function drawCompass(cx: number, cy: number, radius: number) {
-    setDraw(BRASS);
+  function drawRuneSeal(cx: number, cy: number, radius: number) {
     setFill(PARCHMENT);
-    doc.setLineWidth(1.2);
-    doc.circle(cx, cy, radius, "FD");
-    doc.setLineWidth(0.7);
-    doc.circle(cx, cy, radius * 0.52, "S");
-    for (let index = 0; index < 8; index += 1) {
-      const angle = (Math.PI * index) / 4;
-      const inner = index % 2 === 0 ? radius * 0.22 : radius * 0.36;
-      const outer = index % 2 === 0 ? radius * 0.92 : radius * 0.7;
-      doc.line(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner, cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
-    }
-    setFill(NAVY);
-    doc.circle(cx, cy, Math.max(1.8, radius * 0.12), "F");
+    setDraw(BRASS);
+    doc.setLineWidth(1.3);
+    doc.lines([[radius, radius], [-radius, radius], [-radius, -radius], [radius, -radius]], cx, cy - radius, [1, 1], "FD", true);
+    setDraw(NAVY_LIGHT);
+    doc.setLineWidth(0.75);
+    doc.lines([[0, radius * 0.72], [radius * 0.54, radius * 0.44], [-radius * 0.2, radius * 0.12], [radius * 0.46, radius * 0.72]], cx - radius * 0.38, cy - radius * 0.76, [1, 1], "S");
+    setFill(RUST);
+    doc.circle(cx, cy, Math.max(1.6, radius * 0.11), "F");
+  }
+
+  function drawCornerOrnament(x: number, y: number, horizontal: 1 | -1, vertical: 1 | -1) {
+    setDraw(BRASS);
+    doc.setLineWidth(1.05);
+    doc.line(x, y, x + 24 * horizontal, y);
+    doc.line(x, y, x, y + 24 * vertical);
+    doc.line(x + 5 * horizontal, y + 5 * vertical, x + 17 * horizontal, y + 5 * vertical);
+    doc.line(x + 5 * horizontal, y + 5 * vertical, x + 5 * horizontal, y + 17 * vertical);
+    setFill(RUST);
+    doc.circle(x + 5 * horizontal, y + 5 * vertical, 1.7, "F");
   }
 
   function drawIcon(icon: CharacterPdfIcon, x: number, y: number, size = 11) {
@@ -131,46 +137,47 @@ export async function buildCharacterPdf(model: CharacterPdfModel) {
     }
   }
 
-  function drawMapTexture() {
+  function drawParchmentTexture() {
     setDraw(MAP_LINE);
     doc.setLineWidth(0.35);
     doc.setLineDashPattern([2, 3], 0);
-    doc.lines([[14, -4], [11, 8], [16, -3], [10, 10], [18, -4]], 23, 126, [1, 1], "S");
-    doc.lines([[-12, 8], [-10, 13], [-16, 7], [-9, 14], [-15, 8]], 589, 474, [1, 1], "S");
+    doc.lines([[15, -5], [10, 9], [16, -4], [11, 11], [17, -5]], 22, 128, [1, 1], "S");
+    doc.lines([[-13, 8], [-9, 13], [-15, 8], [-10, 14], [-16, 7]], 590, 476, [1, 1], "S");
     doc.setLineDashPattern([], 0);
-    doc.circle(38, 632, 16, "S");
-    doc.line(22, 632, 54, 632);
-    doc.line(38, 616, 38, 648);
-    doc.lines([[10, -8], [8, 12], [12, -9], [9, 8]], 510, 716, [1, 1], "S");
+    doc.lines([[8, -8], [8, 8], [-8, 8], [-8, -8]], 34, 650, [1, 1], "S", true);
+    doc.line(34, 638, 34, 662);
+    doc.line(22, 650, 46, 650);
+    doc.lines([[10, -8], [8, 12], [12, -9], [9, 8]], 516, 716, [1, 1], "S");
   }
 
-  function drawFrame(withCompasses: boolean) {
+  function drawFrame(withSeal: boolean) {
     setFill(PARCHMENT);
     doc.rect(0, 0, PAGE_WIDTH, PAGE_HEIGHT, "F");
     setDraw(NAVY);
-    doc.setLineWidth(8);
-    doc.rect(8, 8, PAGE_WIDTH - 16, PAGE_HEIGHT - 16, "S");
+    doc.setLineWidth(9);
+    doc.rect(9, 9, PAGE_WIDTH - 18, PAGE_HEIGHT - 18, "S");
     setDraw(BRASS);
-    doc.setLineWidth(1.6);
-    doc.rect(14, 14, PAGE_WIDTH - 28, PAGE_HEIGHT - 28, "S");
+    doc.setLineWidth(1.8);
+    doc.rect(16, 16, PAGE_WIDTH - 32, PAGE_HEIGHT - 32, "S");
     setDraw(NAVY_LIGHT);
-    doc.setLineWidth(0.7);
-    doc.rect(18, 18, PAGE_WIDTH - 36, PAGE_HEIGHT - 36, "S");
-    drawMapTexture();
-    if (withCompasses) {
-      drawCompass(PAGE_WIDTH / 2, 18, 14);
-      drawCompass(PAGE_WIDTH / 2, 773, 15);
-    }
+    doc.setLineWidth(0.65);
+    doc.rect(21, 21, PAGE_WIDTH - 42, PAGE_HEIGHT - 42, "S");
+    drawCornerOrnament(26, 26, 1, 1);
+    drawCornerOrnament(PAGE_WIDTH - 26, 26, -1, 1);
+    drawCornerOrnament(26, PAGE_HEIGHT - 26, 1, -1);
+    drawCornerOrnament(PAGE_WIDTH - 26, PAGE_HEIGHT - 26, -1, -1);
+    drawParchmentTexture();
+    if (withSeal) drawRuneSeal(PAGE_WIDTH / 2, 19, 13);
   }
 
   function writeWrapped(text: string, x: number, y: number, width: number, maxLines: number, fontSize: number, lineHeight: number) {
+    doc.setFontSize(fontSize);
     const lines = doc.splitTextToSize(safeText(text), width) as string[];
     const visible = lines.slice(0, maxLines);
     if (lines.length > maxLines && visible.length) {
       const last = visible.length - 1;
       visible[last] = `${visible[last].replace(/[.\s]+$/, "")}...`;
     }
-    doc.setFontSize(fontSize);
     doc.text(visible, x, y, { lineHeightFactor: lineHeight / fontSize });
     return visible.length;
   }
@@ -178,48 +185,54 @@ export async function buildCharacterPdf(model: CharacterPdfModel) {
   function drawSectionCard(section: CharacterPdfSection, x: number, y: number, width: number, height: number, maxRows: number) {
     setFill(PAPER);
     setDraw(NAVY_LIGHT);
-    doc.setLineWidth(0.8);
-    doc.roundedRect(x, y, width, height, 3, 3, "FD");
+    doc.setLineWidth(0.9);
+    doc.roundedRect(x, y, width, height, 4, 4, "FD");
     setFill(NAVY);
-    doc.roundedRect(x, y, width, 22, 3, 3, "F");
-    doc.rect(x, y + 10, width, 12, "F");
+    doc.roundedRect(x, y, width, 24, 4, 4, "F");
+    doc.rect(x, y + 11, width, 13, "F");
+    setFill(BRASS);
+    doc.rect(x, y, 4, height, "F");
+    doc.rect(x + 4, y + 23, width - 4, 1.2, "F");
+    setDraw(BRASS_LIGHT);
+    doc.setLineWidth(0.9);
+    doc.circle(x + 17, y + 12, 7, "S");
+    drawIcon(section.icon, x + 17, y + 12, 9);
     setText(BRASS_LIGHT);
     doc.setFont("times", "bold");
     doc.setFontSize(9.5);
-    doc.text(safeText(section.title), x + width / 2, y + 15, { align: "center" });
-    drawIcon(section.icon, x + width - 13, y + 11, 10);
+    doc.text(safeText(section.title), x + 30, y + 16);
     const rows = section.rows.slice(0, maxRows);
     if (!rows.length) {
       setText(MUTED);
       doc.setFont("helvetica", "italic");
       doc.setFontSize(7);
-      doc.text("None recorded", x + 10, y + 39);
+      doc.text("None recorded", x + 13, y + 42);
       return;
     }
-    const available = height - 30;
+    const available = height - 32;
     const rowHeight = Math.max(13, available / rows.length);
     rows.forEach((row, index) => {
-      const rowY = y + 34 + index * rowHeight;
+      const rowY = y + 36 + index * rowHeight;
       setText(INK);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7.2);
       const name = safeText(row.name);
-      doc.text(name.length > 31 ? `${name.slice(0, 29)}...` : name, x + 9, rowY);
+      doc.text(name.length > 31 ? `${name.slice(0, 29)}...` : name, x + 13, rowY);
       if (row.detail) {
         setText(MUTED);
         doc.setFont("helvetica", "normal");
-        const detailX = section.title === "SAVING THROWS" || section.title === "SKILLS" ? x + width - 10 : x + 9;
+        const detailX = section.title === "SAVING THROWS" || section.title === "SKILLS" ? x + width - 11 : x + 13;
         if (detailX === x + width - 10) {
           doc.setFontSize(7);
           doc.text(safeText(row.detail), detailX, rowY, { align: "right" });
         } else if (rowHeight >= 23) {
-          writeWrapped(row.detail, detailX, rowY + 9, width - 18, 1, 6.5, 7.5);
+          writeWrapped(row.detail, detailX, rowY + 9, width - 26, 1, 6.5, 7.5);
         }
       }
       if (index < rows.length - 1) {
         setDraw(MAP_LINE);
         doc.setLineWidth(0.25);
-        doc.line(x + 8, rowY + rowHeight - 7, x + width - 8, rowY + rowHeight - 7);
+        doc.line(x + 12, rowY + rowHeight - 7, x + width - 10, rowY + rowHeight - 7);
       }
     });
   }
@@ -227,191 +240,226 @@ export async function buildCharacterPdf(model: CharacterPdfModel) {
   drawFrame(true);
   setText(NAVY);
   doc.setFont("times", "bold");
-  doc.setFontSize(27);
-  doc.text("AZEROTH ARCHIVES", PAGE_WIDTH / 2, 48, { align: "center", charSpace: 0.5 });
-  setText(MUTED);
-  doc.setFont("times", "normal");
-  doc.setFontSize(6.8);
-  doc.text("AN EXPLORER'S LEDGER - CHRONICLES OF HEROES ACROSS AZEROTH", PAGE_WIDTH / 2, 62, { align: "center", charSpace: 0.45 });
-
-  const portraitX = 44;
-  const portraitY = 82;
-  const portraitSize = 145;
-  setFill(PAPER);
+  doc.setFontSize(25);
+  doc.text("AZEROTH ARCHIVES", PAGE_WIDTH / 2, 49, { align: "center", charSpace: 0.65 });
+  setText(BRASS);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(6.5);
+  doc.text("WARCRAFT 5E CHARACTER RECORD", PAGE_WIDTH / 2, 62, { align: "center", charSpace: 1.05 });
   setDraw(BRASS);
-  doc.setLineWidth(2.2);
-  doc.circle(portraitX + portraitSize / 2, portraitY + portraitSize / 2, portraitSize / 2, "FD");
+  doc.setLineWidth(0.75);
+  doc.line(168, 68, 444, 68);
+
+  const portraitX = 42;
+  const portraitY = 82;
+  const portraitSize = 132;
+  setFill(NAVY);
+  setDraw(BRASS);
+  doc.setLineWidth(2.1);
+  doc.roundedRect(portraitX, portraitY, portraitSize, portraitSize, 6, 6, "FD");
+  setDraw(BRASS_LIGHT);
+  doc.setLineWidth(0.8);
+  doc.roundedRect(portraitX + 5, portraitY + 5, portraitSize - 10, portraitSize - 10, 4, 4, "S");
   if (model.portraitDataUrl) {
     try {
-      doc.saveGraphicsState();
-      doc.circle(portraitX + portraitSize / 2, portraitY + portraitSize / 2, portraitSize / 2 - 4, "S");
-      doc.clip();
-      doc.addImage(model.portraitDataUrl, "JPEG", portraitX + 4, portraitY + 4, portraitSize - 8, portraitSize - 8);
-      doc.restoreGraphicsState();
+      doc.addImage(model.portraitDataUrl, "JPEG", portraitX + 7, portraitY + 7, portraitSize - 14, portraitSize - 14);
     } catch {
       // A corrupt legacy portrait should never block exporting the rest of the sheet.
     }
   }
   if (!model.portraitDataUrl) {
-    setText(NAVY);
+    setText(BRASS_LIGHT);
     doc.setFont("times", "bold");
-    doc.setFontSize(40);
+    doc.setFontSize(36);
     const initials = safeText(model.name).split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase() || "AA";
-    doc.text(initials, portraitX + portraitSize / 2, portraitY + 87, { align: "center" });
+    doc.text(initials, portraitX + portraitSize / 2, portraitY + 78, { align: "center" });
+    drawRuneSeal(portraitX + portraitSize / 2, portraitY + 105, 8);
   }
 
-  setText(NAVY);
+  const identityX = 188;
+  const identityY = 82;
+  const identityWidth = 382;
+  setFill(NAVY);
+  setDraw(BRASS);
+  doc.setLineWidth(1.2);
+  doc.roundedRect(identityX, identityY, identityWidth, 132, 6, 6, "FD");
+  setFill(NAVY_LIGHT);
+  doc.roundedRect(identityX + 6, identityY + 6, identityWidth - 12, 48, 3, 3, "F");
+  setDraw(BRASS_LIGHT);
+  doc.setLineWidth(0.65);
+  doc.line(identityX + 15, identityY + 56, identityX + identityWidth - 15, identityY + 56);
+  setText(BRASS_LIGHT);
   doc.setFont("times", "bold");
-  doc.setFontSize(22);
+  doc.setFontSize(20);
   const heroName = safeText(model.name || "Unnamed Hero");
-  doc.text(heroName.length > 28 ? `${heroName.slice(0, 26)}...` : heroName, 211, 104);
-  setText(MUTED);
-  doc.setFont("times", "normal");
-  doc.setFontSize(8.5);
-  writeWrapped(model.identityLine, 212, 121, 355, 1, 8.5, 10);
-  doc.setFontSize(7.5);
-  doc.text(`PLAYER: ${safeText(model.playerName || "Not recorded")}`, 212, 134);
+  doc.text(heroName.length > 29 ? `${heroName.slice(0, 27)}...` : heroName, identityX + 18, identityY + 27);
+  setText(PAPER);
+  doc.setFont("helvetica", "normal");
+  writeWrapped(model.identityLine, identityX + 18, identityY + 42, identityWidth - 36, 1, 7.5, 9);
+  setText(BRASS_LIGHT);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(6.4);
+  doc.text(`PLAYER  ${safeText(model.playerName || "NOT RECORDED")}`, identityX + 18, identityY + 68);
 
-  const statY = 145;
-  const statWidth = 87.5;
+  const statY = identityY + 77;
+  const statWidth = 91;
   model.stats.slice(0, 4).forEach((stat, index) => {
-    const x = 211 + index * statWidth;
+    const x = identityX + 9 + index * statWidth;
     setFill(PAPER);
-    setDraw(MAP_LINE);
-    doc.setLineWidth(0.6);
-    doc.rect(x, statY, statWidth, 68, "FD");
-    drawIcon(stat.icon, x + statWidth / 2, statY + 16, 12);
+    setDraw(BRASS);
+    doc.setLineWidth(0.55);
+    doc.roundedRect(x, statY, statWidth - 4, 45, 3, 3, "FD");
+    drawIcon(stat.icon, x + 14, statY + 12, 9);
     setText(MUTED);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(6.6);
-    doc.text(safeText(stat.label), x + statWidth / 2, statY + 32, { align: "center" });
+    doc.setFontSize(5.8);
+    doc.text(safeText(stat.label), x + 25, statY + 14);
     setText(index === 1 ? RUST : NAVY);
     doc.setFont("times", "bold");
-    doc.setFontSize(stat.value.length > 9 ? 14 : 18);
-    doc.text(safeText(stat.value), x + statWidth / 2, statY + 55, { align: "center" });
+    doc.setFontSize(stat.value.length > 9 ? 12.5 : 16);
+    doc.text(safeText(stat.value), x + (statWidth - 4) / 2, statY + 35, { align: "center" });
   });
 
-  const abilityY = 239;
+  const abilityY = 230;
   const abilityWidth = 82;
   model.abilities.slice(0, 6).forEach((ability, index) => {
     const x = 42 + index * 88;
     setFill(PAPER);
     setDraw(BRASS);
-    doc.setLineWidth(0.75);
-    doc.roundedRect(x, abilityY, abilityWidth, 68, 3, 3, "FD");
+    doc.setLineWidth(0.9);
+    doc.roundedRect(x, abilityY, abilityWidth, 74, 4, 4, "FD");
+    setFill(NAVY);
+    doc.roundedRect(x + 5, abilityY + 5, abilityWidth - 10, 18, 3, 3, "F");
     setText(NAVY);
     doc.setFont("times", "bold");
-    doc.setFontSize(7.3);
-    doc.text(safeText(ability.label).toUpperCase(), x + abilityWidth / 2, abilityY + 14, { align: "center" });
-    setFill(NAVY);
-    doc.circle(x + abilityWidth / 2, abilityY + 34, 12, "F");
     setText(BRASS_LIGHT);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7.5);
-    doc.text(safeText(ability.label).slice(0, 3).toUpperCase(), x + abilityWidth / 2, abilityY + 36.5, { align: "center" });
+    doc.setFontSize(7.1);
+    doc.text(safeText(ability.label).toUpperCase(), x + abilityWidth / 2, abilityY + 17, { align: "center" });
     setText(INK);
     doc.setFont("times", "bold");
-    doc.setFontSize(13);
-    doc.text(String(ability.score), x + 29, abilityY + 59, { align: "center" });
+    doc.setFontSize(24);
+    doc.text(String(ability.score), x + abilityWidth / 2, abilityY + 50, { align: "center" });
+    setFill(NAVY);
+    doc.circle(x + abilityWidth / 2, abilityY + 64, 9, "F");
     setText(RUST);
-    doc.setFontSize(10);
-    doc.text(safeText(ability.modifier), x + 57, abilityY + 58, { align: "center" });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    setText(BRASS_LIGHT);
+    doc.text(safeText(ability.modifier), x + abilityWidth / 2, abilityY + 66.8, { align: "center" });
   });
 
   const overview = model.overviewSections;
-  drawSectionCard(overview[0] ?? { title: "SAVING THROWS", icon: "shield", rows: [] }, 42, 323, 166, 142, 6);
-  drawSectionCard(overview[1] ?? { title: "SKILLS", icon: "book", rows: [] }, 223, 323, 166, 142, 7);
-  drawSectionCard(overview[2] ?? { title: "ATTACKS", icon: "blades", rows: [] }, 404, 323, 166, 142, 5);
-  drawSectionCard(overview[3] ?? { title: "FEATURES", icon: "scroll", rows: [] }, 42, 479, 250, 162, 6);
-  drawSectionCard(overview[4] ?? { title: "SPELLS", icon: "spark", rows: [] }, 306, 479, 264, 162, 7);
-  drawSectionCard(overview[5] ?? { title: "EQUIPMENT", icon: "satchel", rows: [] }, 42, 655, 250, 88, 4);
-  drawSectionCard(overview[6] ?? { title: "NOTES", icon: "quill", rows: [] }, 306, 655, 264, 88, 2);
+  drawSectionCard(overview[0] ?? { title: "SAVING THROWS", icon: "shield", rows: [] }, 42, 319, 166, 142, 6);
+  drawSectionCard(overview[1] ?? { title: "SKILLS", icon: "book", rows: [] }, 223, 319, 166, 142, 7);
+  drawSectionCard(overview[2] ?? { title: "ATTACKS", icon: "blades", rows: [] }, 404, 319, 166, 142, 5);
+  drawSectionCard(overview[3] ?? { title: "FEATURES", icon: "scroll", rows: [] }, 42, 475, 250, 162, 6);
+  drawSectionCard(overview[4] ?? { title: "SPELLS", icon: "spark", rows: [] }, 306, 475, 264, 162, 7);
+  drawSectionCard(overview[5] ?? { title: "EQUIPMENT", icon: "satchel", rows: [] }, 42, 651, 250, 94, 4);
+  drawSectionCard(overview[6] ?? { title: "NOTES", icon: "quill", rows: [] }, 306, 651, 264, 94, 2);
 
-  let detailY = 92;
+  let detailY = 101;
   function addDetailPage() {
     doc.addPage();
     drawFrame(false);
     setFill(NAVY);
-    doc.roundedRect(24, 22, 564, 48, 4, 4, "F");
+    doc.roundedRect(29, 28, 554, 57, 5, 5, "F");
+    setFill(NAVY_LIGHT);
+    doc.roundedRect(36, 35, 540, 43, 3, 3, "F");
     setDraw(BRASS);
-    doc.setLineWidth(1);
-    doc.line(34, 65, 578, 65);
+    doc.setLineWidth(0.9);
+    doc.line(80, 72, 530, 72);
+    drawRuneSeal(55, 56.5, 12);
     setText(BRASS_LIGHT);
     doc.setFont("times", "bold");
-    doc.setFontSize(17);
-    doc.text(`${safeText(model.name || "Hero")} - LIVING RECORD`, 38, 48);
+    doc.setFontSize(16);
+    const pageTitle = safeText(model.name || "Hero");
+    doc.text(pageTitle.length > 31 ? `${pageTitle.slice(0, 29)}...` : pageTitle, 78, 53);
     setText(PAPER);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6.2);
+    doc.text("LIVING CHARACTER RECORD", 79, 66, { charSpace: 0.7 });
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(6.8);
+    doc.setFontSize(6.4);
     const meta = safeText(model.detailMeta);
-    doc.text(meta.length > 90 ? `${meta.slice(0, 88)}...` : meta, 574, 48, { align: "right" });
-    detailY = 88;
+    doc.text(meta.length > 68 ? `${meta.slice(0, 66)}...` : meta, 530, 55, { align: "right" });
+    detailY = 101;
   }
 
   function drawDetailHeader(section: CharacterPdfSection, continued = false) {
     setFill(NAVY);
-    doc.roundedRect(30, detailY, 552, 23, 3, 3, "F");
+    doc.roundedRect(34, detailY, 544, 27, 4, 4, "F");
+    setFill(BRASS);
+    doc.rect(34, detailY, 5, 27, "F");
+    setDraw(BRASS_LIGHT);
+    doc.setLineWidth(0.75);
+    doc.circle(52, detailY + 13.5, 7, "S");
+    drawIcon(section.icon, 52, detailY + 13.5, 9);
     setText(BRASS_LIGHT);
     doc.setFont("times", "bold");
-    doc.setFontSize(10);
-    doc.text(`${safeText(section.title)}${continued ? " - CONTINUED" : ""}`, 43, detailY + 15);
-    drawIcon(section.icon, 566, detailY + 11.5, 10);
-    detailY += 27;
+    doc.setFontSize(9.5);
+    doc.text(`${safeText(section.title)}${continued ? " - CONTINUED" : ""}`, 67, detailY + 17);
+    detailY += 32;
   }
 
   function ensureDetailSpace(height: number, section?: CharacterPdfSection) {
-    if (detailY + height <= 748) return false;
+    if (detailY + height <= 757) return false;
     addDetailPage();
     if (section) drawDetailHeader(section, true);
     return true;
   }
 
   function detailRowHeight(row: CharacterPdfRow) {
-    const detailLines = doc.splitTextToSize(safeText(row.detail).slice(0, 1200), 522) as string[];
-    return Math.max(23, 17 + Math.min(detailLines.length, 12) * 8);
+    const detailLines = doc.splitTextToSize(safeText(row.detail).slice(0, 1600), 506) as string[];
+    return Math.max(20, 15 + Math.min(detailLines.length, 14) * 7.5);
   }
 
   addDetailPage();
   model.detailSections.forEach((section) => {
-    const firstRow = section.rows[0] ?? { name: "None recorded", detail: "" };
-    ensureDetailSpace(31 + detailRowHeight(firstRow));
-    drawDetailHeader(section);
     const rows = section.rows.length ? section.rows : [{ name: "None recorded", detail: "" }];
+    const completeSectionHeight = 41 + rows.reduce((total, row) => total + detailRowHeight(row), 0);
+    if (completeSectionHeight <= 645 && detailY + completeSectionHeight > 757) addDetailPage();
+    else ensureDetailSpace(32 + detailRowHeight(rows[0]));
+    drawDetailHeader(section);
     rows.forEach((row, index) => {
-      const detailLines = doc.splitTextToSize(safeText(row.detail).slice(0, 1200), 522) as string[];
-      const visibleDetail = detailLines.slice(0, 12);
+      const detailLines = doc.splitTextToSize(safeText(row.detail).slice(0, 1600), 506) as string[];
+      const visibleDetail = detailLines.slice(0, 14);
       const rowHeight = detailRowHeight(row);
       ensureDetailSpace(rowHeight + 4, section);
       if (index % 2 === 0) {
         setFill(PAPER);
-        doc.rect(30, detailY - 1, 552, rowHeight, "F");
+        doc.roundedRect(34, detailY - 1, 544, rowHeight, 2, 2, "F");
       }
+      setFill(BRASS);
+      doc.circle(46, detailY + 8, 1.5, "F");
       setText(INK);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.2);
-      doc.text(safeText(row.name), 40, detailY + 10);
+      doc.setFontSize(8);
+      doc.text(safeText(row.name), 54, detailY + 10);
       if (visibleDetail.length) {
         setText(MUTED);
         doc.setFont("helvetica", "normal");
-        doc.setFontSize(7.2);
-        doc.text(visibleDetail, 40, detailY + 20, { lineHeightFactor: 1.1 });
+        doc.setFontSize(7);
+        doc.text(visibleDetail, 54, detailY + 19, { lineHeightFactor: 1.08 });
       }
       setDraw(MAP_LINE);
       doc.setLineWidth(0.25);
-      doc.line(38, detailY + rowHeight - 2, 574, detailY + rowHeight - 2);
+      doc.line(46, detailY + rowHeight - 2, 566, detailY + rowHeight - 2);
       detailY += rowHeight;
     });
     detailY += 9;
   });
 
   const pageCount = doc.getNumberOfPages();
-  for (let page = 1; page <= pageCount; page += 1) {
+  for (let page = 2; page <= pageCount; page += 1) {
     doc.setPage(page);
-    setText(MUTED);
-    doc.setFont("helvetica", "normal");
+    setFill(PARCHMENT);
+    setDraw(BRASS);
+    doc.setLineWidth(0.8);
+    doc.lines([[10, 10], [-10, 10], [-10, -10], [10, -10]], 555, 36, [1, 1], "FD", true);
+    setText(NAVY);
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(6.5);
-    doc.text("Generated with Azeroth Archives", 30, 770);
-    doc.text(`PAGE ${page} OF ${pageCount}`, 582, 770, { align: "right" });
+    doc.text(`${page} / ${pageCount}`, 555, 48.5, { align: "center" });
   }
 
   return new Uint8Array(doc.output("arraybuffer"));

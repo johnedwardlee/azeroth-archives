@@ -1,8 +1,10 @@
-import { AlertTriangle, CheckCircle2, FileArchive, LockKeyhole, ShieldAlert, UnlockKeyhole } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileJson, LockKeyhole, ShieldAlert, UnlockKeyhole } from "lucide-react";
 import type { CharacterReadinessReport } from "../lib/character-readiness";
+import { CollapsiblePanel } from "./collapsible-panel";
 
 type Props = {
   report: CharacterReadinessReport;
+  characterId: string;
   finalizedAt?: string;
   readOnlyReview?: boolean;
   campaignName?: string;
@@ -11,9 +13,10 @@ type Props = {
   onExportReview: () => void;
 };
 
-export function ReadinessPanel({ report, finalizedAt, readOnlyReview, campaignName, onFinalize, onReopen, onExportReview }: Props) {
-  return <section className={`panel readiness-panel ${report.ready ? "ready" : "blocked"}`}>
-    <div className="section-heading"><div><span className="eyebrow">Session-zero preflight</span><h2>{readOnlyReview ? "DM review copy" : finalizedAt ? "Character finalized" : report.ready ? "Ready to play" : "Creation review"}</h2></div>{report.ready ? <CheckCircle2 size={21} /> : <ShieldAlert size={21} />}</div>
+export function ReadinessPanel({ report, characterId, finalizedAt, readOnlyReview, campaignName, onFinalize, onReopen, onExportReview }: Props) {
+  const title = readOnlyReview ? "DM review copy" : finalizedAt ? "Character finalized" : report.ready ? "Ready to play" : "Creation review";
+  const summary = <><span className={report.errors.length ? "has-issues" : ""}>{report.errors.length} errors</span><span className={report.warnings.length ? "has-warnings" : ""}>{report.warnings.length} warnings</span>{report.ready ? <CheckCircle2 size={20} /> : <ShieldAlert size={20} />}</>;
+  return <CollapsiblePanel className={`readiness-panel ${report.ready ? "ready" : "blocked"}`} storageKey={`azeroth-archives:panel:${characterId}:readiness`} eyebrow="Session-zero preflight" title={title} summary={summary}>
     {campaignName && <p className="readiness-campaign">Campaign profile: <strong>{campaignName}</strong></p>}
     {readOnlyReview && <div className="review-only-banner"><LockKeyhole size={16} /><span>This imported DM review copy is read-only. The player’s original remains authoritative.</span></div>}
     {!readOnlyReview && finalizedAt && <div className="review-only-banner finalized"><LockKeyhole size={16} /><span>Creation choices are protected. Living-sheet trackers and level advancement remain available.</span></div>}
@@ -26,7 +29,7 @@ export function ReadinessPanel({ report, finalizedAt, readOnlyReview, campaignNa
     <div className="readiness-actions">
       {!readOnlyReview && !finalizedAt && <button className="button button-primary" disabled={!report.ready} onClick={onFinalize}><LockKeyhole size={15} />Finalize character</button>}
       {!readOnlyReview && finalizedAt && <button className="button button-outline" onClick={onReopen}><UnlockKeyhole size={15} />Reopen creation</button>}
-      <button className="button button-outline" onClick={onExportReview}><FileArchive size={15} />Export DM review package</button>
+      <button className="button button-outline" onClick={onExportReview}><FileJson size={15} />Export for DM</button>
     </div>
-  </section>;
+  </CollapsiblePanel>;
 }

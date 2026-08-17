@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+## 1.3.0
+
+- Rebuilt the exported character sheet to match the approved neutral Warcraft design with runic framing, a portrait plate, carved stat panels, varied section symbols, and themed continuation pages; removed the discarded slogan, compass medallions, and bottom labels.
+- Replaced folder-based DM review packages with one versioned, importable JSON file containing the character and readiness report.
+- Made Guided Setup and Session-Zero Preflight collapsible with per-character saved expansion state and compact summaries.
+- Extended collapsible panels to class resources, active effects, spell slots, and equipment load summaries.
+- Made the Content Pack Workshop responsive and removed the narrow-drawer width conflict that caused horizontal page scrolling.
+- Added a reusable live combat-status strip to the Actions screen with editable HP, temporary HP, inspiration, conditions, concentration, spell slots, and class resources.
+- Added per-character action favorites, a quick bar, recent-action history, ammunition consumption, and immediate one-step undo for resource expenditure.
+- Upgraded character saves to schema 6 for action favorites and recent-use history.
+
 ## 1.2.2
 
 - Added guided Magic Initiate setup for its spell list, casting ability, two cantrips, same-list level-1 spell, and free Long Rest casting.

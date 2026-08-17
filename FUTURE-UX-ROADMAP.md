@@ -4,6 +4,8 @@ This document records interface work to revisit after the pre-session character-
 
 ## Collapsible sections
 
+**Status:** Foundation rollout complete for Guided Setup, Session-Zero Preflight, class resources, active effects, spell slots, and equipment load. The reusable component includes compact summaries and per-character saved expansion state.
+
 Make large panels collapsible throughout the app, beginning with:
 
 - Guided Setup
@@ -37,7 +39,7 @@ The app should distinguish between **character management** and **active play**.
 
 ## Recommended direction: Encounter workspace
 
-Add a new default play screen called **Encounter**. It should combine the information needed to take a turn without replacing the detailed Actions, Combat, and Spells management screens.
+**Next release:** Add a new default play screen called **Encounter**. It should combine the information needed to take a turn without replacing the detailed Actions, Combat, and Spells management screens. Version 1.3.0 provides the reusable combat strip, persisted favorites, recent-action records, ammunition use, and resource undo that this workspace will build on.
 
 ### Persistent combat strip
 
@@ -118,16 +120,57 @@ Provide a fast searchable overlay opened by a keyboard shortcut. Typing `fire`, 
 
 Replace Actions, Combat, and Spells with one large page. This minimizes navigation but risks becoming dense and makes character maintenance harder. Prefer the Encounter workspace plus retained management tabs.
 
+## PDF export fidelity
+
+**Status:** Implemented. The exported sheet now uses the approved neutral Warcraft direction across overview and continuation pages, with runic framing, varied symbols, a portrait plate, navy/brass carved panels, no faction imagery, no slogan, and no bottom labels. The generated preview is rendered and visually checked as part of release QA.
+
+Before this revision, the generated character-sheet PDF did not match the approved Warcraft-themed design. The approved Option 4 artwork remains the visual source of truth for the exported sheet.
+
+- Rebuild the PDF template around the approved typography, borders, parchment treatment, blue-and-gold palette, visual hierarchy, and page composition.
+- Use general Warcraft-inspired ornamentation only: no Alliance symbols, faction slogans, or bottom labels.
+- Keep the varied symbol treatment from the final mockup instead of repeating compass icons throughout the sheet.
+- Preserve practical character-sheet requirements such as readable print contrast, selectable text where possible, sensible page breaks, and support for long spell, feature, and equipment lists.
+- Add reference-image comparisons or other visual regression checks so later PDF changes cannot silently drift away from the approved design.
+
+## Responsive content creation editor
+
+**Status:** Implemented. The workshop now uses the full available drawer width, removes the conflicting fixed-width rule, hides the preview before it crowds the editor, and stacks vertically at narrow widths without whole-page horizontal scrolling.
+
+Previously, the content creation editor was locked to a fixed width, which forced whole-page horizontal scrolling and made the editor difficult to use in smaller desktop windows.
+
+- Replace fixed page and panel widths with a fluid responsive layout.
+- Collapse multi-column fields and preview panes into a vertical layout as the window narrows.
+- Keep primary controls visible with a local or sticky toolbar where useful.
+- Allow only inherently wide fields, such as raw JSON or code editors, to scroll within their own panel; the page itself should not require horizontal scrolling.
+- Consider resizable editor and preview panes at larger window sizes.
+- Test the editor at the app's minimum supported window size, including keyboard navigation and focus behavior.
+
+## Simplify DM review export
+
+**Status:** Implemented. **Export for DM** now creates one versioned `.azeroth-review.json` file containing the character, campaign profile, and readiness report. The former PDF/text/folder bundle has been removed.
+
+The previous desktop export created a folder containing an importable JSON file, a PDF, and a readiness text report. That bundle was intended to support both app-based inspection and offline/manual review, but it was unnecessarily cumbersome when the DM was importing the character into the app.
+
+- Make **Export for DM** save one `.azeroth-review.json` file through a normal save dialog.
+- Keep all character data and useful readiness metadata inside that JSON so a separate text report is unnecessary.
+- Import the JSON directly into the DM's read-only inspection view.
+- Keep printable PDF export as its existing separate action instead of coupling it to DM handoff.
+- Keep the JSON format versioned so future app releases can migrate older review files safely.
+
 ## Proposed implementation order
 
-1. Add reusable collapsible panels and persisted expansion state.
-2. Add favorites/pinning to the existing generated Actions dashboard.
-3. Build the persistent combat strip.
-4. Create the unified Encounter action library from existing action-generation data.
-5. Add inline attack, spell, item, and feature resolution.
-6. Add action-economy filters and availability explanations.
-7. Add recent actions and one-step resource undo.
-8. Consider the optional turn planner and command palette after real-session feedback.
+1. [x] Replace the folder-based DM review export with a single JSON file.
+2. [x] Make the content creation editor responsive and eliminate whole-page horizontal scrolling.
+3. [x] Add reusable collapsible panels and persisted expansion state to Guided Setup and Session-Zero Preflight.
+4. [x] Restore the PDF export to the approved Warcraft-themed design and add rendered visual QA coverage.
+5. [ ] Extend collapsible panels to the remaining long management sections.
+6. [ ] Add favorites/pinning to the existing generated Actions dashboard.
+7. [ ] Build the persistent combat strip.
+8. [ ] Create the unified Encounter action library from existing action-generation data.
+9. [ ] Add inline attack, spell, item, and feature resolution.
+10. [ ] Add action-economy filters and availability explanations.
+11. [ ] Add recent actions and one-step resource undo.
+12. [ ] Consider the optional turn planner and command palette after real-session feedback.
 
 ## Initial success criteria
 
@@ -137,4 +180,6 @@ Replace Actions, Combat, and Spells with one large page. This minimizes navigati
 - The detailed management screens remain available for preparation and editing.
 - Common actions require no more than two clicks after opening the Encounter workspace.
 - The layout remains usable at the app's smallest supported window size.
-
+- Exported PDFs visually match the approved Warcraft-themed reference design.
+- The content creation editor remains usable without whole-page horizontal scrolling at the minimum supported window size.
+- A player can export a DM-readable character as one JSON file without creating a folder.

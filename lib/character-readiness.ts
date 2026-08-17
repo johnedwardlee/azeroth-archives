@@ -48,7 +48,7 @@ export function evaluateCharacterReadiness(character: CharacterData, context: Ch
   const training = classTrainingFor(character.className);
 
   if (!character.name.trim() || character.name.trim().toLowerCase() === "new hero") push(issues, "error", "identity-name", "Name the character", "Replace the draft name before finalizing.");
-  if (!character.playerName.trim()) push(issues, "error", "identity-player", "Add the player name", "The DM review package needs to identify the player.");
+  if (!character.playerName.trim()) push(issues, "error", "identity-player", "Add the player name", "The DM review file needs to identify the player.");
   if (!character.ancestry) push(issues, "error", "identity-ancestry", "Choose an ancestry", "An ancestry is required.");
   else if (!selectedAncestry) push(issues, "error", "identity-ancestry-missing", "Ancestry content is unavailable", `${character.ancestry} is not present in the enabled campaign content.`);
   if (!character.className || !character.classLevels.length) push(issues, "error", "identity-class", "Choose a class", "At least one class level is required.");
@@ -153,27 +153,4 @@ export function evaluateCharacterReadiness(character: CharacterData, context: Ch
   const errors = issues.filter((issue) => issue.severity === "error");
   const warnings = issues.filter((issue) => issue.severity === "warning");
   return { ready: errors.length === 0, errors, warnings, checkedAt: new Date().toISOString() };
-}
-
-export function readinessReportText(character: CharacterData, report: CharacterReadinessReport, campaignName?: string) {
-  const lines = [
-    "AZEROTH ARCHIVES - CHARACTER READINESS REPORT",
-    "",
-    `Character: ${character.name}`,
-    `Player: ${character.playerName || "Not recorded"}`,
-    `Campaign: ${campaignName || "No campaign profile"}`,
-    `Checked: ${new Date(report.checkedAt).toLocaleString()}`,
-    `Result: ${report.ready ? "READY FOR GM REVIEW" : "NOT READY"}`,
-    `Errors: ${report.errors.length}`,
-    `Warnings: ${report.warnings.length}`,
-  ];
-  const section = (title: string, entries: ReadinessIssue[]) => {
-    lines.push("", title);
-    if (!entries.length) lines.push("- None");
-    else entries.forEach((entry) => lines.push(`- ${entry.title}: ${entry.detail}`));
-  };
-  section("ERRORS", report.errors);
-  section("WARNINGS / GM REVIEW", report.warnings);
-  lines.push("", character.finalizedAt ? `Finalized: ${new Date(character.finalizedAt).toLocaleString()}` : "Finalized: No");
-  return lines.join("\n");
 }

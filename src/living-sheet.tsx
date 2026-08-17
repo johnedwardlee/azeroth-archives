@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, Heart, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 import { DescriptionPicker } from "./description-picker";
+import { CollapsiblePanel } from "./collapsible-panel";
 import {
   ABILITY_LABELS,
   abilityModifier,
@@ -307,8 +308,8 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
           {character.conditions.length > 0 && <div className="condition-effects">{character.conditions.map((item) => <p key={item}><strong>{item === "Exhaustion" ? `Exhaustion ${character.exhaustionLevel}` : item}</strong>{conditionEffectText(item, character.exhaustionLevel)}</p>)}</div>}
         </div>
       </div>
-      <div className="class-resource-panel">
-        <div className="class-resource-heading"><div><span className="eyebrow">Rest recovery</span><h3>Class resources</h3></div><button className="button button-outline" onClick={addResource}><Plus size={14} />Add tracker</button></div>
+      <CollapsiblePanel contained className="class-resource-panel" storageKey={`azeroth-panel-${character.id}-session-resources`} eyebrow="Rest recovery" title="Class resources" summary={<span>{character.resources.reduce((total, resource) => total + resource.current, 0)} uses available</span>}>
+        <div className="class-resource-heading class-resource-actions"><span /> <button className="button button-outline" onClick={addResource}><Plus size={14} />Add tracker</button></div>
         <div className="class-resource-list">{character.resources.map((resource) => <article key={resource.id}>
           <input className="resource-name" aria-label="Resource name" value={resource.name} onChange={(event) => updateResource(resource.id, { name: event.target.value })} />
           <div className="resource-stepper"><button aria-label={`Spend ${resource.name}`} disabled={resource.current <= 0} onClick={() => updateResource(resource.id, { current: resource.current - 1 })}>−</button><strong>{resource.current}</strong><span>/</span><input aria-label={`${resource.name} maximum`} type="number" min="0" value={resource.maximum} onChange={(event) => updateResource(resource.id, { maximum: Number(event.target.value) })} /><button aria-label={`Recover ${resource.name}`} disabled={resource.current >= resource.maximum} onClick={() => updateResource(resource.id, { current: resource.current + 1 })}>+</button></div>
@@ -317,13 +318,13 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
           <button className="icon-button danger" disabled={resource.automatic} aria-label={`Remove ${resource.name}`} onClick={() => patchCharacter({ resources: character.resources.filter((item) => item.id !== resource.id) })}><Trash2 size={14} /></button>
         </article>)}</div>
         {!character.resources.length && <p className="class-resource-empty">Add a reusable tracker for Rage, Focus, Channel Divinity, Sorcery Points, or another limited class feature.</p>}
-      </div>
-      <div className="active-effect-panel">
-        <div className="class-resource-heading"><div><span className="eyebrow">Turn tracking</span><h3>Active effects</h3></div><div className="effect-advance"><button onClick={() => advanceEffects(1)}>Next round</button><button onClick={() => advanceEffects(10, 1)}>+1 minute</button></div></div>
+      </CollapsiblePanel>
+      <CollapsiblePanel contained className="active-effect-panel" storageKey={`azeroth-panel-${character.id}-session-effects`} eyebrow="Turn tracking" title="Active effects" summary={<span>{character.activeEffects.length} tracked</span>}>
+        <div className="class-resource-heading class-resource-actions"><span /><div className="effect-advance"><button onClick={() => advanceEffects(1)}>Next round</button><button onClick={() => advanceEffects(10, 1)}>+1 minute</button></div></div>
         <div className="effect-add-row"><input aria-label="Effect name" value={effectName} onChange={(event) => setEffectName(event.target.value)} placeholder="Effect name" /><select aria-label="Effect condition" value={effectCondition} onChange={(event) => setEffectCondition(event.target.value)}><option value="">No condition</option>{CONDITIONS.filter((item) => !character.conditionImmunities.some((immune) => immune.toLowerCase() === item.toLowerCase())).map((item) => <option key={item}>{item}</option>)}</select><select aria-label="Effect duration" value={effectDuration} onChange={(event) => setEffectDuration(event.target.value as ActiveEffect["duration"])}><option value="rounds">Rounds</option><option value="minutes">Minutes</option><option value="until-rest">Until rest</option><option value="manual">Manual</option></select>{(effectDuration === "rounds" || effectDuration === "minutes") && <input aria-label="Effect duration amount" type="number" min="1" value={effectRemaining} onChange={(event) => setEffectRemaining(Math.max(1, Number(event.target.value) || 1))} />}<button onClick={addEffect}><Plus size={14} />Add effect</button></div>
         <div className="active-effect-list">{character.activeEffects.map((effect) => <article className={effect.concentration ? "concentration" : ""} key={effect.id}><Sparkles size={15} /><div><strong>{effect.name}</strong><span>{effect.source}{effect.condition ? ` · ${effect.condition}` : ""}</span></div><b>{effect.duration === "rounds" ? `${effect.remaining} rd` : effect.duration === "minutes" ? `${effect.remaining} min` : effect.duration === "until-rest" ? "Until rest" : "Manual"}</b>{effect.concentration && <small>Concentration</small>}<button aria-label={`End ${effect.name}`} onClick={() => endEffect(effect.id)}>×</button></article>)}</div>
         {!character.activeEffects.length && <p className="class-resource-empty">Cast a duration spell or add an effect to track its expiration here.</p>}
-      </div>
+      </CollapsiblePanel>
     </section>
   );
 }
@@ -513,8 +514,8 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
 
   return (
     <div className="living-tab-grid spellbook-layout">
-      <section className="panel slot-panel">
-        <div className="section-heading"><div><span className="eyebrow">Daily resources</span><h2>Spell slots</h2></div><button className="text-button" onClick={() => patchCharacter({ spellSlots: Object.fromEntries(Object.entries(character.spellSlots).map(([level, slot]) => [level, { ...slot, used: 0 }])) })}>Restore all</button></div>
+      <CollapsiblePanel className="slot-panel" storageKey={`azeroth-panel-${character.id}-spell-slots`} eyebrow="Daily resources" title="Spell slots" summary={<span>{Object.values(character.spellSlots).reduce((total, slot) => total + slot.maximum - slot.used, 0)} remaining</span>}>
+        <div className="collapsible-panel-actions"><button className="text-button" onClick={() => patchCharacter({ spellSlots: Object.fromEntries(Object.entries(character.spellSlots).map(([level, slot]) => [level, { ...slot, used: 0 }])) })}>Restore all</button></div>
         <div className="spellcasting-profile-list">{spellcastingProfiles.map((profile) => {
           const modifier = abilityModifier(character.abilities[profile.ability]);
           const attack = modifier + character.proficiencyBonus;
@@ -523,7 +524,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
         {!spellcastingProfiles.length && <p className="spellcasting-note">This character has no default spellcasting ability. Known spells can still be tracked.</p>}
         {spellcastingBlocked && <p className="spellcasting-note equipment-blocked">Spellcasting is blocked while wearing armor or a shield without proficiency.</p>}
         <div className="slot-grid">{Array.from({ length: 9 }, (_, index) => index + 1).map((level) => { const slot = character.spellSlots[String(level)] ?? { maximum: 0, used: 0 }; return <div className="slot-row" key={level}><strong>{level}</strong><label>Max <input aria-label={`Level ${level} maximum spell slots`} type="number" min="0" max="20" value={slot.maximum} onChange={(event) => updateSlot(level, { maximum: Number(event.target.value) })} /></label><span>{slot.maximum - slot.used} left</span><button disabled={slot.used <= 0} onClick={() => updateSlot(level, { used: slot.used - 1 })}>−</button><button disabled={slot.used >= slot.maximum} onClick={() => updateSlot(level, { used: slot.used + 1 })}>Use</button></div>; })}</div>
-      </section>
+      </CollapsiblePanel>
 
       <section className="panel spell-list-panel">
         <div className="section-heading"><div><span className="eyebrow">Known magic</span><h2>Spellbook</h2></div><span className="count-chip">{character.spells.length}</span></div>
@@ -658,8 +659,7 @@ export function InventoryManager({ catalog, character, patchCharacter, encumbran
 
   return (
     <div className="living-tab-grid inventory-layout">
-      <section className="panel currency-panel">
-        <div className="section-heading"><div><span className="eyebrow">Carried wealth</span><h2>Currency & load</h2></div></div>
+      <CollapsiblePanel className="currency-panel" storageKey={`azeroth-panel-${character.id}-currency-load`} eyebrow="Carried wealth" title="Currency & load" summary={<span>{formatPounds(totalWeight)} / {formatPounds(carryingCapacity)} lb.</span>} defaultExpanded={false}>
         <div className="currency-grid">{(["gold", "silver", "copper"] as const).map((coin) => <label key={coin}><span>{coin}</span><input type="number" min="0" value={character.currency[coin]} onChange={(event) => patchCharacter({ currency: { ...character.currency, [coin]: Math.max(0, Number(event.target.value)) } })} /></label>)}</div>
         <div className="carry-summary"><strong>{character.inventory.reduce((total, item) => total + item.quantity, 0)}</strong><span>items carried</span><strong>{strength}</strong><span>Strength score</span></div>
         <div className={`attunement-summary ${attunedCount >= attunementLimit ? "full" : ""}`}><span>Attunement</span><strong>{attunedCount} / {attunementLimit}</strong></div>
@@ -682,7 +682,7 @@ export function InventoryManager({ catalog, character, patchCharacter, encumbran
           <div className="encumbrance-penalty">{encumbrance.level !== "unencumbered" && <AlertTriangle size={15} />}<div><strong>Current penalties</strong><p>{encumbrance.penalty}</p></div></div>
           {unlistedWeightItems > 0 && <p className="unlisted-weight-warning">{unlistedWeightItems} carried {unlistedWeightItems === 1 ? "item has" : "items have"} no numeric listed weight and {unlistedWeightItems === 1 ? "is" : "are"} not included.</p>}
         </div>
-      </section>
+      </CollapsiblePanel>
 
       <section className="panel inventory-panel">
         <div className="section-heading"><div><span className="eyebrow">Possessions</span><h2>Equipment & inventory</h2></div><span className="count-chip">{character.inventory.length}</span></div>

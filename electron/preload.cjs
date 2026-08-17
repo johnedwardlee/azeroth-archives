@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld("azerothDesktop", {
   savePdf: (filename, bytes) => ipcRenderer.invoke("dialog:save-pdf", filename, bytes),
   saveJson: (filename, contents) => ipcRenderer.invoke("dialog:save-json", filename, contents),
   saveContentPack: (filename, contents) => ipcRenderer.invoke("dialog:save-content-pack", filename, contents),
-  saveReviewPackage: (packageName, files) => ipcRenderer.invoke("dialog:save-review-package", packageName, files),
+  saveReviewJson: (filename, contents) => ipcRenderer.invoke("dialog:save-review-json", filename, contents),
   getAppInfo: () => ipcRenderer.invoke("app:info"),
   openDataFolder: () => ipcRenderer.invoke("app:open-data-folder"),
   openReleaseNotes: () => ipcRenderer.invoke("app:open-release-notes"),

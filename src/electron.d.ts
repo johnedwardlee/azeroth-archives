@@ -33,7 +33,7 @@ declare global {
       savePdf: (filename: string, bytes: number[]) => Promise<string | null>;
       saveJson: (filename: string, contents: string) => Promise<string | null>;
       saveContentPack: (filename: string, contents: string) => Promise<string | null>;
-      saveReviewPackage: (packageName: string, files: Array<{ name: string; kind: "text" | "bytes"; contents: string | number[] }>) => Promise<string | null>;
+      saveReviewJson: (filename: string, contents: string) => Promise<string | null>;
       getAppInfo: () => Promise<{ version: string; platform: string; packaged: boolean; dataPath: string; backupPath: string }>;
       openDataFolder: () => Promise<string>;
       openReleaseNotes: () => Promise<void>;

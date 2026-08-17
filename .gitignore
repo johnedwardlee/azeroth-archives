@@ -41,6 +41,7 @@ yarn-error.log*
 /release/
 /.wrangler/
 /outputs/
+/output/
 /work/
 
 # Old installer builds

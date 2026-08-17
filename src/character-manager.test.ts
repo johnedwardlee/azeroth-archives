@@ -86,7 +86,7 @@ describe("character save migrations", () => {
       spells: [{ id: "light", name: "Light", level: 0, school: "Evocation", classes: ["Mage"], castingTime: "Action", range: "Touch", components: "V", duration: "1 hour", description: "Light.", prepared: false }],
     });
 
-    expect(character.schemaVersion).toBe(5);
+    expect(character.schemaVersion).toBe(CURRENT_CHARACTER_SCHEMA_VERSION);
     expect(character.classLevels).toEqual([{ className: "Mage", subclassName: "", level: 20 }]);
     expect(character.abilities.strength).toBe(newCharacter().abilities.strength);
     expect(character.currency).toEqual({ copper: 0, silver: 0, gold: 12 });
