@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0
+
+- Replace the former Overview, Features, Actions, Combat, Spells, Equipment, Companions, and Notes tabs with Encounter, Character, Spellbook, Inventory, Companions, and Journal.
+- Make Encounter the default play screen for finalized characters and DM review copies while unfinished characters continue to open on Character setup.
+- Add a unified Encounter library for attacks, prepared spells, features, usable equipment, active companion commands, and standard combat actions.
+- Add action-economy and purpose filters, full-library search, visible availability explanations, responsive action cards, favorites, recent actions, and one-step resource undo.
+- Consolidate vitals, abilities, identity, features, advancement, checks, attacks, and defenses into the Character screen for detailed management.
+- Move the finalized Character Setup Complete control below the active character view while keeping unfinished Session-Zero and creation choices at the top.
+
 ## 1.4.0
 
 - Made every primary character-workspace section collapsible, saved each panel's state per character, and added visible-page Expand all / Collapse all controls.

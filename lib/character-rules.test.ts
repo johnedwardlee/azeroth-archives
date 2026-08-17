@@ -66,6 +66,19 @@ describe("living sheet rules", () => {
     expect(isIncapacitated({ conditions: [" unconscious "] })).toBe(true);
   });
 
+  it("adds standard actions and active companion commands to the encounter library", () => {
+    const character = {
+      ...newCharacter(),
+      companions: [{ id: "wolf", name: "Wolf", kind: "companion" as const, active: true, currentHp: 11, maxHp: 11, armorClass: 13, speed: "40 ft.", description: "Bite a nearby enemy.", notes: "", source: "Test" }],
+    };
+    const actions = generatedCharacterActions(character, []);
+    expect(actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "standard-dodge", timing: "action", purpose: "defense" }),
+      expect.objectContaining({ id: "standard-move", timing: "movement" }),
+      expect.objectContaining({ id: "companion-wolf", purpose: "companion" }),
+    ]));
+  });
+
   it("keeps shared effect conditions until the last source ends", () => {
     const first = { id: "first", name: "First", source: "Test", duration: "rounds" as const, remaining: 1, condition: "Stunned" };
     const second = { ...first, id: "second", name: "Second" };

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { recordRecentAction, toggleFavoriteAction } from "./action-history";
 import type { GeneratedAction } from "./character-rules";
 
-const action: GeneratedAction = { id: "spell-fire", name: "Fire Bolt", timing: "action", source: "Spell · Cantrip", description: "A bolt of flame." };
+const action: GeneratedAction = { id: "spell-fire", name: "Fire Bolt", timing: "action", purpose: "spell", source: "Spell · Cantrip", description: "A bolt of flame." };
 
 describe("action history", () => {
   it("toggles a favorite without disturbing its order", () => {

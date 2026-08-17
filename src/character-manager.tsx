@@ -85,7 +85,7 @@ import {
   type SpellcastingProfile,
 } from "../lib/types";
 
-type Tab = "overview" | "features" | "actions" | "combat" | "spells" | "equipment" | "companions" | "notes";
+type Tab = "encounter" | "character" | "spellbook" | "inventory" | "companions" | "journal";
 export const CURRENT_STORE_VERSION = 5 as const;
 export const CURRENT_CHARACTER_SCHEMA_VERSION = 6 as const;
 export type OfflineStore = {
@@ -453,7 +453,7 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
       actionId: entry.actionId,
       name: entry.name.trim() || "Action",
       source: typeof entry.source === "string" ? entry.source : "Character",
-      timing: (["action", "bonus", "reaction", "passive"] as const).includes(entry.timing) ? entry.timing : "action",
+      timing: (["action", "bonus", "reaction", "movement", "other", "passive"] as const).includes(entry.timing) ? entry.timing : "action",
       result: typeof entry.result === "string" ? entry.result : "Used",
       usedAt: typeof entry.usedAt === "string" ? entry.usedAt : new Date().toISOString(),
     })) : [],
@@ -611,7 +611,7 @@ export function CharacterManager() {
   const [onboardingCompleted, setOnboardingCompleted] = useState(true);
   const [appRole, setAppRole] = useState<AppRole>("player");
   const [storeLoaded, setStoreLoaded] = useState(false);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("character");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("Loading your roster…");
   const [saving, setSaving] = useState(false);
@@ -763,6 +763,7 @@ export function CharacterManager() {
 
   useEffect(() => {
     setShowCompletedSetup(false);
+    setTab(character.finalizedAt || character.readOnlyReview ? "encounter" : "character");
   }, [character.id, character.finalizedAt]);
 
   useEffect(() => {
@@ -1144,6 +1145,7 @@ export function CharacterManager() {
       const saved = await persistCharacter(payload);
       setCharacter(saved);
       setCharacters((current) => [saved, ...current.filter((entry) => entry.id !== saved.id)]);
+      setTab("encounter");
       setStatus("Character finalized; creation choices are protected");
     } catch {
       setStatus("Character could not be finalized");
@@ -1153,6 +1155,7 @@ export function CharacterManager() {
   function reopenCharacterCreation() {
     if (character.readOnlyReview || !window.confirm("Reopen character creation? Ancestry, class, background, ability assignments, and starting choices will become editable again.")) return;
     patchCharacter({ finalizedAt: undefined });
+    setTab("character");
     setStatus("Character creation reopened");
   }
 
@@ -1828,12 +1831,12 @@ export function CharacterManager() {
 
       <aside className={`roster-panel ${showRoster ? "is-open" : ""}`}>
         <div className="roster-heading"><div><span className="eyebrow">Your party</span><h2>Characters</h2></div><button className="icon-button mobile-only" onClick={() => setShowRoster(false)} aria-label="Close roster"><X size={18} /></button></div>
-        <button className="button button-create" onClick={() => { setCharacter(createCampaignDraft()); setShowRoster(false); setStatus("New character draft"); }}><Plus size={17} />Create character</button>
+        <button className="button button-create" onClick={() => { setCharacter(createCampaignDraft()); setTab("character"); setShowRoster(false); setStatus("New character draft"); }}><Plus size={17} />Create character</button>
         <label className="search-field"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a character" /></label>
         <div className="character-list">
           {visibleCharacters.map((item, index) => (
             <div key={item.id} className={`character-row ${item.id === character.id ? "active" : ""}`}>
-              <button className="character-row-select" onClick={() => { setCharacter(item); setMenuCharacterId(null); setShowRoster(false); }}>
+              <button className="character-row-select" onClick={() => { setCharacter(item); setTab(item.finalizedAt || item.readOnlyReview ? "encounter" : "character"); setMenuCharacterId(null); setShowRoster(false); }}>
                 <span className={`mini-portrait tone-${index % 4}`}>{item.portraitDataUrl ? <img src={item.portraitDataUrl} alt="" /> : initials(item.name)}</span>
                 <span><strong>{item.name}{item.readOnlyReview ? " · Review" : item.finalizedAt ? " · Final" : ""}</strong><small>Level {item.level} {item.className}</small></span>
               </button>
@@ -1899,7 +1902,7 @@ export function CharacterManager() {
         </div>
 
         <nav className="tabs" aria-label="Character sections">
-          {(["overview", "features", "actions", "combat", "spells", "equipment", "companions", "notes"] as Tab[]).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "combat" && character.attacks.length ? ` ${character.attacks.length}` : ""}{item === "spells" && character.spells.length ? ` ${character.spells.length}` : ""}{item === "equipment" && character.inventory.length ? ` ${character.inventory.length}` : ""}{item === "companions" && character.companions.length ? ` ${character.companions.length}` : ""}</button>)}
+          {(["encounter", "character", "spellbook", "inventory", "companions", "journal"] as Tab[]).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "spellbook" && character.spells.length ? ` ${character.spells.length}` : ""}{item === "inventory" && character.inventory.length ? ` ${character.inventory.length}` : ""}{item === "companions" && character.companions.length ? ` ${character.companions.length}` : ""}</button>)}
         </nav>
 
         <div className="section-collapse-controls" aria-label="Section display controls">
@@ -1908,9 +1911,7 @@ export function CharacterManager() {
           <button type="button" onClick={() => setVisiblePanelsExpanded(false)}>Collapse all</button>
         </div>
 
-        {character.finalizedAt && <div className="completed-setup-toggle"><div><strong>Character setup complete</strong><span>Session-zero and creation choices are hidden during regular play.</span></div><button type="button" className="button button-outline" aria-expanded={showCompletedSetup} onClick={() => setShowCompletedSetup((current) => !current)}>{showCompletedSetup ? <EyeOff size={15} /> : <Eye size={15} />}{showCompletedSetup ? "Hide setup" : "Show setup"}</button></div>}
-
-        {tab === "overview" && (
+        {tab === "character" && (
           <div className="overview-grid">
             {creationSetupVisible && <ReadinessPanel key={`readiness-${character.id}`} characterId={character.id} report={readinessReport} finalizedAt={character.finalizedAt} readOnlyReview={character.readOnlyReview} campaignName={characterCampaignProfile?.name} onFinalize={finalizeCharacter} onReopen={reopenCharacterCreation} onExportReview={exportDmReview} />}
             <CollapsiblePanel className="vitals-panel" storageKey={`azeroth-panel-${character.id}-overview-vitals`} eyebrow="At a glance" title="Combat & vitals" summary={<span>{character.currentHp}/{character.maxHp} HP · AC {effectiveArmor.value}</span>}>
@@ -1937,7 +1938,7 @@ export function CharacterManager() {
               </div>
               <div className="feature-preview">
                 <div><span className="eyebrow">Recently gained</span><h3>{resolvedFeatures.at(-1)?.name ?? "Ready for adventure"}</h3>{resolvedFeatures.at(-1) && featureOrigin(resolvedFeatures.at(-1)!) && <small className="feature-origin">Granted by {featureOrigin(resolvedFeatures.at(-1)!)}</small>}<p>{resolvedFeatures.at(-1)?.description ?? "Add features through your ancestry, class, or an imported content pack."}</p></div>
-                <button className="text-button" onClick={() => setTab("features")}>View all features <span>→</span></button>
+                <button className="text-button" onClick={() => document.getElementById("character-features")?.scrollIntoView({ behavior: "smooth", block: "start" })}>View all features <span>→</span></button>
               </div>
             </CollapsiblePanel>
             {creationSetupVisible && <CreationGuide key={`creation-guide-${character.id}`} character={character} patchCharacter={patchCharacter} background={selectedBackground} feats={feats} equipment={equipment} campaignProfile={characterCampaignProfile} locked={creationLocked} />}
@@ -1946,8 +1947,8 @@ export function CharacterManager() {
           </div>
         )}
 
-        {tab === "features" && (
-          <div className="stacked-tab-panels">
+        {tab === "character" && (
+          <div className="stacked-tab-panels" id="character-features">
           <FeatManager catalog={feats} character={character} patchCharacter={patchCharacter} />
           <CollapsiblePanel className="wide-panel" storageKey={`azeroth-panel-${character.id}-features-traits`} eyebrow="Rules reference" title="Features & traits" summary={<span>{resolvedFeatures.length} entries</span>}>
             <div className="feature-list">
@@ -1958,17 +1959,19 @@ export function CharacterManager() {
           </div>
         )}
 
-        {tab === "actions" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} encumbranceRule={characterCampaignProfile?.encumbranceRule} />}
+        {tab === "encounter" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} encumbranceRule={characterCampaignProfile?.encumbranceRule} />}
 
-        {tab === "combat" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
+        {tab === "character" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 
-          {tab === "spells" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingProfiles={spellcastingProfiles} creationLocked={creationLocked} showCreationSetup={creationSetupVisible} />}
+          {tab === "spellbook" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingProfiles={spellcastingProfiles} creationLocked={creationLocked} showCreationSetup={creationSetupVisible} />}
 
-        {tab === "equipment" && <InventoryManager catalog={equipment} character={character} patchCharacter={patchCharacter} encumbranceRule={characterCampaignProfile?.encumbranceRule} attunementLimit={characterCampaignProfile?.attunementLimit} />}
+        {tab === "inventory" && <InventoryManager catalog={equipment} character={character} patchCharacter={patchCharacter} encumbranceRule={characterCampaignProfile?.encumbranceRule} attunementLimit={characterCampaignProfile?.attunementLimit} />}
 
         {tab === "companions" && <CompanionManager catalog={creatures} character={character} patchCharacter={patchCharacter} />}
 
-        {tab === "notes" && <JournalManager character={character} patchCharacter={patchCharacter} />}
+        {tab === "journal" && <JournalManager character={character} patchCharacter={patchCharacter} />}
+
+        {character.finalizedAt && <div className="completed-setup-toggle completed-setup-toggle-bottom"><div><strong>Character setup complete</strong><span>Session-zero and creation choices are hidden during regular play.</span></div><button type="button" className="button button-outline" aria-expanded={showCompletedSetup} onClick={() => setShowCompletedSetup((current) => !current)}>{showCompletedSetup ? <EyeOff size={15} /> : <Eye size={15} />}{showCompletedSetup ? "Hide setup" : "Show setup"}</button></div>}
       </section>
 
       {deleteTarget && <div className="modal-scrim" onMouseDown={() => setDeleteTarget(null)}>

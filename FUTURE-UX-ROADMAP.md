@@ -8,6 +8,8 @@ Version 1.4.0 is the foundation release for this redesign. It completes workspac
 
 ### 1.5.0 — Navigation and Encounter workspace
 
+**Status:** Completed. The primary navigation is consolidated into six destinations, finalized characters open in Encounter, and the unified action library combines character, spell, item, companion, and standard actions with action-economy and purpose filters.
+
 - Reduce the primary navigation to Encounter, Character, Spellbook, Inventory, Companions, and Journal.
 - Make Encounter the default during active sessions while retaining detailed management screens.
 - Keep HP, temporary HP, Armor Class, speed, inspiration, conditions, concentration, spell slots, class resources, and urgent warnings visible in the combat strip.
@@ -73,7 +75,7 @@ The app should distinguish between **character management** and **active play**.
 
 ## Recommended direction: Encounter workspace
 
-**Next UI release:** Add a new default play screen called **Encounter**. It should combine the information needed to take a turn without replacing the detailed Actions, Combat, and Spells management screens. Version 1.4.0 provides the reusable combat strip, persisted favorites, recent-action records, ammunition use, resource undo, and workspace-wide collapsible panels that this screen will build on.
+**Status:** Implemented in version 1.5.0. **Encounter** is the default play screen for finalized characters and combines the information needed to take a turn while detailed management remains available under Character, Spellbook, Inventory, and Companions.
 
 ### Persistent combat strip
 
@@ -200,9 +202,9 @@ The previous desktop export created a folder containing an importable JSON file,
 5. [x] Extend collapsible panels to the remaining long management sections.
 6. [x] Add favorites/pinning to the existing generated Actions dashboard.
 7. [x] Build the persistent combat strip.
-8. [ ] Create the unified Encounter action library from existing action-generation data.
+8. [x] Create the unified Encounter action library from existing action-generation data.
 9. [ ] Add inline attack, spell, item, and feature resolution.
-10. [ ] Add action-economy filters and availability explanations.
+10. [x] Add action-economy filters and availability explanations.
 11. [x] Add recent actions and one-step resource undo.
 12. [ ] Consider the optional turn planner and command palette after real-session feedback.
 

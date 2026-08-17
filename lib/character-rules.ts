@@ -3,6 +3,7 @@ import {
   type AbilityKey,
   type AdvancementChoiceKind,
   type ActiveEffect,
+  type ActionTiming,
   type CharacterAttack,
   type CharacterClassLevel,
   type CharacterData,
@@ -122,7 +123,8 @@ export type AdvancementPrompt = {
 export type GeneratedAction = {
   id: string;
   name: string;
-  timing: "action" | "bonus" | "reaction" | "passive";
+  timing: ActionTiming;
+  purpose: "attack" | "spell" | "healing" | "defense" | "control" | "item" | "utility" | "companion";
   source: string;
   description: string;
   resourceId?: string;
@@ -132,6 +134,15 @@ export type GeneratedAction = {
   attackId?: string;
   ammunitionItemId?: string;
 };
+
+function actionPurpose(name: string, description: string): GeneratedAction["purpose"] {
+  const text = `${name} ${description}`;
+  if (/heal|hit points?|temporary hit points?|restore/i.test(text)) return "healing";
+  if (/attack roll|weapon attack|spell attack|\bdamage\b/i.test(text)) return "attack";
+  if (/armor class|resistance|immunity|disadvantage on attacks|dodge|disengage/i.test(text)) return "defense";
+  if (/charmed|frightened|grappled|incapacitated|paralyzed|prone|restrained|stunned|condition|control/i.test(text)) return "control";
+  return "utility";
+}
 
 type ClassTraining = {
   skillChoices: number;
@@ -511,6 +522,7 @@ export function generatedCharacterActions(character: CharacterData, catalog: Equ
       id: `feature-${feature.id ?? `${feature.name}-${index}`}`,
       name: feature.name,
       timing: actionTiming(feature.description),
+      purpose: actionPurpose(feature.name, feature.description),
       source: "Feature",
       description: feature.description,
       resourceId: resource?.id,
@@ -521,16 +533,37 @@ export function generatedCharacterActions(character: CharacterData, catalog: Equ
     id: `spell-${spell.id}`,
     name: spell.name,
     timing: /bonus action/i.test(spell.castingTime) ? "bonus" as const : /reaction/i.test(spell.castingTime) ? "reaction" as const : "action" as const,
+    purpose: (/heal|hit points?|restore/i.test(`${spell.name} ${spell.description}`) ? "healing" : /attack roll|\bdamage\b/i.test(spell.description) ? "attack" : /condition|charmed|frightened|paralyzed|restrained|stunned/i.test(spell.description) ? "control" : "spell") as GeneratedAction["purpose"],
     source: `Spell · ${spell.level ? `Level ${spell.level}` : "Cantrip"}`,
     description: spell.description,
     spellId: spell.id,
   }));
   const attackActions = character.attacks.map((attack) => {
     const inventoryItem = attack.inventoryItemId ? character.inventory.find((item) => item.id === attack.inventoryItemId) : undefined;
-    return { id: `attack-${attack.id}`, name: attack.name, timing: "action" as const, source: "Attack", description: `${attack.damage} ${attack.damageType}${attack.notes ? ` · ${attack.notes}` : ""}`, attackId: attack.id, ...(inventoryItem?.ammunition !== undefined ? { ammunitionItemId: inventoryItem.id } : {}) };
+    return { id: `attack-${attack.id}`, name: attack.name, timing: "action" as const, purpose: "attack" as const, source: "Attack", description: `${attack.damage} ${attack.damageType}${attack.notes ? ` · ${attack.notes}` : ""}`, attackId: attack.id, ...(inventoryItem?.ammunition !== undefined ? { ammunitionItemId: inventoryItem.id } : {}) };
   });
-  const itemActions = character.inventory.filter((item) => item.equipped && (item.consumable || item.maximumCharges !== undefined)).map((item) => ({ id: `item-${item.id}`, name: item.name, timing: "action" as const, source: "Equipment", description: item.notes || "Use this equipped item.", inventoryId: item.id }));
-  return [...attackActions, ...spellActions, ...featureActions, ...itemActions];
+  const itemActions = character.inventory.filter((item) => item.equipped && (item.consumable || item.maximumCharges !== undefined)).map((item) => ({ id: `item-${item.id}`, name: item.name, timing: "action" as const, purpose: (/heal|hit points?|restore/i.test(`${item.name} ${item.notes}`) ? "healing" : "item") as GeneratedAction["purpose"], source: "Equipment", description: item.notes || "Use this equipped item.", inventoryId: item.id }));
+  const companionActions = character.companions.filter((companion) => companion.active).map((companion) => ({
+    id: `companion-${companion.id}`,
+    name: `${companion.name} action`,
+    timing: "action" as const,
+    purpose: "companion" as const,
+    source: `Companion · ${companion.name}`,
+    description: companion.notes || companion.description || `Use ${companion.name}'s listed action.`,
+  }));
+  const standardActions: GeneratedAction[] = [
+    { id: "standard-attack", name: "Attack", timing: "action", purpose: "attack", source: "Standard action", description: "Make one attack with a weapon or an unarmed strike. Use a tracked attack when available." },
+    { id: "standard-dash", name: "Dash", timing: "action", purpose: "utility", source: "Standard action", description: "Gain extra movement for the current turn equal to your Speed after modifiers." },
+    { id: "standard-disengage", name: "Disengage", timing: "action", purpose: "defense", source: "Standard action", description: "Your movement does not provoke opportunity attacks for the rest of the turn." },
+    { id: "standard-dodge", name: "Dodge", timing: "action", purpose: "defense", source: "Standard action", description: "Until your next turn, attacks against you have disadvantage when you can see the attacker, and you have advantage on Agility saving throws." },
+    { id: "standard-help", name: "Help", timing: "action", purpose: "utility", source: "Standard action", description: "Assist another creature with an ability check or distract a nearby enemy for an ally's next attack." },
+    { id: "standard-hide", name: "Hide", timing: "action", purpose: "defense", source: "Standard action", description: "Make an Agility (Stealth) check while sufficiently concealed to become hidden." },
+    { id: "standard-ready", name: "Ready", timing: "action", purpose: "control", source: "Standard action", description: "Choose a trigger and an action or movement to resolve with your Reaction before your next turn." },
+    { id: "standard-search", name: "Search", timing: "action", purpose: "utility", source: "Standard action", description: "Make an appropriate check to find something concealed or discernible." },
+    { id: "standard-move", name: "Move", timing: "movement", purpose: "utility", source: "Movement", description: "Move up to your current Speed, splitting the movement around other actions if needed." },
+    { id: "standard-interact", name: "Interact", timing: "other", purpose: "utility", source: "Free / Other", description: "Perform a brief object interaction or other simple activity allowed during your turn." },
+  ];
+  return [...attackActions, ...spellActions, ...featureActions, ...itemActions, ...companionActions, ...standardActions];
 }
 
 export function activeEffectFromSpell(spell: SpellDefinition): ActiveEffect | null {

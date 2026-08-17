@@ -268,7 +268,7 @@ export type CharacterResource = {
   source?: string;
 };
 
-export type ActionTiming = "action" | "bonus" | "reaction" | "passive";
+export type ActionTiming = "action" | "bonus" | "reaction" | "movement" | "other" | "passive";
 
 export type RecentActionUse = {
   actionId: string;
