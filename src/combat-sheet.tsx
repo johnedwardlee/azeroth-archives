@@ -16,6 +16,7 @@ import {
   DAMAGE_TYPES,
   isEquipmentProficient,
   rollDiceFormula,
+  rollD20,
   resolvedRollMode,
   type RollKind,
   type RollMode,
@@ -49,10 +50,6 @@ const DEFENSE_CONDITIONS = ["Blinded", "Charmed", "Deafened", "Exhaustion", "Fri
 
 function signed(value: number) {
   return `${value >= 0 ? "+" : ""}${value}`;
-}
-
-function d20() {
-  return Math.floor(Math.random() * 20) + 1;
 }
 
 function DefenseList({ label, values, suggestions, onChange }: { label: string; values: string[]; suggestions: string[]; onChange: (values: string[]) => void }) {
@@ -90,8 +87,7 @@ export function CombatManager({
   function roll(label: string, modifier: number, kind: RollKind = "ability", ability?: AbilityKey, skillName = "") {
     const effects = conditionRollEffects(character, kind, ability, skillName, catalog);
     const actualMode = resolvedRollMode(mode, effects.forcedDisadvantage);
-    const dice = actualMode === "normal" ? [d20()] : [d20(), d20()];
-    const kept = actualMode === "advantage" ? Math.max(...dice) : actualMode === "disadvantage" ? Math.min(...dice) : dice[0];
+    const { dice, kept } = rollD20(actualMode);
     setRollResult({ label, dice, kept, modifier: modifier + effects.modifier, mode: actualMode, reasons: effects.reasons });
   }
 

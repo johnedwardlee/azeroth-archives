@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   activeEffectFromSpell,
   attackFromEquipment,
@@ -13,8 +13,12 @@ import {
   preparedSpellLimitForClasses,
   progressionSpellSlots,
   resolveIncomingDamage,
+  resolvedRollMode,
+  rollD20,
+  spellDamageProfile,
   spellListsGrantedByFeats,
   spellMatchesLists,
+  spellSaveAbility,
   startingSpellRequirementsFor,
   syncEffectConditions,
 } from "./character-rules";
@@ -77,6 +81,29 @@ describe("living sheet rules", () => {
       expect.objectContaining({ id: "standard-move", timing: "movement" }),
       expect.objectContaining({ id: "companion-wolf", purpose: "companion" }),
     ]));
+  });
+
+  it("resolves normal, advantage, and disadvantage d20 rolls", () => {
+    const random = vi.spyOn(Math, "random");
+    random.mockReturnValueOnce(0.45).mockReturnValueOnce(0.1).mockReturnValueOnce(0.9).mockReturnValueOnce(0.2).mockReturnValueOnce(0.8);
+    expect(rollD20("normal")).toMatchObject({ dice: [10], kept: 10 });
+    expect(rollD20("advantage")).toMatchObject({ dice: [3, 19], kept: 19 });
+    expect(rollD20("disadvantage")).toMatchObject({ dice: [5, 17], kept: 5 });
+    expect(resolvedRollMode("advantage", true)).toBe("normal");
+    expect(resolvedRollMode("normal", true)).toBe("disadvantage");
+    random.mockRestore();
+  });
+
+  it("resolves spell damage, automatic missiles, upcasting, cantrip scaling, and legacy save names", () => {
+    const missiles = { id: "magic-missile", name: "Arcane Missiles", level: 1, description: "You create three glowing darts. Each dart deals 1d4 + 1 Force damage. The spell creates one more dart for each spell slot level above 1." };
+    expect(spellDamageProfile(missiles, 1, 1)).toMatchObject({ formula: "1d4+1", damageType: "Force", instances: 3, instanceLabel: "dart", automatic: true });
+    expect(spellDamageProfile(missiles, 3, 1)?.instances).toBe(5);
+    const burningHands = { id: "burning-hands", name: "Burning Hands", level: 1, description: "Each creature makes an Agility saving throw, taking 3d6 Fire damage. The damage increases by 1d6 for each spell slot level above 1." };
+    expect(spellDamageProfile(burningHands, 3, 1)).toMatchObject({ formula: "5d6", instances: 1, automatic: false });
+    const fireBolt = { id: "fire-bolt", name: "Fire Bolt", level: 0, description: "Make a ranged spell attack. On a hit, the target takes 1d10 Fire damage. Cantrip Upgrade. The damage increases by 1d10 when you reach levels 5, 11, and 17." };
+    expect(spellDamageProfile(fireBolt, 0, 11)?.formula).toBe("3d10");
+    expect(spellSaveAbility("The target makes a Constitution saving throw.")).toBe("stamina");
+    expect(spellSaveAbility("The target makes a Wisdom saving throw.")).toBe("spirit");
   });
 
   it("keeps shared effect conditions until the last source ends", () => {

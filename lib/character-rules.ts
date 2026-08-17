@@ -643,6 +643,54 @@ export function extractDiceFormula(text: string) {
   return text.match(/\b\d+d\d+(?:\s*[+-]\s*\d+)?\b/i)?.[0]?.replace(/\s+/g, "") ?? null;
 }
 
+export function spellSaveAbility(text: string): AbilityKey | null {
+  const match = text.match(/(Strength|Agility|Dexterity|Stamina|Constitution|Intellect|Intelligence|Spirit|Wisdom|Charisma) saving throw/i)?.[1]?.toLowerCase();
+  if (!match) return null;
+  const aliases: Record<string, AbilityKey> = { strength: "strength", agility: "agility", dexterity: "agility", stamina: "stamina", constitution: "stamina", intellect: "intellect", intelligence: "intellect", spirit: "spirit", wisdom: "spirit", charisma: "charisma" };
+  return aliases[match] ?? null;
+}
+
+export type SpellDamageProfile = {
+  formula: string;
+  damageType: string;
+  instances: number;
+  instanceLabel?: string;
+  automatic: boolean;
+};
+
+export function spellDamageProfile(spell: Pick<SpellDefinition, "id" | "name" | "level" | "description">, slotLevel = spell.level, characterLevel = 1): SpellDamageProfile | null {
+  if (!/\bdamage\b/i.test(spell.description)) return null;
+  const extracted = extractDiceFormula(spell.description);
+  if (!extracted) return null;
+  const parsed = extracted.match(/^(\d+)d(\d+)([+-]\d+)?$/i);
+  if (!parsed) return null;
+  let diceCount = Number(parsed[1]);
+  const sides = Number(parsed[2]);
+  const modifier = parsed[3] ?? "";
+
+  const cantripIncrease = spell.description.match(/Cantrip Upgrade[\s\S]*?damage increases by\s+(\d+)d(\d+)/i);
+  if (spell.level === 0 && cantripIncrease && Number(cantripIncrease[2]) === sides) {
+    const steps = characterLevel >= 17 ? 3 : characterLevel >= 11 ? 2 : characterLevel >= 5 ? 1 : 0;
+    diceCount += Number(cantripIncrease[1]) * steps;
+  }
+
+  const slotIncrease = spell.description.match(/damage increases by\s+(\d+)d(\d+)\s+for each spell slot level above\s+(\d+)/i);
+  if (slotIncrease && Number(slotIncrease[2]) === sides) {
+    diceCount += Number(slotIncrease[1]) * Math.max(0, slotLevel - Number(slotIncrease[3]));
+  }
+
+  const damageType = spell.description.match(new RegExp(`\\b(?:\\d+d\\d+(?:\\s*[+-]\\s*\\d+)?)\\s+(${DAMAGE_TYPES.join("|")})\\s+damage`, "i"))?.[1] ?? "";
+  const missileSpell = spell.id.toLowerCase() === "magic-missile" || /(?:three|3)\s+(?:glowing\s+)?darts[\s\S]*?each dart/i.test(spell.description);
+  const instances = missileSpell ? 3 + Math.max(0, slotLevel - 1) : 1;
+  return {
+    formula: `${diceCount}d${sides}${modifier}`,
+    damageType,
+    instances,
+    ...(missileSpell ? { instanceLabel: "dart" } : {}),
+    automatic: !/spell attack/i.test(spell.description) && !spellSaveAbility(spell.description),
+  };
+}
+
 export function rollDiceFormula(formula: string, critical = false, extraModifier = 0) {
   const match = formula.trim().match(/^(\d+)d(\d+)(?:\s*([+-])\s*(\d+))?$/i);
   if (!match) return null;
@@ -716,6 +764,13 @@ function encumbranceDisadvantage(character: CharacterData, kind: RollKind, abili
 export function resolvedRollMode(selected: RollMode, forcedDisadvantage: boolean): RollMode {
   if (!forcedDisadvantage) return selected;
   return selected === "advantage" ? "normal" : "disadvantage";
+}
+
+export function rollD20(mode: RollMode) {
+  const d20 = () => Math.floor(Math.random() * 20) + 1;
+  const dice = mode === "normal" ? [d20()] : [d20(), d20()];
+  const kept = mode === "advantage" ? Math.max(...dice) : mode === "disadvantage" ? Math.min(...dice) : dice[0];
+  return { dice, kept, mode };
 }
 
 export function conditionEffectText(condition: string, exhaustionLevel = 0) {

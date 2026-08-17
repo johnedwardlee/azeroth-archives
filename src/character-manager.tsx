@@ -26,7 +26,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { FeatManager, InventoryManager, SessionTracker, SpellbookManager } from "./living-sheet";
+import { FeatManager, InventoryManager, SpellbookManager } from "./living-sheet";
 import { CombatManager, SKILLS } from "./combat-sheet";
 import { ActionDashboard } from "./action-dashboard";
 import { CreationGuide } from "./creation-guide";
@@ -1942,7 +1942,6 @@ export function CharacterManager() {
               </div>
             </CollapsiblePanel>
             {creationSetupVisible && <CreationGuide key={`creation-guide-${character.id}`} character={character} patchCharacter={patchCharacter} background={selectedBackground} feats={feats} equipment={equipment} campaignProfile={characterCampaignProfile} locked={creationLocked} />}
-            <SessionTracker character={character} patchCharacter={patchCharacter} hitDicePools={hitDicePools} />
             <AdvancementPanel character={character} onRollback={rollbackLatestAdvancement} />
           </div>
         )}
@@ -1959,7 +1958,7 @@ export function CharacterManager() {
           </div>
         )}
 
-        {tab === "encounter" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} encumbranceRule={characterCampaignProfile?.encumbranceRule} />}
+        {tab === "encounter" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} hitDicePools={hitDicePools} encumbranceRule={characterCampaignProfile?.encumbranceRule} />}
 
         {tab === "character" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+## 1.5.1
+
+- Replaced generic Encounter `Roll` and `Cast` button labels with the exact d20 modifier, advantage/disadvantage dice, spell save DC, or a clear no-roll label.
+- Fixed Encounter spell damage resolution: automatic-hit spells such as Arcane Missiles now roll damage on cast, saving-throw spells expose their damage roll, spell attacks retain critical damage, and standard cantrip/upcast scaling is applied.
+- Keep the Encounter choice count, filters, and action cards together in one initially expanded panel so existing characters cannot appear to have choices without displaying them.
+- Move the complete During Play session tracker from Character to Encounter, immediately after the unified action library.
+- Resolve tracked weapon and spell attacks inline with Normal, Advantage, and Disadvantage modes; apply proficiency, ability, attack, condition, armor, encumbrance, and exhaustion modifiers; and expose normal and critical damage rolls.
+- Share one d20 roll implementation between Encounter and detailed Combat management so both screens use identical dice selection rules.
+
 ## 1.5.0
 
 - Replace the former Overview, Features, Actions, Combat, Spells, Equipment, Companions, and Notes tabs with Encounter, Character, Spellbook, Inventory, Companions, and Journal.
