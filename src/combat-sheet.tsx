@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { Dices, Plus, ShieldCheck, Swords, Trash2 } from "lucide-react";
+import { Dices, Plus, Swords, Trash2 } from "lucide-react";
 import { DescriptionPicker } from "./description-picker";
+import { CollapsiblePanel } from "./collapsible-panel";
 import {
   ABILITY_LABELS,
   abilityModifier,
@@ -180,13 +181,10 @@ export function CombatManager({
 
   return (
     <div className="combat-layout">
-      <section className="panel checks-panel">
-        <div className="section-heading">
-          <div><span className="eyebrow">D20 tests</span><h2>Checks & saving throws</h2></div>
-          <div className="roll-mode" aria-label="Roll mode">
-            {(["normal", "advantage", "disadvantage"] as RollMode[]).map((item) => <button key={item} className={mode === item ? "active" : ""} onClick={() => setMode(item)}>{item === "normal" ? "Normal" : item === "advantage" ? "Adv" : "Dis"}</button>)}
-          </div>
-        </div>
+      <CollapsiblePanel className="checks-panel" storageKey={`azeroth-panel-${character.id}-combat-checks`} eyebrow="D20 tests" title="Checks & saving throws" summary={<span>Passive Perception {passivePerception}</span>}>
+        <div className="collapsible-panel-actions"><div className="roll-mode" aria-label="Roll mode">
+          {(["normal", "advantage", "disadvantage"] as RollMode[]).map((item) => <button key={item} className={mode === item ? "active" : ""} onClick={() => setMode(item)}>{item === "normal" ? "Normal" : item === "advantage" ? "Adv" : "Dis"}</button>)}
+        </div></div>
 
         {rollResult && <div className="roll-result"><Dices size={18} /><div><span>{rollResult.label}</span><strong>{rollResult.kept + rollResult.modifier}</strong><small>{rollResult.dice.join(" / ")} {signed(rollResult.modifier)}{rollResult.mode !== "normal" ? ` · ${rollResult.mode}` : ""}</small>{rollResult.reasons.length > 0 && <small className="roll-effect-note">Disadvantage: {rollResult.reasons.join(", ")}</small>}{character.exhaustionLevel > 0 && <small className="roll-effect-note">Exhaustion: −{character.exhaustionLevel * 2}</small>}</div><button onClick={() => setRollResult(null)}>×</button></div>}
         {damageResult && <div className="damage-roll-result" role="status"><Swords size={16} /><span>{damageResult}</span><button onClick={() => setDamageResult("")}>×</button></div>}
@@ -214,10 +212,10 @@ export function CombatManager({
             return <div key={skill.name} className={expertise ? "expertise" : proficient ? "proficient" : ""}><button className="proficiency-dot" onClick={() => cycleSkill(skill.name)} title="Cycle proficiency">{expertise ? "◆" : proficient ? "●" : "○"}</button><span>{skill.name}<small>{ABILITY_LABELS[skill.ability].slice(0, 3)}</small></span><strong>{signed(modifier)}</strong><button className="roll-button" onClick={() => roll(skill.name, modifier, "ability", skill.ability, skill.name)}><Dices size={13} /></button></div>;
           })}
         </div>
-      </section>
+      </CollapsiblePanel>
 
-      <section className="panel attacks-panel">
-        <div className="section-heading"><div><span className="eyebrow">Combat actions</span><h2>Attacks</h2></div><button className="button button-outline" onClick={addCustomAttack}><Plus size={14} />Custom</button></div>
+      <CollapsiblePanel className="attacks-panel" storageKey={`azeroth-panel-${character.id}-combat-attacks`} eyebrow="Combat actions" title="Attacks" summary={<span>{character.attacks.length} tracked</span>}>
+        <div className="collapsible-panel-actions"><button className="button button-outline" onClick={addCustomAttack}><Plus size={14} />Custom</button></div>
         <div className="weapon-import-row">
           <DescriptionPicker ariaLabel="Carried weapons" value={weaponId} placeholder="Add a carried weapon" onChange={setWeaponId} options={carriedWeapons.map(({ inventoryItem, definition }) => ({ value: inventoryItem.id, label: definition.name, meta: `${definition.damage} ${definition.damageType}${inventoryItem.equipmentSlot && inventoryItem.equipmentSlot !== "none" ? ` · ${inventoryItem.equipmentSlot}` : ""}${definition.mastery ? ` · ${definition.mastery}` : ""}`, description: [definition.description, definition.properties?.length ? `Properties: ${definition.properties.join(", ")}` : "", inventoryItem.notes].filter(Boolean).join("\n\n") }))} />
           <button className="button button-primary" disabled={!weaponId} onClick={addWeapon}><Swords size={14} />Add attack</button>
@@ -245,10 +243,9 @@ export function CombatManager({
           })}
         </div>
         {!character.attacks.length && <div className="empty-state compact">Add a carried weapon or create a custom attack.</div>}
-      </section>
+      </CollapsiblePanel>
 
-      <section className="panel defenses-panel">
-        <div className="section-heading"><div><span className="eyebrow">Damage resolution</span><h2>Defenses & immunities</h2></div><ShieldCheck size={20} /></div>
+      <CollapsiblePanel className="defenses-panel" storageKey={`azeroth-panel-${character.id}-combat-defenses`} eyebrow="Damage resolution" title="Defenses & immunities" summary={<span>{character.damageResistances.length + character.damageVulnerabilities.length + character.damageImmunities.length + character.conditionImmunities.length} entries</span>}>
         <div className="defense-columns">
           <DefenseList label="Resistances" values={character.damageResistances} suggestions={DAMAGE_TYPES} onChange={(values) => patchCharacter({ damageResistances: values })} />
           <DefenseList label="Vulnerabilities" values={character.damageVulnerabilities} suggestions={DAMAGE_TYPES} onChange={(values) => patchCharacter({ damageVulnerabilities: values })} />
@@ -257,7 +254,7 @@ export function CombatManager({
         </div>
         <h3 className="combat-subheading">Additional saving throw bonuses</h3>
         <div className="saving-bonus-grid">{abilityKeys.map((ability) => <label key={ability}><span>{ABILITY_LABELS[ability]}</span><input aria-label={`${ABILITY_LABELS[ability]} additional saving throw bonus`} type="number" value={character.savingThrowBonuses[ability] ?? 0} onChange={(event) => patchCharacter({ savingThrowBonuses: { ...character.savingThrowBonuses, [ability]: Number(event.target.value) || 0 } })} /></label>)}</div>
-      </section>
+      </CollapsiblePanel>
     </div>
   );
 }

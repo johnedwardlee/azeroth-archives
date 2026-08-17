@@ -1,10 +1,10 @@
-import { History, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import type { CharacterData } from "../lib/types";
+import { CollapsiblePanel } from "./collapsible-panel";
 
 export function AdvancementPanel({ character, onRollback }: { character: CharacterData; onRollback: () => void }) {
   const latest = character.advancementHistory.at(-1);
-  return <section className="panel advancement-panel">
-    <div className="section-heading"><div><span className="eyebrow">Character progression</span><h2>Classes & advancement</h2></div><History size={20} /></div>
+  return <CollapsiblePanel className="advancement-panel" storageKey={`azeroth-panel-${character.id}-overview-advancement`} eyebrow="Character progression" title="Classes & advancement" summary={<span>Level {character.level} · {character.classLevels.length} {character.classLevels.length === 1 ? "class" : "classes"}</span>} defaultExpanded={false}>
     <div className="class-level-list">
       {character.classLevels.map((entry) => <article key={entry.className}>
         <div><strong>{entry.className}</strong>{entry.subclassName && <span>{entry.subclassName}</span>}</div><b>Level {entry.level}</b>
@@ -20,5 +20,5 @@ export function AdvancementPanel({ character, onRollback }: { character: Charact
       {!character.advancementHistory.length && <p className="empty-state compact">Future level-ups will be recorded here and can be safely undone.</p>}
     </div>
     {latest && <small className="advancement-rollback-note">Undo restores advancement choices and statistics from immediately before {latest.className} level {latest.classLevel}.</small>}
-  </section>;
+  </CollapsiblePanel>;
 }

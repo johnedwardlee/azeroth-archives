@@ -1,5 +1,11 @@
 import { ChevronDown } from "lucide-react";
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
+
+const expansionEventName = "azeroth-archives:set-visible-panel-expansion";
+
+export function setVisiblePanelsExpanded(expanded: boolean) {
+  window.dispatchEvent(new CustomEvent(expansionEventName, { detail: { expanded } }));
+}
 
 function storedExpansionState(storageKey: string, defaultExpanded: boolean) {
   try {
@@ -23,6 +29,20 @@ export function CollapsiblePanel({ className = "", storageKey, eyebrow, title, s
   const [expanded, setExpanded] = useState(() => storedExpansionState(storageKey, defaultExpanded));
   const contentId = useId();
 
+  useEffect(() => {
+    setExpanded(storedExpansionState(storageKey, defaultExpanded));
+  }, [storageKey, defaultExpanded]);
+
+  useEffect(() => {
+    const applyExpansion = (event: Event) => {
+      const next = Boolean((event as CustomEvent<{ expanded: boolean }>).detail?.expanded);
+      setExpanded(next);
+      try { window.localStorage.setItem(storageKey, String(next)); } catch { /* Local persistence is optional. */ }
+    };
+    window.addEventListener(expansionEventName, applyExpansion);
+    return () => window.removeEventListener(expansionEventName, applyExpansion);
+  }, [storageKey]);
+
   function toggle() {
     setExpanded((current) => {
       const next = !current;
@@ -31,7 +51,7 @@ export function CollapsiblePanel({ className = "", storageKey, eyebrow, title, s
     });
   }
 
-  return <section className={`${contained ? "collapsible-subsection" : "panel"} collapsible-panel ${className}`.trim()}>
+  return <section className={`${contained ? "collapsible-subsection" : "panel"} collapsible-panel ${className}`.trim()} data-expanded={expanded}>
     <button type="button" className="section-heading collapsible-heading" aria-expanded={expanded} aria-controls={contentId} onClick={toggle}>
       <span className="collapsible-heading-title"><span className="eyebrow">{eyebrow}</span><span className="collapsible-title">{title}</span></span>
       <span className="collapsible-heading-summary">{summary}<ChevronDown size={18} aria-hidden="true" /></span>

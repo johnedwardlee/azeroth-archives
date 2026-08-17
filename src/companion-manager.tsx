@@ -1,7 +1,8 @@
-import { Heart, PawPrint, Plus, Trash2 } from "lucide-react";
+import { Heart, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { CharacterData, CompanionKind, CreatureDefinition, TrackedCompanion } from "../lib/types";
 import { DescriptionPicker } from "./description-picker";
+import { CollapsiblePanel } from "./collapsible-panel";
 
 export function CompanionManager({ catalog, character, patchCharacter }: { catalog: CreatureDefinition[]; character: CharacterData; patchCharacter: (patch: Partial<CharacterData>) => void }) {
   const [selectedId, setSelectedId] = useState("");
@@ -19,13 +20,12 @@ export function CompanionManager({ catalog, character, patchCharacter }: { catal
     setSelectedId(""); setCustomName("");
   };
   return <div className="companion-layout">
-    <section className="panel companion-add-panel">
-      <div className="section-heading"><div><span className="eyebrow">Allies and alternate forms</span><h2>Companions & summons</h2></div><PawPrint size={20} /></div>
+    <CollapsiblePanel className="companion-add-panel" storageKey={`azeroth-panel-${character.id}-companions-add`} eyebrow="Allies and alternate forms" title="Companions & summons" summary={<span>{character.companions.length} tracked · {character.companions.filter((item) => item.active).length} active</span>}>
       <DescriptionPicker ariaLabel="Creature catalog" value={selectedId} placeholder="Choose an imported creature" onChange={setSelectedId} options={available.map((item) => ({ value: item.id, label: item.name, meta: item.challengeRating ? `CR ${item.challengeRating}` : "Creature", description: item.description }))} />
       <button className="button button-primary" disabled={!selectedId} onClick={() => add(catalog.find((item) => item.id === selectedId))}><Plus size={14} />Add creature</button>
       <div className="custom-companion-row"><input value={customName} onChange={(event) => setCustomName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") add(); }} placeholder="Custom companion or form" /><button onClick={() => add()}><Plus size={14} /></button></div>
       <p>Track permanent companions, temporary summons, and transformation forms. Creature entries provide reference text; combat values remain editable for campaign rulings.</p>
-    </section>
+    </CollapsiblePanel>
     <section className="companion-list">
       {character.companions.map((item) => <article className={`panel companion-card ${item.active ? "active" : ""}`} key={item.id}>
         <div className="companion-heading"><div><span>{item.kind}{item.challengeRating ? ` · CR ${item.challengeRating}` : ""}</span><input aria-label={`${item.name} name`} value={item.name} onChange={(event) => update(item.id, { name: event.target.value })} /></div><button className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => patchCharacter({ companions: character.companions.filter((entry) => entry.id !== item.id) })}><Trash2 size={14} /></button></div>

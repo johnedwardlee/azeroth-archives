@@ -2,9 +2,43 @@
 
 This document records interface work to revisit after the pre-session character-creation rules are stable. It is planning material, not a commitment to the next release.
 
+## UI revamp release plan
+
+Version 1.4.0 is the foundation release for this redesign. It completes workspace-wide collapsible panels, per-character display preferences, the persistent combat strip, action favorites and history, resource undo, finalized-setup hiding, and read-only DM review behavior.
+
+### 1.5.0 — Navigation and Encounter workspace
+
+- Reduce the primary navigation to Encounter, Character, Spellbook, Inventory, Companions, and Journal.
+- Make Encounter the default during active sessions while retaining detailed management screens.
+- Keep HP, temporary HP, Armor Class, speed, inspiration, conditions, concentration, spell slots, class resources, and urgent warnings visible in the combat strip.
+- Combine attacks, prepared spells, features, usable equipment, standard actions, and companion actions in one searchable library.
+- Add filters for action economy and purpose without hiding unavailable options or their explanations.
+- Keep common actions within two clicks and preserve the current Warcraft visual direction.
+
+### 1.5.1 — Contextual action resolution
+
+- Open attacks, spells, healing, items, and features in one inline resolution drawer.
+- Support Normal, Advantage, Disadvantage, damage and healing rolls, saves, upcasting, targets, ammunition, charges, spell slots, class resources, concentration, and active effects.
+- Show a concise result and retain immediate undo for accidental expenditure.
+
+### 1.6.0 — Character management redesign
+
+- Organize the Character screen into Vitals, Abilities, Identity, Features, Advancement, and Setup.
+- Move editing controls away from high-frequency play information.
+- Keep completed creation choices under the existing Setup toggle.
+- Use the same organization for read-only DM review imports, without editing controls.
+
+### Final responsive, accessibility, and polish pass
+
+- Test every screen at the minimum supported window size and remove whole-page horizontal scrolling.
+- Preserve keyboard navigation, visible focus, screen-reader names, and accurate expanded states.
+- Keep urgent state visible when panels are collapsed.
+- Add quick-bar reordering and consider an optional command palette after real-session feedback.
+- Add screenshot-based visual regression coverage before removing the legacy Actions and Combat navigation.
+
 ## Collapsible sections
 
-**Status:** Foundation rollout complete for Guided Setup, Session-Zero Preflight, class resources, active effects, spell slots, and equipment load. The reusable component includes compact summaries and per-character saved expansion state.
+**Status:** Completed in version 1.4.0 across the primary character workspace. The reusable component includes compact summaries, per-character saved expansion state, keyboard-accessible headers, and active-page Expand all / Collapse all controls.
 
 Make large panels collapsible throughout the app, beginning with:
 
@@ -39,7 +73,7 @@ The app should distinguish between **character management** and **active play**.
 
 ## Recommended direction: Encounter workspace
 
-**Next release:** Add a new default play screen called **Encounter**. It should combine the information needed to take a turn without replacing the detailed Actions, Combat, and Spells management screens. Version 1.3.0 provides the reusable combat strip, persisted favorites, recent-action records, ammunition use, and resource undo that this workspace will build on.
+**Next UI release:** Add a new default play screen called **Encounter**. It should combine the information needed to take a turn without replacing the detailed Actions, Combat, and Spells management screens. Version 1.4.0 provides the reusable combat strip, persisted favorites, recent-action records, ammunition use, resource undo, and workspace-wide collapsible panels that this screen will build on.
 
 ### Persistent combat strip
 
@@ -163,13 +197,13 @@ The previous desktop export created a folder containing an importable JSON file,
 2. [x] Make the content creation editor responsive and eliminate whole-page horizontal scrolling.
 3. [x] Add reusable collapsible panels and persisted expansion state to Guided Setup and Session-Zero Preflight.
 4. [x] Restore the PDF export to the approved Warcraft-themed design and add rendered visual QA coverage.
-5. [ ] Extend collapsible panels to the remaining long management sections.
-6. [ ] Add favorites/pinning to the existing generated Actions dashboard.
-7. [ ] Build the persistent combat strip.
+5. [x] Extend collapsible panels to the remaining long management sections.
+6. [x] Add favorites/pinning to the existing generated Actions dashboard.
+7. [x] Build the persistent combat strip.
 8. [ ] Create the unified Encounter action library from existing action-generation data.
 9. [ ] Add inline attack, spell, item, and feature resolution.
 10. [ ] Add action-economy filters and availability explanations.
-11. [ ] Add recent actions and one-step resource undo.
+11. [x] Add recent actions and one-step resource undo.
 12. [ ] Consider the optional turn planner and command palette after real-session feedback.
 
 ## Initial success criteria

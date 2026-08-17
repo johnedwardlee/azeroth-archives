@@ -266,11 +266,8 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
   }
 
   return (
-    <section className="panel session-panel">
-      <div className="section-heading">
-        <div><span className="eyebrow">During play</span><h2>Session tracker</h2></div>
-        <div className="rest-actions"><button className="button button-outline" onClick={shortRest}>Short rest</button><button className="button button-outline" onClick={longRest}>Long rest</button></div>
-      </div>
+    <CollapsiblePanel className="session-panel" storageKey={`azeroth-panel-${character.id}-session-tracker`} eyebrow="During play" title="Session tracker" summary={<span>{character.currentHp}/{character.maxHp} HP · {character.conditions.length + character.activeEffects.length} effects</span>}>
+      <div className="collapsible-panel-actions rest-actions"><button className="button button-outline" onClick={shortRest}>Short rest</button><button className="button button-outline" onClick={longRest}>Long rest</button></div>
       <div className="session-grid">
         <div className="session-block hp-controls">
           <span className="field-label"><Heart size={14} />Damage & healing</span>
@@ -325,7 +322,7 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
         <div className="active-effect-list">{character.activeEffects.map((effect) => <article className={effect.concentration ? "concentration" : ""} key={effect.id}><Sparkles size={15} /><div><strong>{effect.name}</strong><span>{effect.source}{effect.condition ? ` · ${effect.condition}` : ""}</span></div><b>{effect.duration === "rounds" ? `${effect.remaining} rd` : effect.duration === "minutes" ? `${effect.remaining} min` : effect.duration === "until-rest" ? "Until rest" : "Manual"}</b>{effect.concentration && <small>Concentration</small>}<button aria-label={`End ${effect.name}`} onClick={() => endEffect(effect.id)}>×</button></article>)}</div>
         {!character.activeEffects.length && <p className="class-resource-empty">Cast a duration spell or add an effect to track its expiration here.</p>}
       </CollapsiblePanel>
-    </section>
+    </CollapsiblePanel>
   );
 }
 
@@ -343,18 +340,17 @@ export function FeatManager({ catalog, character, patchCharacter }: { catalog: F
   }
 
   return (
-    <section className="panel wide-panel tracker-panel">
-      <div className="section-heading"><div><span className="eyebrow">Character choices</span><h2>Feats</h2></div><span className="count-chip">{character.feats.length}</span></div>
+    <CollapsiblePanel className="wide-panel tracker-panel" storageKey={`azeroth-panel-${character.id}-features-feats`} eyebrow="Character choices" title="Feats" summary={<span>{character.feats.length} selected</span>}>
       <div className="catalog-add-row"><DescriptionPicker ariaLabel="Available feats" value={selectedId} placeholder="Choose an available feat" onChange={setSelectedId} options={available.map((feat) => ({ value: feat.id, label: feat.name, meta: [feat.category, feat.prerequisite].filter(Boolean).join(" · "), description: feat.description }))} /><button className="button button-primary" disabled={!selectedId} onClick={addFeat}><Plus size={15} />Add feat</button></div>
       <div className="tracker-card-list">
         {visibleFeats.map((feat) => { const issues = featPrerequisiteIssues(feat, character); return <article className={issues.length ? "has-warning" : ""} key={feat.id}><div><span>{feat.category}</span><h3>{feat.name}</h3>{feat.prerequisite && <small>{feat.prerequisite}</small>}{issues.map((issue) => <small className="feat-warning" key={issue}><AlertTriangle size={11} />{issue} GM override allowed.</small>)}<p>{feat.description}</p></div><button className="icon-button danger" aria-label={`Remove ${feat.name}`} onClick={() => patchCharacter({ feats: character.feats.filter((item) => item.id !== feat.id), featSpellcastingChoices: character.featSpellcastingChoices.filter((choice) => choice.featId !== feat.id), spells: character.spells.filter((spell) => spell.sourceFeatId !== feat.id) })}><Trash2 size={14} /></button></article>; })}
         {!character.feats.length && <div className="empty-state compact">No feats selected yet.</div>}
       </div>
-    </section>
+    </CollapsiblePanel>
   );
 }
 
-export function SpellbookManager({ catalog, equipmentCatalog, character, patchCharacter, spellcastingProfiles, creationLocked = false }: { catalog: SpellDefinition[]; equipmentCatalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; spellcastingProfiles: SpellcastingProfile[]; creationLocked?: boolean }) {
+export function SpellbookManager({ catalog, equipmentCatalog, character, patchCharacter, spellcastingProfiles, creationLocked = false, showCreationSetup = true }: { catalog: SpellDefinition[]; equipmentCatalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; spellcastingProfiles: SpellcastingProfile[]; creationLocked?: boolean; showCreationSetup?: boolean }) {
   const [selectedId, setSelectedId] = useState("");
   const [selectedOwner, setSelectedOwner] = useState("");
   const [query, setQuery] = useState("");
@@ -526,8 +522,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
         <div className="slot-grid">{Array.from({ length: 9 }, (_, index) => index + 1).map((level) => { const slot = character.spellSlots[String(level)] ?? { maximum: 0, used: 0 }; return <div className="slot-row" key={level}><strong>{level}</strong><label>Max <input aria-label={`Level ${level} maximum spell slots`} type="number" min="0" max="20" value={slot.maximum} onChange={(event) => updateSlot(level, { maximum: Number(event.target.value) })} /></label><span>{slot.maximum - slot.used} left</span><button disabled={slot.used <= 0} onClick={() => updateSlot(level, { used: slot.used - 1 })}>−</button><button disabled={slot.used >= slot.maximum} onClick={() => updateSlot(level, { used: slot.used + 1 })}>Use</button></div>; })}</div>
       </CollapsiblePanel>
 
-      <section className="panel spell-list-panel">
-        <div className="section-heading"><div><span className="eyebrow">Known magic</span><h2>Spellbook</h2></div><span className="count-chip">{character.spells.length}</span></div>
+      <CollapsiblePanel className={`spell-list-panel ${showCreationSetup ? "" : "hide-creation-setup"}`} storageKey={`azeroth-panel-${character.id}-spellbook`} eyebrow="Known magic" title="Spellbook" summary={<span>{character.spells.length} known · {character.spells.filter((spell) => spell.prepared).length} prepared</span>}>
         {!!startingRequirements.length && <div className="spell-setup-summary">{startingRequirements.map(({ className, requirement, cantrips, learned, prepared }) => <div key={className}><strong>{className} starting spells</strong><span>Cantrips {cantrips}/{requirement.cantrips} · Level 1+ learned {learned}/{requirement.learned} · Prepared {prepared}/{requirement.prepared}</span></div>)}</div>}
         {magicInitiateFeat && <div className="magic-initiate-setup"><div><span className="eyebrow">Background feat</span><h3>Magic Initiate setup</h3><p>Choose one list, one casting ability, two cantrips, and one level-1 spell. All three spells must use the same list.</p></div><div className="magic-initiate-grid"><label><span>Spell list</span><select aria-label="Magic Initiate spell list" disabled={creationLocked} value={magicInitiateChoice?.spellList ?? ""} onChange={(event) => updateMagicInitiateChoice({ spellList: event.target.value })}><option value="">Choose one list</option>{featSpellLists.map((list) => <option key={list} value={list}>{list}</option>)}</select></label><label><span>Casting ability</span><select aria-label="Magic Initiate casting ability" disabled={creationLocked} value={magicInitiateChoice?.ability ?? ""} onChange={(event) => updateMagicInitiateChoice({ ability: event.target.value as CharacterData["savingThrowProficiencies"][number] })}><option value="">Choose ability</option>{(["intellect", "spirit", "charisma"] as const).map((ability) => <option key={ability} value={ability}>{ABILITY_LABELS[ability]}</option>)}</select></label><label><span>Cantrip 1</span><DescriptionPicker disabled={creationLocked || !magicInitiateChoice?.spellList} ariaLabel="Magic Initiate cantrip 1" value={magicInitiateChoice?.cantripIds[0] ?? ""} placeholder="Choose first cantrip" onChange={(id) => updateMagicInitiateChoice({ cantripIds: [id, ...(magicInitiateChoice?.cantripIds[1] && magicInitiateChoice.cantripIds[1] !== id ? [magicInitiateChoice.cantripIds[1]] : [])] })} options={magicInitiateCantrips.filter((spell) => spell.id !== magicInitiateChoice?.cantripIds[1]).map(pickerOption)} /></label><label><span>Cantrip 2</span><DescriptionPicker disabled={creationLocked || !magicInitiateChoice?.spellList} ariaLabel="Magic Initiate cantrip 2" value={magicInitiateChoice?.cantripIds[1] ?? ""} placeholder="Choose second cantrip" onChange={(id) => updateMagicInitiateChoice({ cantripIds: [...(magicInitiateChoice?.cantripIds[0] ? [magicInitiateChoice.cantripIds[0]] : []), id] })} options={magicInitiateCantrips.filter((spell) => spell.id !== magicInitiateChoice?.cantripIds[0]).map(pickerOption)} /></label><label className="magic-initiate-level-one"><span>Level-1 spell</span><DescriptionPicker disabled={creationLocked || !magicInitiateChoice?.spellList} ariaLabel="Magic Initiate level 1 spell" value={magicInitiateChoice?.levelOneSpellId ?? ""} placeholder="Choose level-1 spell" onChange={(levelOneSpellId) => updateMagicInitiateChoice({ levelOneSpellId, freeCastUsed: false })} options={magicInitiateLevelOne.map(pickerOption)} /></label></div>{magicInitiateChoice?.levelOneSpellId && <p className="spellcasting-note">Free casting: {magicInitiateChoice.freeCastUsed ? "used; restores on a Long Rest" : "available"}.</p>}</div>}
         {concentratingSpell && <div className="concentration-banner"><Sparkles size={16} /><div><span>Concentrating</span><strong>{concentratingSpell.name}</strong></div><button onClick={() => { const activeEffects = character.activeEffects.filter((effect) => !effect.concentration); patchCharacter({ concentratingSpellId: undefined, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects) }); }}>End</button></div>}
@@ -550,7 +545,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
           return <article key={spell.id} className={spell.prepared ? "prepared" : ""}><div className="spell-card-top"><div><span>{spell.level ? `Level ${spell.level} ${spell.school}` : `${spell.school} cantrip`}</span><h3>{spell.name}</h3></div><label><input type="checkbox" checked={spell.prepared} disabled={Boolean(spell.sourceFeatId) || (!spell.prepared && spell.level > 0 && atPreparedLimit)} onChange={(event) => patchCharacter({ spells: character.spells.map((item) => item.id === spell.id ? { ...item, prepared: event.target.checked } : item) })} />Prepared</label><button className="icon-button danger" disabled={Boolean(spell.sourceFeatId)} aria-label={`Forget ${spell.name}`} onClick={() => { const endingConcentration = character.concentratingSpellId === spell.id; const activeEffects = endingConcentration ? character.activeEffects.filter((effect) => !effect.concentration) : character.activeEffects; patchCharacter({ spells: character.spells.filter((item) => item.id !== spell.id), ...(endingConcentration ? { concentratingSpellId: undefined, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects) } : {}) }); }}><Trash2 size={14} /></button></div><div className="spell-meta">{spell.sourceFeatId && owner ? <span>Source: {owner.className}</span> : ownerOptions.length > 0 && <label className="spell-owner"><span>Class</span><select aria-label={`${spell.name} spellcasting class`} value={owner?.className ?? ""} onChange={(event) => assignSpellOwner(spell, event.target.value)}>{ownerOptions.map((profile) => <option key={profile.className} value={profile.className}>{profile.className}</option>)}</select></label>}<span>{spell.castingTime}</span><span>{spell.range}</span><span>{spell.duration}</span>{spell.components && <span>{spell.components}</span>}{spell.ritual && <span>Ritual</span>}{owner && <span>{ABILITY_LABELS[owner.ability]} · DC {8 + abilityModifier(character.abilities[owner.ability]) + character.proficiencyBonus}</span>}</div><p>{spell.description}</p><div className="spell-card-actions">{spell.level > 0 && slotLevels.length > 0 && !freeFeatCast && <select aria-label={`${spell.name} casting level`} value={selectedCastLevel} onChange={(event) => setCastLevels((current) => ({ ...current, [spell.id]: Number(event.target.value) }))}>{slotLevels.map((level) => <option key={level} value={level}>Level {level}{level > spell.level ? " (upcast)" : ""}</option>)}</select>}<button className="button button-primary" disabled={!canCast} onClick={() => castSpell(spell, false, selectedCastLevel)}>{spellcastingBlocked ? "Armor blocks casting" : !preparedToCast ? "Not prepared" : canCast ? spell.level === 0 ? "Cast cantrip" : freeFeatCast ? "Cast free" : "Cast" : "No slot available"}</button>{spell.ritual && <button className="button button-outline" disabled={!canRitualCast} onClick={() => castSpell(spell, true)}>{canRitualCast ? "Cast ritual" : "Prepare to ritual cast"}</button>}{formula && <button className="button button-outline" onClick={() => rollSpellEffect(spell)}>Roll {formula}</button>}</div></article>;
         })}</div>
         {!visibleSpells.length && <div className="empty-state compact">No spells here yet. Learn one from the imported content library.</div>}
-      </section>
+      </CollapsiblePanel>
     </div>
   );
 }
@@ -684,8 +679,7 @@ export function InventoryManager({ catalog, character, patchCharacter, encumbran
         </div>
       </CollapsiblePanel>
 
-      <section className="panel inventory-panel">
-        <div className="section-heading"><div><span className="eyebrow">Possessions</span><h2>Equipment & inventory</h2></div><span className="count-chip">{character.inventory.length}</span></div>
+      <CollapsiblePanel className="inventory-panel" storageKey={`azeroth-panel-${character.id}-equipment-inventory`} eyebrow="Possessions" title="Equipment & inventory" summary={<span>{character.inventory.length} items · {formatPounds(totalWeight)} lb.</span>}>
         <div className="catalog-add-row"><DescriptionPicker ariaLabel="Available equipment" value={selectedId} placeholder="Choose imported equipment" onChange={setSelectedId} options={catalog.map((item) => ({ value: item.id, label: item.name, meta: [item.category, item.cost, item.weight].filter(Boolean).join(" · "), description: equipmentDescription(item) }))} /><button className="button button-primary" disabled={!selectedId} onClick={addCatalogItem}><Plus size={15} />Add</button></div>
         <div className="custom-item-row"><input value={customName} onChange={(event) => setCustomName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addCustomItem(); }} placeholder="Add a custom item" /><button onClick={addCustomItem}><Plus size={15} /></button></div>
         <div className="inventory-list">
@@ -724,7 +718,7 @@ export function InventoryManager({ catalog, character, patchCharacter, encumbran
           })}
         </div>
         {!character.inventory.length && <div className="empty-state compact">Your inventory is empty.</div>}
-      </section>
+      </CollapsiblePanel>
     </div>
   );
 }

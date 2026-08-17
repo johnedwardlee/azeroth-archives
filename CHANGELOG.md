@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.4.0
+
+- Made every primary character-workspace section collapsible, saved each panel's state per character, and added visible-page Expand all / Collapse all controls.
+- Hide Session-Zero Preflight, Guided Setup, starting-spell requirements, and background spell setup after character finalization; add one persistent play-view toggle to review or hide them together.
+- Keep collapsible section headers interactive in read-only DM review imports while leaving character editing controls locked.
 
 ## 1.3.0
 

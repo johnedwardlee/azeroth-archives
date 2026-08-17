@@ -4,6 +4,8 @@ import {
   BookOpen,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   FileDown,
   FileJson,
   Heart,
@@ -37,6 +39,7 @@ import { ContentPackWorkshop } from "./content-pack-workshop";
 import { CampaignPanel } from "./campaign-panel";
 import { Onboarding } from "./onboarding";
 import { ReadinessPanel } from "./readiness-panel";
+import { CollapsiblePanel, setVisiblePanelsExpanded } from "./collapsible-panel";
 import { buildCharacterPdf, type CharacterPdfSection } from "./character-pdf";
 import bundledWarcraftPackJson from "../content-packs/warcraft5e-campaign.w5e?raw";
 import packageMetadata from "../package.json";
@@ -617,6 +620,7 @@ export function CharacterManager() {
   const [showSettings, setShowSettings] = useState(false);
   const [showCampaigns, setShowCampaigns] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showCompletedSetup, setShowCompletedSetup] = useState(false);
   const [menuCharacterId, setMenuCharacterId] = useState<string | null>(null);
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [levelUpHpGain, setLevelUpHpGain] = useState(1);
@@ -731,6 +735,7 @@ export function CharacterManager() {
     campaignProfile: characterCampaignProfile,
   }), [character, ancestries, classes, backgrounds, feats, enabledContent, characterCampaignProfile]);
   const creationLocked = Boolean(character.finalizedAt || character.readOnlyReview);
+  const creationSetupVisible = !character.finalizedAt || showCompletedSetup;
   useEffect(() => {
     const load = window.azerothDesktop?.load() ?? Promise.resolve(readBrowserStore());
     load.then((store) => {
@@ -755,6 +760,10 @@ export function CharacterManager() {
     if (character.id === "draft") return;
     setCharacters((current) => current.map((item) => item.id === character.id ? character : item));
   }, [character]);
+
+  useEffect(() => {
+    setShowCompletedSetup(false);
+  }, [character.id, character.finalizedAt]);
 
   useEffect(() => {
     if (character.id === "draft" || status !== "Unsaved changes") return;
@@ -1893,30 +1902,35 @@ export function CharacterManager() {
           {(["overview", "features", "actions", "combat", "spells", "equipment", "companions", "notes"] as Tab[]).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "combat" && character.attacks.length ? ` ${character.attacks.length}` : ""}{item === "spells" && character.spells.length ? ` ${character.spells.length}` : ""}{item === "equipment" && character.inventory.length ? ` ${character.inventory.length}` : ""}{item === "companions" && character.companions.length ? ` ${character.companions.length}` : ""}</button>)}
         </nav>
 
+        <div className="section-collapse-controls" aria-label="Section display controls">
+          <span>Sections</span>
+          <button type="button" onClick={() => setVisiblePanelsExpanded(true)}>Expand all</button>
+          <button type="button" onClick={() => setVisiblePanelsExpanded(false)}>Collapse all</button>
+        </div>
+
+        {character.finalizedAt && <div className="completed-setup-toggle"><div><strong>Character setup complete</strong><span>Session-zero and creation choices are hidden during regular play.</span></div><button type="button" className="button button-outline" aria-expanded={showCompletedSetup} onClick={() => setShowCompletedSetup((current) => !current)}>{showCompletedSetup ? <EyeOff size={15} /> : <Eye size={15} />}{showCompletedSetup ? "Hide setup" : "Show setup"}</button></div>}
+
         {tab === "overview" && (
           <div className="overview-grid">
-            <ReadinessPanel key={`readiness-${character.id}`} characterId={character.id} report={readinessReport} finalizedAt={character.finalizedAt} readOnlyReview={character.readOnlyReview} campaignName={characterCampaignProfile?.name} onFinalize={finalizeCharacter} onReopen={reopenCharacterCreation} onExportReview={exportDmReview} />
-            <section className="panel vitals-panel">
-              <div className="section-heading"><div><span className="eyebrow">At a glance</span><h2>Combat & vitals</h2></div><Shield size={20} /></div>
+            {creationSetupVisible && <ReadinessPanel key={`readiness-${character.id}`} characterId={character.id} report={readinessReport} finalizedAt={character.finalizedAt} readOnlyReview={character.readOnlyReview} campaignName={characterCampaignProfile?.name} onFinalize={finalizeCharacter} onReopen={reopenCharacterCreation} onExportReview={exportDmReview} />}
+            <CollapsiblePanel className="vitals-panel" storageKey={`azeroth-panel-${character.id}-overview-vitals`} eyebrow="At a glance" title="Combat & vitals" summary={<span>{character.currentHp}/{character.maxHp} HP · AC {effectiveArmor.value}</span>}>
               <div className="vital-grid">
                 <label><span><Heart size={15} />Hit points</span><div className="paired-input"><input type="number" value={character.currentHp} onChange={(event) => patchCharacter({ currentHp: Number(event.target.value) })} /><b>/</b><input type="number" value={character.maxHp} onChange={(event) => patchCharacter({ maxHp: Number(event.target.value) })} /></div><small>Current / Maximum</small></label>
                 <label><span><Shield size={15} />Armor class</span><input className="stat-input" type="number" value={effectiveArmor.value} readOnly={effectiveArmor.automatic} onChange={(event) => patchCharacter({ armorClass: Number(event.target.value) })} /><small>{effectiveArmor.source}</small></label>
                 <label><span><Zap size={15} />Effective speed</span><div className="unit-input"><input type="number" value={effectiveSpeed.value} readOnly={effectiveSpeed.effects.length > 0} onChange={(event) => patchCharacter({ speed: Number(event.target.value) })} /><b>ft</b></div><small>{effectiveSpeed.effects.length ? `Base ${character.speed} · ${effectiveSpeed.effects.join(" · ")}` : "Walking"}</small></label>
                 <label><span><Swords size={15} />Proficiency</span><div className="static-stat">+{character.proficiencyBonus}</div><small>Level based</small></label>
               </div>
-            </section>
+            </CollapsiblePanel>
 
-            <section className="panel abilities-panel">
-              <div className="section-heading"><div><span className="eyebrow">Core scores</span><h2>Abilities</h2></div><span className="section-note">Modifier</span></div>
+            <CollapsiblePanel className="abilities-panel" storageKey={`azeroth-panel-${character.id}-overview-abilities`} eyebrow="Core scores" title="Abilities" summary={<span>6 scores · modifiers included</span>}>
               <div className="ability-grid">
                 {abilityKeys.map((key) => (
                   <label key={key} className="ability-card"><span>{ABILITY_LABELS[key]}</span><input disabled={creationLocked} type="number" value={character.abilities[key]} onChange={(event) => updateAbility(key, Number(event.target.value))} /><strong>{modifierLabel(character.abilities[key])}</strong></label>
                 ))}
               </div>
-            </section>
+            </CollapsiblePanel>
 
-            <section className="panel details-panel">
-              <div className="section-heading"><div><span className="eyebrow">Identity</span><h2>Character details</h2></div><BookOpen size={20} /></div>
+            <CollapsiblePanel className="details-panel" storageKey={`azeroth-panel-${character.id}-overview-details`} eyebrow="Identity" title="Character details" summary={<span>{character.playerName || "Player not set"} · {character.experience.toLocaleString()} XP</span>}>
               <div className="form-grid">
                 <label><span>Player name</span><input value={character.playerName} onChange={(event) => patchCharacter({ playerName: event.target.value })} placeholder="Your name" /></label>
                 <label><span>Experience points</span><input type="number" min="0" value={character.experience} onChange={(event) => patchCharacter({ experience: Math.max(0, Number(event.target.value)) })} /></label>
@@ -1925,8 +1939,8 @@ export function CharacterManager() {
                 <div><span className="eyebrow">Recently gained</span><h3>{resolvedFeatures.at(-1)?.name ?? "Ready for adventure"}</h3>{resolvedFeatures.at(-1) && featureOrigin(resolvedFeatures.at(-1)!) && <small className="feature-origin">Granted by {featureOrigin(resolvedFeatures.at(-1)!)}</small>}<p>{resolvedFeatures.at(-1)?.description ?? "Add features through your ancestry, class, or an imported content pack."}</p></div>
                 <button className="text-button" onClick={() => setTab("features")}>View all features <span>→</span></button>
               </div>
-            </section>
-            <CreationGuide key={`creation-guide-${character.id}`} character={character} patchCharacter={patchCharacter} background={selectedBackground} feats={feats} equipment={equipment} campaignProfile={characterCampaignProfile} locked={creationLocked} />
+            </CollapsiblePanel>
+            {creationSetupVisible && <CreationGuide key={`creation-guide-${character.id}`} character={character} patchCharacter={patchCharacter} background={selectedBackground} feats={feats} equipment={equipment} campaignProfile={characterCampaignProfile} locked={creationLocked} />}
             <SessionTracker character={character} patchCharacter={patchCharacter} hitDicePools={hitDicePools} />
             <AdvancementPanel character={character} onRollback={rollbackLatestAdvancement} />
           </div>
@@ -1935,13 +1949,12 @@ export function CharacterManager() {
         {tab === "features" && (
           <div className="stacked-tab-panels">
           <FeatManager catalog={feats} character={character} patchCharacter={patchCharacter} />
-          <section className="panel wide-panel">
-            <div className="section-heading"><div><span className="eyebrow">Rules reference</span><h2>Features & traits</h2></div><span className="count-chip">{character.features.length}</span></div>
+          <CollapsiblePanel className="wide-panel" storageKey={`azeroth-panel-${character.id}-features-traits`} eyebrow="Rules reference" title="Features & traits" summary={<span>{resolvedFeatures.length} entries</span>}>
             <div className="feature-list">
               {resolvedFeatures.map((feature, index) => <article key={`${feature.name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><div><div className="feature-title-row"><h3>{feature.name}</h3>{featureOrigin(feature) && <small className="feature-origin">{featureOrigin(feature)}</small>}</div><p>{feature.description}</p></div></article>)}
               {!character.features.length && <div className="empty-state">No features yet. Choose an ancestry and class or import a content pack.</div>}
             </div>
-          </section>
+          </CollapsiblePanel>
           </div>
         )}
 
@@ -1949,7 +1962,7 @@ export function CharacterManager() {
 
         {tab === "combat" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
 
-          {tab === "spells" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingProfiles={spellcastingProfiles} creationLocked={creationLocked} />}
+          {tab === "spells" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingProfiles={spellcastingProfiles} creationLocked={creationLocked} showCreationSetup={creationSetupVisible} />}
 
         {tab === "equipment" && <InventoryManager catalog={equipment} character={character} patchCharacter={patchCharacter} encumbranceRule={characterCampaignProfile?.encumbranceRule} attunementLimit={characterCampaignProfile?.attunementLimit} />}
 

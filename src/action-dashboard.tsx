@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Clock3, History, RotateCcw, Search, Sparkles, Star, Zap } from "lucide-react";
+import { RotateCcw, Search, Sparkles, Star } from "lucide-react";
 import { recordRecentAction, toggleFavoriteAction } from "../lib/action-history";
 import { activeEffectFromSpell, generatedCharacterActions, hasUnproficientArmor, isIncapacitated, syncEffectConditions, type GeneratedAction } from "../lib/character-rules";
 import type { CharacterData, EncumbranceRule, EquipmentDefinition } from "../lib/types";
 import { CombatStatusStrip } from "./combat-status-strip";
+import { CollapsiblePanel } from "./collapsible-panel";
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
 type UndoState = { message: string; patch: Partial<CharacterData> };
@@ -133,12 +134,12 @@ export function ActionDashboard({ character, patchCharacter, catalog, encumbranc
 
   return <div className="action-dashboard">
     <CombatStatusStrip character={character} catalog={catalog} patchCharacter={patchCharacter} encumbranceRule={encumbranceRule} />
-    <section className="panel action-dashboard-header"><div className="section-heading"><div><span className="eyebrow">Rules-aware play</span><h2>Action dashboard</h2></div><Zap size={20} /></div><p>Actions are generated from your features, prepared spells, attacks, and equipped items.</p><label className="catalog-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search actions and features" /></label>{feedback && <div className="cast-feedback" role="status"><span>{feedback}</span>{undoState && <button className="feedback-undo" onClick={undoLastUse}><RotateCcw size={13} />Undo</button>}<button aria-label="Dismiss action message" onClick={() => setFeedback("")}>×</button></div>}</section>
-    <section className="panel quick-action-panel"><div className="action-column-heading"><Star size={15} /><h3>Quick bar</h3><span>{favorites.length}</span></div>{favorites.length ? <div className="quick-action-grid">{favorites.map((action) => actionCard(action, true))}</div> : <p className="action-empty">Pin frequently used actions with the star on any action card.</p>}</section>
-    {character.recentActions.length > 0 && <section className="panel recent-action-panel"><div className="action-column-heading"><History size={15} /><h3>Recently used</h3><span>{character.recentActions.length}</span></div><div className="recent-action-list">{character.recentActions.map((entry) => <button key={`${entry.actionId}-${entry.usedAt}`} disabled={!byId.has(entry.actionId) || !canUse(byId.get(entry.actionId)!)} onClick={() => { const action = byId.get(entry.actionId); if (action) useAction(action); }}><span>{entry.name}</span><small>{entry.result}</small></button>)}</div></section>}
+    <CollapsiblePanel className="action-dashboard-header" storageKey={`azeroth-panel-${character.id}-actions-dashboard`} eyebrow="Rules-aware play" title="Action dashboard" summary={<span>{actions.length} available</span>}><p>Actions are generated from your features, prepared spells, attacks, and equipped items.</p><label className="catalog-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search actions and features" /></label>{feedback && <div className="cast-feedback" role="status"><span>{feedback}</span>{undoState && <button className="feedback-undo" onClick={undoLastUse}><RotateCcw size={13} />Undo</button>}<button aria-label="Dismiss action message" onClick={() => setFeedback("")}>×</button></div>}</CollapsiblePanel>
+    <CollapsiblePanel className="quick-action-panel" storageKey={`azeroth-panel-${character.id}-actions-quick-bar`} eyebrow="Quick access" title="Quick bar" summary={<span>{favorites.length} pinned</span>}>{favorites.length ? <div className="quick-action-grid">{favorites.map((action) => actionCard(action, true))}</div> : <p className="action-empty">Pin frequently used actions with the star on any action card.</p>}</CollapsiblePanel>
+    {character.recentActions.length > 0 && <CollapsiblePanel className="recent-action-panel" storageKey={`azeroth-panel-${character.id}-actions-recent`} eyebrow="History" title="Recently used" summary={<span>{character.recentActions.length} entries</span>}><div className="recent-action-list">{character.recentActions.map((entry) => <button key={`${entry.actionId}-${entry.usedAt}`} disabled={!byId.has(entry.actionId) || !canUse(byId.get(entry.actionId)!)} onClick={() => { const action = byId.get(entry.actionId); if (action) useAction(action); }}><span>{entry.name}</span><small>{entry.result}</small></button>)}</div></CollapsiblePanel>}
     <div className="action-timing-grid">{(["action", "bonus", "reaction", "passive"] as const).map((timing) => {
       const group = visible.filter((action) => action.timing === timing);
-      return <section className="panel action-column" key={timing}><div className="action-column-heading"><Clock3 size={15} /><h3>{timingLabels[timing]}</h3><span>{group.length}</span></div><div className="action-card-list">{group.map((action) => actionCard(action))}{!group.length && <p className="action-empty">No {timingLabels[timing].toLowerCase()} found.</p>}</div></section>;
+      return <CollapsiblePanel className="action-column" storageKey={`azeroth-panel-${character.id}-actions-${timing}`} eyebrow="Action economy" title={timingLabels[timing]} summary={<span>{group.length} available</span>} key={timing}><div className="action-card-list">{group.map((action) => actionCard(action))}{!group.length && <p className="action-empty">No {timingLabels[timing].toLowerCase()} found.</p>}</div></CollapsiblePanel>;
     })}</div>
   </div>;
 }
