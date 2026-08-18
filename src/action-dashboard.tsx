@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Dices, RotateCcw, Search, Sparkles, Star, Swords } from "lucide-react";
-import { recordRecentAction, toggleFavoriteAction } from "../lib/action-history";
+import { favoriteActionsFirst, recordRecentAction, toggleFavoriteAction } from "../lib/action-history";
 import { activeEffectFromSpell, conditionRollEffects, generatedCharacterActions, hasUnproficientArmor, isEquipmentProficient, isIncapacitated, resolvedRollMode, rollD20, rollDiceFormula, spellcastingAbilityForClass, spellDamageProfile, spellSaveAbility, syncEffectConditions, type GeneratedAction, type RollMode, type SpellDamageProfile } from "../lib/character-rules";
 import { ABILITY_LABELS, abilityModifier, type AbilityKey, type ActionTiming, type CharacterData, type EncumbranceRule, type EquipmentDefinition, type HitDicePool } from "../lib/types";
 import { CombatStatusStrip } from "./combat-status-strip";
@@ -44,14 +44,13 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
   const [damageResult, setDamageResult] = useState("");
   const actions = useMemo(() => generatedCharacterActions(character, catalog), [character, catalog]);
   const byId = useMemo(() => new Map(actions.map((action) => [action.id, action])), [actions]);
-  const visible = actions.filter((action) => {
+  const visible = favoriteActionsFirst(actions.filter((action) => {
     const matchesQuery = `${action.name} ${action.source} ${action.description}`.toLowerCase().includes(query.trim().toLowerCase());
     const matchesPurpose = purposeFilter === "all"
       || (purposeFilter === "spell" ? Boolean(action.spellId) : purposeFilter === "item" ? Boolean(action.inventoryId) : purposeFilter === "companion" ? action.source.startsWith("Companion") : action.purpose === purposeFilter);
     return matchesQuery && action.timing !== "passive" && (timingFilter === "all" || action.timing === timingFilter) && matchesPurpose;
-  });
+  }), character.favoriteActionIds);
   const references = actions.filter((action) => action.timing === "passive" && `${action.name} ${action.source} ${action.description}`.toLowerCase().includes(query.trim().toLowerCase()) && (purposeFilter === "all" || action.purpose === purposeFilter));
-  const favorites = character.favoriteActionIds.flatMap((id) => byId.get(id) ?? []);
 
   function snapshotForUndo(message: string): UndoState {
     return { message, patch: { resources: character.resources, inventory: character.inventory, spellSlots: character.spellSlots, activeEffects: character.activeEffects, conditions: character.conditions, concentratingSpellId: character.concentratingSpellId, recentActions: character.recentActions } };
@@ -225,13 +224,13 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     return "Use";
   }
 
-  function actionCard(action: GeneratedAction, compact = false) {
+  function actionCard(action: GeneratedAction) {
     const favorite = character.favoriteActionIds.includes(action.id);
     const unavailable = unavailableReason(action);
     const buttonLabel = actionButtonLabel(action);
-    return <article className={`${compact ? "compact-action-card" : ""} ${unavailable ? "unavailable" : ""}`.trim()} key={action.id}>
+    return <article className={unavailable ? "unavailable" : undefined} key={action.id}>
       <div className="action-card-heading"><div><span>{action.source}</span><h4>{action.name}</h4><div className="action-badges"><b>{action.timing === "other" ? "Free / Other" : action.timing}</b><b>{purposeLabels[action.purpose]}</b></div></div><button type="button" className={`favorite-action ${favorite ? "active" : ""}`} aria-label={`${favorite ? "Remove" : "Add"} ${action.name} ${favorite ? "from" : "to"} favorites`} onClick={() => patchCharacter({ favoriteActionIds: toggleFavoriteAction(character.favoriteActionIds, action.id) })}><Star size={15} fill={favorite ? "currentColor" : "none"} /></button></div>
-      {!compact && <p>{action.description}</p>}
+      <p>{action.description}</p>
       <div className="action-card-controls">{unavailable ? <span className="unavailable-reason">{unavailable}</span> : remainingUseLabel(action) ? <span>{remainingUseLabel(action)}</span> : <span>Ready</span>}{action.timing !== "passive" && <button disabled={Boolean(unavailable)} title={unavailable ?? `${action.name}: ${buttonLabel}`} aria-label={`${action.name}: ${buttonLabel}`} onClick={() => useAction(action)}>{action.attackId || (action.spellId && /spell attack/i.test(character.spells.find((entry) => entry.id === action.spellId)?.description ?? "")) ? <Dices size={13} /> : <Sparkles size={13} />}{buttonLabel}</button>}</div>
     </article>;
   }
@@ -252,7 +251,6 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
       </div>
     </CollapsiblePanel>
     <SessionTracker character={character} patchCharacter={patchCharacter} hitDicePools={hitDicePools} />
-    <CollapsiblePanel className="quick-action-panel" storageKey={`azeroth-panel-${character.id}-encounter-quick-bar`} eyebrow="Quick access" title="Quick bar" summary={<span>{favorites.length} pinned</span>}>{favorites.length ? <div className="quick-action-grid">{favorites.map((action) => actionCard(action, true))}</div> : <p className="action-empty">Pin frequently used actions with the star on any action card.</p>}</CollapsiblePanel>
     {character.recentActions.length > 0 && <CollapsiblePanel className="recent-action-panel" storageKey={`azeroth-panel-${character.id}-encounter-recent`} eyebrow="History" title="Recently used" summary={<span>{character.recentActions.length} entries</span>}><div className="recent-action-list">{character.recentActions.map((entry) => { const action = byId.get(entry.actionId); return <button key={`${entry.actionId}-${entry.usedAt}`} disabled={!action || Boolean(action && unavailableReason(action))} onClick={() => { if (action) useAction(action); }}><span>{entry.name}</span><small>{entry.result}</small></button>; })}</div></CollapsiblePanel>}
     {timingFilter === "all" && references.length > 0 && <CollapsiblePanel className="action-reference-panel" storageKey={`azeroth-panel-${character.id}-encounter-references`} eyebrow="Always available" title="Passive features" summary={<span>{references.length} references</span>} defaultExpanded={false}><div className="encounter-action-grid">{references.map((action) => actionCard(action))}</div></CollapsiblePanel>}
   </div>;

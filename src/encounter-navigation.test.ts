@@ -23,6 +23,9 @@ describe("v1.5 navigation and encounter workspace", () => {
     expect(source).toContain('unavailable choices remain visible');
     expect(source).toContain('encounter-library-v2');
     expect(source).toContain('className="encounter-library-inline"');
+    expect(source).toContain("favoriteActionsFirst(actions.filter");
+    expect(source).not.toContain('title="Quick bar"');
+    expect(source).not.toContain("encounter-quick-bar");
     expect(source).not.toContain('<section className="panel encounter-library"');
   });
 

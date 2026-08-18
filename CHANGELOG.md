@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.5.2
+
+- Move favorited Encounter actions to the top of the filtered action list and remove the redundant Quick Bar section.
+
 ## 1.5.1
 
 - Replaced generic Encounter `Roll` and `Cast` button labels with the exact d20 modifier, advantage/disadvantage dice, spell save DC, or a clear no-roll label.
