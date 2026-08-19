@@ -32,7 +32,7 @@ function signed(value: number) {
   return `${value >= 0 ? "+" : "−"}${Math.abs(value)}`;
 }
 
-export function ActionDashboard({ character, patchCharacter, catalog, hitDicePools, encumbranceRule = "variant" }: { character: CharacterData; patchCharacter: PatchCharacter; catalog: EquipmentDefinition[]; hitDicePools: HitDicePool[]; encumbranceRule?: EncumbranceRule }) {
+export function ActionDashboard({ character, patchCharacter, catalog, hitDicePools, encumbranceRule = "standard" }: { character: CharacterData; patchCharacter: PatchCharacter; catalog: EquipmentDefinition[]; hitDicePools: HitDicePool[]; encumbranceRule?: EncumbranceRule }) {
   const [query, setQuery] = useState("");
   const [timingFilter, setTimingFilter] = useState<TimingFilter>("all");
   const [purposeFilter, setPurposeFilter] = useState<PurposeFilter>("all");

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.5.3
+
+- Replace variant encumbrance with standard 5e carrying capacity (Strength × 15), remove the variant campaign option, and migrate existing variant profiles to the standard rule.
+
 ## 1.5.2
 
 - Move favorited Encounter actions to the top of the filtered action list and remove the redundant Quick Bar section.

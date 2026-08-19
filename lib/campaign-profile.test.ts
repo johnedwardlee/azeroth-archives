@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeCampaignProfile, parseCampaignProfileFile, serializeCampaignProfile } from "./campaign-profile";
+import { newCampaignProfile, normalizeCampaignProfile, parseCampaignProfileFile, serializeCampaignProfile } from "./campaign-profile";
 
 describe("campaign profiles", () => {
   it("normalizes unsafe values and round-trips the portable file format", () => {
@@ -23,5 +23,11 @@ describe("campaign profiles", () => {
 
   it("rejects unrelated JSON files", () => {
     expect(() => parseCampaignProfileFile({ format: "something-else" })).toThrow(/not an Azeroth Archives campaign profile/i);
+  });
+
+  it("uses standard 5e encumbrance and migrates legacy variant profiles", () => {
+    expect(newCampaignProfile().encumbranceRule).toBe("standard");
+    expect(normalizeCampaignProfile({ encumbranceRule: "variant" }).encumbranceRule).toBe("standard");
+    expect(normalizeCampaignProfile({ encumbranceRule: "none" }).encumbranceRule).toBe("none");
   });
 });

@@ -550,7 +550,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
   );
 }
 
-export function InventoryManager({ catalog, character, patchCharacter, encumbranceRule = "variant", attunementLimit = 3 }: { catalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; encumbranceRule?: EncumbranceRule; attunementLimit?: number }) {
+export function InventoryManager({ catalog, character, patchCharacter, encumbranceRule = "standard", attunementLimit = 3 }: { catalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; encumbranceRule?: EncumbranceRule; attunementLimit?: number }) {
   const [selectedId, setSelectedId] = useState("");
   const [customName, setCustomName] = useState("");
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
@@ -671,9 +671,9 @@ export function InventoryManager({ catalog, character, patchCharacter, encumbran
           </div>
           <div className="encumbrance-meter" role="progressbar" aria-label={`Carried weight: ${formatPounds(totalWeight)} of ${formatPounds(carryingCapacity)} pounds`} aria-valuemin={0} aria-valuemax={carryingCapacity} aria-valuenow={Math.min(totalWeight, carryingCapacity)}>
             <span style={{ width: `${loadPercent}%` }} />
-            {encumbranceRule === "variant" && <><i className="encumbered-marker" aria-hidden="true" /><i className="heavily-encumbered-marker" aria-hidden="true" /></>}
+            {encumbrance.rule === "variant" && <><i className="encumbered-marker" aria-hidden="true" /><i className="heavily-encumbered-marker" aria-hidden="true" /></>}
           </div>
-          <div className="encumbrance-thresholds"><span>{formatPounds(encumberedAt)} lb. encumbered</span><span>{formatPounds(heavilyEncumberedAt)} lb. heavy</span></div>
+          <div className="encumbrance-thresholds">{encumbrance.rule === "variant" ? <><span>{formatPounds(encumberedAt)} lb. encumbered</span><span>{formatPounds(heavilyEncumberedAt)} lb. heavy</span></> : encumbrance.rule === "standard" ? <><span>Standard 5e capacity</span><span>Strength × 15</span></> : <><span>Weight tracking only</span><span>No enforced limit</span></>}</div>
           <div className="encumbrance-penalty">{encumbrance.level !== "unencumbered" && <AlertTriangle size={15} />}<div><strong>Current penalties</strong><p>{encumbrance.penalty}</p></div></div>
           {unlistedWeightItems > 0 && <p className="unlisted-weight-warning">{unlistedWeightItems} carried {unlistedWeightItems === 1 ? "item has" : "items have"} no numeric listed weight and {unlistedWeightItems === 1 ? "is" : "are"} not included.</p>}
         </div>

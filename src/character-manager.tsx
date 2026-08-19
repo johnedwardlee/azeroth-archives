@@ -744,7 +744,7 @@ export function CharacterManager() {
       if (loadedCharacters[0]) setCharacter(loadedCharacters[0]);
       setCustomPacks(withBundledPack(store.packs));
       setDisabledPackIds(store.disabledPackIds ?? []);
-      setCampaignProfiles(store.campaignProfiles ?? []);
+      setCampaignProfiles((store.campaignProfiles ?? []).map(normalizeCampaignProfile));
       setActiveCampaignProfileId(store.activeCampaignProfileId);
       setOnboardingCompleted(store.onboardingCompleted);
       setAppRole(store.appRole ?? "player");

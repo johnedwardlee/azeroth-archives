@@ -4,7 +4,7 @@ import type { CharacterData, EncumbranceRule, EquipmentDefinition } from "../lib
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
 
-export function CombatStatusStrip({ character, catalog, patchCharacter, encumbranceRule = "variant" }: { character: CharacterData; catalog: EquipmentDefinition[]; patchCharacter: PatchCharacter; encumbranceRule?: EncumbranceRule }) {
+export function CombatStatusStrip({ character, catalog, patchCharacter, encumbranceRule = "standard" }: { character: CharacterData; catalog: EquipmentDefinition[]; patchCharacter: PatchCharacter; encumbranceRule?: EncumbranceRule }) {
   const encumbrance = calculateEncumbrance(character.inventory, character.abilities.strength, encumbranceRule);
   const armorClass = calculateArmorClass(character, catalog);
   const speed = calculateEffectiveSpeed(character, encumbrance, catalog);

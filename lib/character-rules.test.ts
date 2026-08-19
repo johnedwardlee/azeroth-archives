@@ -119,17 +119,17 @@ describe("living sheet rules", () => {
     expect(attack).toMatchObject({ contentId: "dagger", inventoryItemId: "inventory-dagger-2" });
   });
 
-  it("calculates variant encumbrance thresholds and penalties", () => {
+  it("retains legacy variant encumbrance only when explicitly requested", () => {
     const inventory = [{ id: "load", name: "Load", quantity: 1, weight: "105 lb.", category: "Gear", notes: "", equipped: false }];
-    const result = calculateEncumbrance(inventory, 10);
+    const result = calculateEncumbrance(inventory, 10, "variant");
     expect(result.level).toBe("heavily-encumbered");
     expect(result.carryingCapacity).toBe(150);
     expect(result.penalty).toContain("Speed −20 ft.");
   });
 
-  it("supports standard-capacity and tracking-only campaign encumbrance", () => {
+  it("uses standard 5e capacity by default and supports tracking-only campaigns", () => {
     const inventory = [{ id: "load", name: "Load", quantity: 1, weight: "105 lb.", category: "Gear", notes: "", equipped: false }];
-    expect(calculateEncumbrance(inventory, 10, "standard").level).toBe("unencumbered");
+    expect(calculateEncumbrance(inventory, 10)).toMatchObject({ rule: "standard", level: "unencumbered", carryingCapacity: 150, speedPenalty: 0 });
     expect(calculateEncumbrance(inventory, 10, "none").label).toBe("Not enforced");
   });
 

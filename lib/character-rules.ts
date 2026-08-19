@@ -240,7 +240,7 @@ export function formatPounds(value: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
 }
 
-export function calculateEncumbrance(inventory: InventoryItem[], strengthScore: number, rule: EncumbranceRule = "variant") {
+export function calculateEncumbrance(inventory: InventoryItem[], strengthScore: number, rule: EncumbranceRule = "standard") {
   const strength = Math.max(1, Math.min(30, Number.isFinite(strengthScore) ? strengthScore : 1));
   const totalWeight = inventory.reduce((total, item) => total + (listedWeightInPounds(item.weight) ?? 0) * item.quantity, 0);
   const unlistedWeightItems = inventory.reduce((total, item) => total + (listedWeightInPounds(item.weight) === null ? item.quantity : 0), 0);

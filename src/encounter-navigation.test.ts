@@ -44,5 +44,6 @@ describe("v1.5 navigation and encounter workspace", () => {
     expect(encounter).toContain("spellDamageProfile(spell");
     expect(encounter).toContain("if (damage?.automatic) rollResolvedDamage(false, damage)");
     expect(encounter).toContain("pendingDamage.allowCritical");
+    expect(encounter).toContain('encumbranceRule = "standard"');
   });
 });
