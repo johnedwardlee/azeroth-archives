@@ -53,7 +53,7 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
   const references = actions.filter((action) => action.timing === "passive" && `${action.name} ${action.source} ${action.description}`.toLowerCase().includes(query.trim().toLowerCase()) && (purposeFilter === "all" || action.purpose === purposeFilter));
 
   function snapshotForUndo(message: string): UndoState {
-    return { message, patch: { resources: character.resources, inventory: character.inventory, spellSlots: character.spellSlots, activeEffects: character.activeEffects, conditions: character.conditions, concentratingSpellId: character.concentratingSpellId, recentActions: character.recentActions } };
+    return { message, patch: { resources: character.resources, inventory: character.inventory, spellSlots: character.spellSlots, featSpellcastingChoices: character.featSpellcastingChoices, activeEffects: character.activeEffects, conditions: character.conditions, concentratingSpellId: character.concentratingSpellId, recentActions: character.recentActions } };
   }
 
   function finishAction(action: GeneratedAction, result: string, changes: Partial<CharacterData> = {}, undoMessage?: string) {
@@ -101,6 +101,21 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     return Array.from({ length: 10 - spell.level }, (_, index) => spell.level + index).find((level) => { const slot = character.spellSlots[String(level)]; return slot && slot.used < slot.maximum; });
   }
 
+  function freeSourceCastAvailable(spell: CharacterData["spells"][number]) {
+    if (spell.level === 0 || !spell.sourceFeatId) return false;
+    const choice = character.featSpellcastingChoices.find((entry) => entry.featId === spell.sourceFeatId);
+    if (!choice) return false;
+    return spell.id === choice.levelOneSpellId ? !choice.freeCastUsed : !choice.freeCastUsedSpellIds?.includes(spell.id);
+  }
+
+  function spendFreeSourceCast(spell: CharacterData["spells"][number]) {
+    return character.featSpellcastingChoices.map((choice) => choice.featId !== spell.sourceFeatId
+      ? choice
+      : spell.id === choice.levelOneSpellId
+        ? { ...choice, freeCastUsed: true }
+        : { ...choice, freeCastUsedSpellIds: [...new Set([...(choice.freeCastUsedSpellIds ?? []), spell.id])] });
+  }
+
   function unavailableReason(action: GeneratedAction): string | null {
     if (action.timing === "passive") return "Reference only";
     if (isIncapacitated(character)) return "Unavailable while Incapacitated";
@@ -120,7 +135,7 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
       const spell = character.spells.find((entry) => entry.id === action.spellId);
       if (!spell) return "Spell is no longer known";
       if (spell.level > 0 && !spell.prepared) return "Spell is not prepared";
-      if (spell.level > 0 && !Object.entries(character.spellSlots).some(([level, slot]) => Number(level) >= spell.level && slot.used < slot.maximum)) return `No level-${spell.level}+ slot`;
+      if (spell.level > 0 && !freeSourceCastAvailable(spell) && !Object.entries(character.spellSlots).some(([level, slot]) => Number(level) >= spell.level && slot.used < slot.maximum)) return `No level-${spell.level}+ slot`;
     }
     return null;
   }
@@ -155,7 +170,8 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     }
     if (action.spellId) {
       const spell = character.spells.find((entry) => entry.id === action.spellId)!;
-      const slotLevel = nextSlotLevel(spell);
+      const usesFreeCast = freeSourceCastAvailable(spell);
+      const slotLevel = usesFreeCast ? 0 : nextSlotLevel(spell);
       const spellSlots = slotLevel ? { ...character.spellSlots, [String(slotLevel)]: { ...character.spellSlots[String(slotLevel)], used: character.spellSlots[String(slotLevel)].used + 1 } } : character.spellSlots;
       const effect = activeEffectFromSpell(spell);
       const activeEffects = effect ? [...character.activeEffects.filter((entry) => !(effect.concentration && entry.concentration)), effect] : character.activeEffects;
@@ -173,8 +189,8 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
         if (damage?.automatic) rollResolvedDamage(false, damage);
       }
       const resolution = attackRoll ? ` Attack: ${attackRoll.dice.join(" / ")} ${signed(attackRoll.modifier)} = ${attackRoll.total}${attackRoll.mode !== "normal" ? ` (${attackRoll.mode})` : ""}.` : saveAbility ? ` Target save: ${ABILITY_LABELS[saveAbility]} DC ${saveDc}.` : damage?.automatic ? ` Damage rolled automatically.` : "";
-      const result = `${spell.name} cast${slotLevel ? ` with a level ${slotLevel} slot` : " as a cantrip"}${effect ? "; effect tracked" : ""}.${resolution}`;
-      finishAction(action, result, { spellSlots, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects), ...(effect?.concentration ? { concentratingSpellId: spell.id } : {}) }, slotLevel ? `Restore the level ${slotLevel} spell slot` : effect ? `Remove ${spell.name}'s tracked effect` : undefined);
+      const result = `${spell.name} cast${usesFreeCast ? " with its once-per-Long-Rest casting" : slotLevel ? ` with a level ${slotLevel} slot` : " as a cantrip"}${effect ? "; effect tracked" : ""}.${resolution}`;
+      finishAction(action, result, { spellSlots, ...(usesFreeCast ? { featSpellcastingChoices: spendFreeSourceCast(spell) } : {}), activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects), ...(effect?.concentration ? { concentratingSpellId: spell.id } : {}) }, usesFreeCast ? `Restore ${spell.name}'s free casting` : slotLevel ? `Restore the level ${slotLevel} spell slot` : effect ? `Remove ${spell.name}'s tracked effect` : undefined);
       return;
     }
     finishAction(action, `${action.name}: marked as used.`);

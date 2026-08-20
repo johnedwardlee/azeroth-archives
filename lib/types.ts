@@ -286,6 +286,7 @@ export type FeatSpellcastingChoice = {
   cantripIds: string[];
   levelOneSpellId?: string;
   freeCastUsed: boolean;
+  freeCastUsedSpellIds?: string[];
 };
 
 export type AdvancementSnapshot = {

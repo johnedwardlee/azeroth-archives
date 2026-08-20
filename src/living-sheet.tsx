@@ -123,13 +123,14 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
       hitDiceByClass: character.hitDiceByClass.map((pool) => ({ ...pool, used: 0 })),
       deathSaveSuccesses: 0,
       deathSaveFailures: 0,
+      ...(character.features.some((feature) => feature.name === "Resourceful") ? { inspiration: true } : {}),
       spellSlots: Object.fromEntries(
         Object.entries(character.spellSlots).map(([level, slot]) => [level, { ...slot, used: 0 }]),
       ),
       concentratingSpellId: undefined,
       activeEffects,
       resources: character.resources.map((resource) => resource.recovery === "manual" ? resource : { ...resource, current: resource.maximum }),
-      featSpellcastingChoices: character.featSpellcastingChoices.map((choice) => ({ ...choice, freeCastUsed: false })),
+      featSpellcastingChoices: character.featSpellcastingChoices.map((choice) => ({ ...choice, freeCastUsed: false, freeCastUsedSpellIds: [] })),
       exhaustionLevel,
       conditions: exhaustionLevel ? [...new Set([...effectConditions, "Exhaustion"])] : effectConditions.filter((item) => item !== "Exhaustion"),
     });
@@ -467,7 +468,8 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
     const availableLevels = availableSlotLevels(spell);
     const requestedLevel = selectedLevel && availableLevels.includes(selectedLevel) ? selectedLevel : availableLevels[0];
     const featChoice = spell.sourceFeatId ? character.featSpellcastingChoices.find((choice) => choice.featId === spell.sourceFeatId) : undefined;
-    const usesFreeFeatCast = !asRitual && spell.level === 1 && Boolean(featChoice && !featChoice.freeCastUsed);
+    const freeCastAlreadyUsed = Boolean(featChoice && (spell.id === featChoice.levelOneSpellId ? featChoice.freeCastUsed : featChoice.freeCastUsedSpellIds?.includes(spell.id)));
+    const usesFreeFeatCast = !asRitual && spell.level > 0 && Boolean(featChoice && !freeCastAlreadyUsed);
     const slotLevel = asRitual || spell.level === 0 || usesFreeFeatCast ? 0 : requestedLevel ?? null;
     if (slotLevel === null) return;
     const spellSlots = slotLevel > 0
@@ -488,7 +490,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
       spellSlots,
       activeEffects,
       conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects),
-      ...(usesFreeFeatCast ? { featSpellcastingChoices: character.featSpellcastingChoices.map((choice) => choice.featId === spell.sourceFeatId ? { ...choice, freeCastUsed: true } : choice) } : {}),
+      ...(usesFreeFeatCast ? { featSpellcastingChoices: character.featSpellcastingChoices.map((choice) => choice.featId === spell.sourceFeatId ? spell.id === choice.levelOneSpellId ? { ...choice, freeCastUsed: true } : { ...choice, freeCastUsedSpellIds: [...new Set([...(choice.freeCastUsedSpellIds ?? []), spell.id])] } : choice) } : {}),
       ...(requiresConcentration ? { concentratingSpellId: spell.id } : {}),
     });
     setLastCast(asRitual
@@ -496,7 +498,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
       : slotLevel > 0
         ? `Cast ${spell.name} using a level ${slotLevel} slot.`
         : usesFreeFeatCast
-          ? `Cast ${spell.name} using Magic Initiate's free casting.`
+          ? `Cast ${spell.name} using its once-per-Long-Rest casting.`
           : `Cast ${spell.name} (cantrip; no slot used).`);
   }
 
@@ -536,7 +538,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
           const owner = ownerForSpell(spell);
           const preparedToCast = spell.level === 0 || spell.prepared;
           const featChoice = spell.sourceFeatId ? character.featSpellcastingChoices.find((choice) => choice.featId === spell.sourceFeatId) : undefined;
-          const freeFeatCast = spell.level === 1 && Boolean(featChoice && !featChoice.freeCastUsed);
+          const freeFeatCast = spell.level > 0 && Boolean(featChoice && !(spell.id === featChoice.levelOneSpellId ? featChoice.freeCastUsed : featChoice.freeCastUsedSpellIds?.includes(spell.id)));
           const canCast = !spellcastingBlocked && (spell.level === 0 || (preparedToCast && (freeFeatCast || selectedCastLevel !== undefined)));
           const formula = extractDiceFormula(spell.description);
           const atPreparedLimit = owner?.preparedLimit !== null && owner?.preparedLimit !== undefined && preparedCountFor(owner.className) >= owner.preparedLimit;

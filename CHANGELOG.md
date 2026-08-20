@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.5.5
+
+- Add guided ancestry setup and finalization checks for Human Skillful and Versatile choices, High Elf Keen Senses and lineage magic, and Gnome lineage magic.
+- Apply Dwarven Resilience, Dwarven Toughness, and Stonecunning automatically, including correct level-one and level-up hit points.
+- Support ancestry and feat spells with their proper casting ability and independent once-per-Long-Rest free casts in the living sheet and Encounter workspace.
+- Restore complete Stonecunning usage text and the full Skilled proficiency choices in the Warcraft 5E content pack.
+
+## 1.5.4
+
+- Recalculate level-one starting hit points when Stamina changes during character creation.
+
 ## 1.5.3
 
 - Replace variant encumbrance with standard 5e carrying capacity (Strength × 15), remove the variant campaign option, and migrate existing variant profiles to the standard rule.

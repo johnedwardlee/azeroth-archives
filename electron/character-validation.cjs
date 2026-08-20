@@ -127,6 +127,7 @@ function assertCharacter(character) {
     stringArray(choice.cantripIds, `Character featSpellcastingChoices[${index}].cantripIds`);
     if (choice.levelOneSpellId !== undefined) requiredString(choice.levelOneSpellId, `Character featSpellcastingChoices[${index}].levelOneSpellId`, false);
     if (typeof choice.freeCastUsed !== "boolean") throw new Error(`Character featSpellcastingChoices[${index}].freeCastUsed must be a boolean.`);
+    if (choice.freeCastUsedSpellIds !== undefined) stringArray(choice.freeCastUsedSpellIds, `Character featSpellcastingChoices[${index}].freeCastUsedSpellIds`);
   });
 
   if (!record(character.spellSlots)) throw new Error("Character spellSlots must be an object.");

@@ -64,6 +64,64 @@ describe("character readiness", () => {
     expect(evaluateCharacterReadiness(complete, { ...context, feats: [magicInitiate], spells }).errors.map((issue) => issue.id)).not.toContain("feat-magic-initiate");
   });
 
+  it("requires Human ancestry skill and Origin feat choices", () => {
+    const human = {
+      id: "human",
+      name: "Human",
+      speed: 30,
+      traits: [
+        { id: "human-skillful", name: "Skillful", description: "You gain proficiency in one skill of your choice." },
+        { id: "human-versatile", name: "Versatile", description: "You gain an Origin feat of your choice." },
+      ],
+    };
+    const alert = { id: "alert", name: "Alert", category: "Origin", description: "Stay ready." };
+    const incomplete = evaluateCharacterReadiness(readyWarrior(), { ...context, ancestries: [human], feats: [alert] });
+    expect(incomplete.errors.map((issue) => issue.id)).toEqual(expect.arrayContaining(["ancestry-skill-human-skillful", "ancestry-feat-human-versatile"]));
+    const complete = {
+      ...readyWarrior(),
+      skillProficiencies: [...readyWarrior().skillProficiencies, "Survival"],
+      feats: [alert],
+      advancementChoices: [
+        { id: "skill", featureId: "human-skillful", featureName: "Skillful", level: 1, kind: "skill" as const, selections: ["Survival"] },
+        { id: "feat", featureId: "human-versatile", featureName: "Versatile", level: 1, kind: "other" as const, selections: ["alert"] },
+      ],
+    };
+    expect(evaluateCharacterReadiness(complete, { ...context, ancestries: [human], feats: [alert] }).errors.map((issue) => issue.id)).not.toEqual(expect.arrayContaining(["ancestry-skill-human-skillful", "ancestry-feat-human-versatile"]));
+  });
+
+  it("requires ancestry spellcasting choices and granted cantrips", () => {
+    const highElf = {
+      id: "elf",
+      name: "High Elf",
+      speed: 30,
+      traits: [
+        { id: "elf-lineage", name: "High Elf Lineage", description: "Choose Intellect, Spirit, or Charisma." },
+        { id: "elf-keen", name: "Keen Senses", description: "Choose Insight, Perception, or Survival." },
+      ],
+    };
+    const minorMagic = { id: "prestidigitation", name: "Minor Magic", level: 0, school: "Transmutation", classes: ["Mage"], castingTime: "Action", range: "10 feet", components: "V", duration: "1 hour", description: "Minor magic." };
+    const base = { ...readyWarrior(), ancestry: "High Elf" };
+    expect(evaluateCharacterReadiness(base, { ...context, ancestries: [highElf], spells: [minorMagic] }).errors.map((issue) => issue.id)).toEqual(expect.arrayContaining(["ancestry-skill-elf-keen", "ancestry-magic-elf-lineage"]));
+    const complete = {
+      ...base,
+      skillProficiencies: [...base.skillProficiencies, "Insight"],
+      advancementChoices: [{ id: "keen", featureId: "elf-keen", featureName: "Keen Senses", level: 1, kind: "skill" as const, selections: ["Insight"] }],
+      featSpellcastingChoices: [{ featId: "elf-lineage", spellList: "High Elf", ability: "intellect" as const, cantripIds: ["prestidigitation"], freeCastUsed: false }],
+      spells: [{ ...minorMagic, prepared: true, sourceFeatId: "elf-lineage", castingAbility: "intellect" as const }],
+    };
+    expect(evaluateCharacterReadiness(complete, { ...context, ancestries: [highElf], spells: [minorMagic] }).errors.map((issue) => issue.id)).not.toEqual(expect.arrayContaining(["ancestry-skill-elf-keen", "ancestry-magic-elf-lineage"]));
+  });
+
+  it("checks Dwarf starting HP and Poison resistance", () => {
+    const dwarf = { id: "dwarf", name: "Dwarf", speed: 30, traits: [{ id: "resilience", name: "Dwarven Resilience", description: "Poison resistance." }, { id: "toughness", name: "Dwarven Toughness", description: "+1 HP per level." }] };
+    const incomplete = { ...readyWarrior(), ancestry: "Dwarf", maxHp: 11 };
+    const ids = evaluateCharacterReadiness(incomplete, { ...context, ancestries: [dwarf] }).errors.map((issue) => issue.id);
+    expect(ids).toEqual(expect.arrayContaining(["ancestry-dwarf-poison", "ancestry-dwarf-hp"]));
+    const complete = { ...incomplete, maxHp: 12, currentHp: 12, damageResistances: ["Poison"] };
+    const completeIds = evaluateCharacterReadiness(complete, { ...context, ancestries: [dwarf] }).errors.map((issue) => issue.id);
+    expect(completeIds).not.toEqual(expect.arrayContaining(["ancestry-dwarf-poison", "ancestry-dwarf-hp"]));
+  });
+
   it("blocks finalization until starting class spell counts are complete", () => {
     const spells = [
       { id: "command", name: "Command", level: 1, school: "Enchantment", classes: ["Paladin"], castingTime: "Action", range: "60 feet", components: "V", duration: "1 round", description: "Command." },

@@ -381,6 +381,7 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
       cantripIds: stringList(choice.cantripIds).slice(0, 2),
       levelOneSpellId: typeof choice.levelOneSpellId === "string" ? choice.levelOneSpellId : undefined,
       freeCastUsed: Boolean(choice.freeCastUsed),
+      freeCastUsedSpellIds: stringList(choice.freeCastUsedSpellIds),
     })) : [],
     spellSlots: value.spellSlots && typeof value.spellSlots === "object" ? Object.fromEntries(Object.entries(value.spellSlots).flatMap(([level, slot]) => {
       if (!/^[1-9]$/.test(level) || !slot || typeof slot !== "object") return [];
@@ -591,6 +592,27 @@ function backgroundDescription(background: BackgroundDefinition) {
   ].filter(Boolean).join("\n\n");
 }
 
+function ancestryHitPointBonus(ancestry: AncestryDefinition | undefined, level: number) {
+  return ancestry?.traits.some((trait) => trait.name === "Dwarven Toughness") ? level : 0;
+}
+
+function ancestryTraitChoiceId(trait: RulesFeature) {
+  return trait.id ?? `ancestry-trait-${trait.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
+function toughFeatHitPointBonus(characterFeats: CharacterData["feats"], level: number) {
+  return characterFeats.some((feat) => feat.id === "tough") ? level * 2 : 0;
+}
+
+function ancestryMagicGrant(ancestry: AncestryDefinition | undefined, level: number) {
+  const trait = ancestry?.traits.find((entry) => entry.name === "High Elf Lineage" || entry.name === "Rock Gnome Lineage");
+  if (!ancestry || !trait) return null;
+  const spellIds = trait.name === "High Elf Lineage" ? ["prestidigitation"] : ["mending", "prestidigitation"];
+  if (trait.name === "High Elf Lineage" && level >= 3) spellIds.push("detect-magic");
+  if (trait.name === "High Elf Lineage" && level >= 5) spellIds.push("misty-step");
+  return { trait, sourceId: ancestryTraitChoiceId(trait), spellIds };
+}
+
 function advancementSnapshot(character: CharacterData): AdvancementSnapshot {
   return structuredClone({
     level: character.level, className: character.className, subclassName: character.subclassName, classLevels: character.classLevels,
@@ -725,7 +747,11 @@ export function CharacterManager() {
   const spellcastingProfiles = useMemo(() => [...character.classLevels.flatMap((entry): SpellcastingProfile[] => {
     const ability = spellcastingAbilityForClass(entry.className, entry.subclassName ?? "", classes.find((definition) => definition.name === entry.className)?.primaryAbility);
     return ability ? [{ className: entry.className, ability, preparedLimit: preparedSpellLimitFor(entry.className, entry.subclassName ?? "", entry.level) }] : [];
-  }), ...character.featSpellcastingChoices.flatMap((choice): SpellcastingProfile[] => choice.ability && choice.spellList ? [{ className: `Magic Initiate (${choice.spellList})`, ability: choice.ability, preparedLimit: null, sourceFeatId: choice.featId, spellList: choice.spellList }] : [])], [character.classLevels, character.featSpellcastingChoices, classes]);
+  }), ...character.featSpellcastingChoices.flatMap((choice): SpellcastingProfile[] => {
+    if (!choice.ability || !choice.spellList) return [];
+    const sourceFeat = character.feats.find((feat) => feat.id === choice.featId);
+    return [{ className: sourceFeat?.id === "magic-initiate" ? `Magic Initiate (${choice.spellList})` : `${character.ancestry} Magic`, ability: choice.ability, preparedLimit: null, sourceFeatId: choice.featId, spellList: choice.spellList }];
+  })], [character.classLevels, character.featSpellcastingChoices, character.feats, character.ancestry, classes]);
   const readinessReport = useMemo(() => evaluateCharacterReadiness(character, {
     ancestries,
     classes,
@@ -737,6 +763,24 @@ export function CharacterManager() {
   }), [character, ancestries, classes, backgrounds, feats, enabledContent, characterCampaignProfile]);
   const creationLocked = Boolean(character.finalizedAt || character.readOnlyReview);
   const creationSetupVisible = !character.finalizedAt || showCompletedSetup;
+  useEffect(() => {
+    if (!storeLoaded || character.finalizedAt || character.readOnlyReview || !selectedAncestry) return;
+    const patch: Partial<CharacterData> = {};
+    if (selectedAncestry.traits.some((trait) => trait.name === "Dwarven Resilience") && !character.damageResistances.some((entry) => entry.toLowerCase() === "poison")) patch.damageResistances = [...character.damageResistances, "Poison"];
+    if (selectedAncestry.traits.some((trait) => trait.name === "Stonecunning")) {
+      const stonecunning = character.resources.find((resource) => resource.source === "Ancestry: Dwarf" && resource.name === "Stonecunning");
+      if (!stonecunning) patch.resources = [...character.resources, { id: crypto.randomUUID(), name: "Stonecunning", current: character.proficiencyBonus, maximum: character.proficiencyBonus, recovery: "long", source: "Ancestry: Dwarf" }];
+      else if (stonecunning.maximum !== character.proficiencyBonus) patch.resources = character.resources.map((resource) => resource.id === stonecunning.id ? { ...resource, maximum: character.proficiencyBonus, current: Math.min(character.proficiencyBonus, resource.current + Math.max(0, character.proficiencyBonus - resource.maximum)) } : resource);
+    }
+    if (character.level === 1 && selectedClass && selectedAncestry.traits.some((trait) => trait.name === "Dwarven Toughness")) {
+      const expectedHp = startingHitPoints(selectedClass.hitDie, character.abilities.stamina) + ancestryHitPointBonus(selectedAncestry, 1) + toughFeatHitPointBonus(character.feats, 1);
+      if (character.maxHp !== expectedHp || character.currentHp !== expectedHp) {
+        patch.maxHp = expectedHp;
+        patch.currentHp = expectedHp;
+      }
+    }
+    if (Object.keys(patch).length) patchCharacter(patch);
+  }, [storeLoaded, character.id, character.level, character.finalizedAt, character.readOnlyReview, character.maxHp, character.currentHp, character.abilities.stamina, character.damageResistances, character.feats, character.resources, character.proficiencyBonus, selectedAncestry, selectedClass]);
   useEffect(() => {
     const load = window.azerothDesktop?.load() ?? Promise.resolve(readBrowserStore());
     load.then((store) => {
@@ -796,9 +840,11 @@ export function CharacterManager() {
       const nextFinalizedAt = "finalizedAt" in patch ? patch.finalizedAt : current.finalizedAt;
       const nextClassName = patch.className ?? current.className;
       const definition = classes.find((item) => item.name === nextClassName);
+      const nextAncestry = ancestries.find((item) => item.name === (patch.ancestry ?? current.ancestry));
+      const nextFeats = patch.feats ?? current.feats;
       let hpPatch: Partial<CharacterData> = {};
       if (patch.abilities && definition && nextLevel === 1 && !nextFinalizedAt) {
-        const maxHp = startingHitPoints(definition.hitDie, patch.abilities.stamina);
+        const maxHp = startingHitPoints(definition.hitDie, patch.abilities.stamina) + ancestryHitPointBonus(nextAncestry, nextLevel) + toughFeatHitPointBonus(nextFeats, nextLevel);
         hpPatch = { maxHp, currentHp: maxHp };
       }
       return { ...current, ...patch, ...hpPatch, updatedAt: new Date().toISOString() };
@@ -946,9 +992,42 @@ export function CharacterManager() {
 
   function applyAncestry(name: string) {
     const ancestry = ancestries.find((item) => item.name === name);
+    if (name === character.ancestry) return;
+    const previousAncestry = ancestries.find((item) => item.name === character.ancestry);
+    const previousTraitIds = new Set(previousAncestry?.traits.map(ancestryTraitChoiceId) ?? []);
+    const previousChoices = character.advancementChoices.filter((choice) => Boolean(choice.featureId && previousTraitIds.has(choice.featureId)));
+    const previousOriginFeatId = previousChoices.find((choice) => choice.featureName === "Versatile")?.selections[0];
+    const previousNestedChoiceId = previousOriginFeatId ? `origin-feat-${previousOriginFeatId}` : "";
+    const previousAncestrySkills = previousChoices.filter((choice) => choice.kind === "skill").flatMap((choice) => choice.selections);
+    const previousNested = previousNestedChoiceId ? character.advancementChoices.find((choice) => choice.featureId === previousNestedChoiceId) : undefined;
+    const previousNestedSkills = previousNested?.selections.filter((entry) => entry.startsWith("skill:")).map((entry) => entry.slice(6)) ?? [];
+    const previousNestedTools = previousNested?.selections.filter((entry) => entry.startsWith("tool:")).map((entry) => entry.slice(5)) ?? [];
+    const retainedChoices = character.advancementChoices.filter((choice) => !previousTraitIds.has(choice.featureId ?? "") && choice.featureId !== previousNestedChoiceId);
+    const retainedFeats = character.feats.filter((feat) => feat.id !== previousOriginFeatId || feat.id === selectedBackground?.featId);
+    const oldHpBonus = ancestryHitPointBonus(previousAncestry, character.level) + (previousOriginFeatId === "tough" ? character.level * 2 : 0);
+    const newHpBonus = ancestryHitPointBonus(ancestry, character.level);
+    const hpDelta = newHpBonus - oldHpBonus;
+    const magicGrant = ancestryMagicGrant(ancestry, character.level);
+    const grantedSpells = magicGrant ? spells.filter((spell) => magicGrant.spellIds.includes(spell.id)).map((spell) => ({ ...spell, prepared: true, sourceFeatId: magicGrant.sourceId })) : [];
+    const ancestryResources = ancestry?.traits.some((trait) => trait.name === "Stonecunning") ? [{ id: crypto.randomUUID(), name: "Stonecunning", current: character.proficiencyBonus, maximum: character.proficiencyBonus, recovery: "long" as const, source: "Ancestry: Dwarf" }] : [];
+    const previousSourceIds = previousTraitIds;
+    const requiredSkills = [...character.classSkillChoices, ...(selectedBackground?.skills ?? [])];
     patchCharacter({
       ancestry: name,
       speed: ancestry?.speed ?? character.speed,
+      maxHp: Math.max(1, character.maxHp + hpDelta),
+      currentHp: Math.max(0, character.currentHp + hpDelta),
+      skillProficiencies: [...new Set([...character.skillProficiencies.filter((skill) => !previousAncestrySkills.includes(skill) && !previousNestedSkills.includes(skill)), ...requiredSkills])],
+      toolProficiencies: [...new Set([...character.toolProficiencies.filter((tool) => !previousNestedTools.includes(tool)), ...(selectedBackground?.toolProficiencies ?? [])])],
+      damageResistances: ancestry?.traits.some((trait) => trait.name === "Dwarven Resilience") ? [...new Set([...character.damageResistances, "Poison"])] : character.damageResistances.filter((entry) => entry.toLowerCase() !== "poison"),
+      advancementChoices: retainedChoices,
+      feats: retainedFeats,
+      featSpellcastingChoices: [
+        ...character.featSpellcastingChoices.filter((choice) => !previousSourceIds.has(choice.featId) && choice.featId !== previousOriginFeatId),
+        ...(magicGrant ? [{ featId: magicGrant.sourceId, spellList: ancestry!.name, cantripIds: grantedSpells.filter((spell) => spell.level === 0).map((spell) => spell.id), levelOneSpellId: grantedSpells.find((spell) => spell.level === 1)?.id, freeCastUsed: false, freeCastUsedSpellIds: [] }] : []),
+      ],
+      spells: [...character.spells.filter((spell) => !spell.sourceFeatId || (!previousSourceIds.has(spell.sourceFeatId) && spell.sourceFeatId !== previousOriginFeatId)), ...grantedSpells],
+      resources: [...character.resources.filter((resource) => resource.source !== `Ancestry: ${previousAncestry?.name}`), ...ancestryResources],
       features: [
         ...(ancestry?.traits ?? []),
         ...character.features.filter((feature) => !ancestries.some((item) => item.traits.some((trait) => trait.name === feature.name))),
@@ -963,9 +1042,10 @@ export function CharacterManager() {
     const classFeatureNames = new Set(classes.flatMap((item) => Object.values(item.levelFeatures).flat().map((feature) => feature.name)));
     const subclassFeatureNames = new Set(classes.flatMap((item) => (item.subclasses ?? []).flatMap((subclass) => Object.values(subclass.levelFeatures).flat().map((feature) => feature.name))));
     const progressionSlots = syncProgressionSpellSlots(character.spellSlots, name, "", character.level);
-    const startingHp = selectedClass && character.level === 1 ? startingHitPoints(selectedClass.hitDie, character.abilities.stamina) : null;
+    const startingHp = selectedClass && character.level === 1 ? startingHitPoints(selectedClass.hitDie, character.abilities.stamina) + ancestryHitPointBonus(selectedAncestry, character.level) + toughFeatHitPointBonus(character.feats, character.level) : null;
     const retainedSkills = [...new Set([...character.skillProficiencies.filter((skill) => !character.classSkillChoices.includes(skill)), ...(selectedBackground?.skills ?? [])])];
     const fightingStyleIds = new Set(feats.filter((feat) => feat.category.toLowerCase() === "fighting style").map((feat) => feat.id));
+    const ancestryChoiceIds = new Set(selectedAncestry?.traits.map(ancestryTraitChoiceId) ?? []);
     patchCharacter({
       className: name,
       subclassName: "",
@@ -978,7 +1058,7 @@ export function CharacterManager() {
       armorProficiencies: training.armor,
       weaponProficiencies: training.weapons,
       weaponMasteries: [],
-      advancementChoices: character.advancementChoices.filter((choice) => choice.kind === "other"),
+      advancementChoices: character.advancementChoices.filter((choice) => choice.kind === "other" || ancestryChoiceIds.has(choice.featureId ?? "") || choice.featureId?.startsWith("origin-feat-")),
       feats: character.feats.filter((feat) => !fightingStyleIds.has(feat.id)),
       spells: character.spells.map((spell) => {
         if (spell.classes.some((className) => className.toLowerCase() === name.toLowerCase())) return { ...spell, className: name };
@@ -1298,7 +1378,7 @@ export function CharacterManager() {
     const features = [...(selectedClass.levelFeatures[String(nextClassLevel)] ?? []), ...(specialization?.levelFeatures[String(nextClassLevel)] ?? [])];
     const prompts = advancementPromptsForFeatures(features, selectedClass.name);
     const staminaBonus = abilityModifier(character.abilities.stamina);
-    setLevelUpHpGain(Math.max(1, Math.floor(selectedClass.hitDie / 2) + 1 + staminaBonus));
+    setLevelUpHpGain(Math.max(1, Math.floor(selectedClass.hitDie / 2) + 1 + staminaBonus) + ancestryHitPointBonus(selectedAncestry, 1) + toughFeatHitPointBonus(character.feats, 1));
     setLevelUpChoice("abilities");
     setLevelUpAbilities([selectedClass.primaryAbility, "stamina"]);
     setLevelUpFeatId("");
@@ -1326,7 +1406,7 @@ export function CharacterManager() {
     setLevelUpSelections({});
     setLevelUpFeatId("");
     setLevelUpFeatAbility("");
-    setLevelUpHpGain(Math.max(1, Math.floor(definition.hitDie / 2) + 1 + abilityModifier(character.abilities.stamina)));
+    setLevelUpHpGain(Math.max(1, Math.floor(definition.hitDie / 2) + 1 + abilityModifier(character.abilities.stamina)) + ancestryHitPointBonus(selectedAncestry, 1) + toughFeatHitPointBonus(character.feats, 1));
   }
 
   function advancementOptions(prompt: (typeof advancementPrompts)[number]) {
@@ -1383,6 +1463,17 @@ export function CharacterManager() {
     const chosenSpellIds = choiceRecords.filter((choice) => choice.kind === "spell").flatMap((choice) => choice.selections);
     const chosenFeats = feats.filter((feat) => chosenFeatIds.includes(feat.id) && !character.feats.some((known) => known.id === feat.id));
     const chosenSpells = spells.filter((spell) => chosenSpellIds.includes(spell.id) && !character.spells.some((known) => known.id === spell.id)).map((spell) => ({ ...spell, prepared: true, className: selectedLevelUpClass.name }));
+    const ancestryGrant = ancestryMagicGrant(selectedAncestry, nextLevel);
+    const ancestryMagicChoice = ancestryGrant ? character.featSpellcastingChoices.find((choice) => choice.featId === ancestryGrant.sourceId) : undefined;
+    const ancestrySpells = ancestryGrant ? spells.filter((spell) => ancestryGrant.spellIds.includes(spell.id)).map((spell) => ({ ...spell, prepared: true, sourceFeatId: ancestryGrant.sourceId, castingAbility: ancestryMagicChoice?.ability })) : [];
+    const featSpellcastingChoices = ancestryGrant && ancestryMagicChoice ? [
+      ...character.featSpellcastingChoices.filter((choice) => choice.featId !== ancestryGrant.sourceId),
+      {
+        ...ancestryMagicChoice,
+        cantripIds: ancestrySpells.filter((spell) => spell.level === 0).map((spell) => spell.id),
+        levelOneSpellId: ancestrySpells.find((spell) => spell.level === 1)?.id,
+      },
+    ] : character.featSpellcastingChoices;
     const progressionSlots = syncMulticlassSpellSlots(character.spellSlots, classLevels);
     const hitDiceByClass = character.hitDiceByClass.some((pool) => pool.className === selectedLevelUpClass.name)
       ? character.hitDiceByClass.map((pool) => pool.className === selectedLevelUpClass.name ? { ...pool, die: selectedLevelUpClass.hitDie, total: pool.total + 1 } : pool)
@@ -1408,9 +1499,10 @@ export function CharacterManager() {
       weaponMasteries: [...new Set([...character.weaponMasteries, ...chosenMasteries])],
       advancementChoices: [...character.advancementChoices.filter((choice) => !(choice.level === nextLevel && choiceRecords.some((record) => record.featureId === choice.featureId && record.kind === choice.kind))), ...choiceRecords],
       resources: syncMulticlassResources(character.resources, classLevels, abilities),
+      featSpellcastingChoices,
       ...(progressionSlots ? { spellSlots: progressionSlots } : {}),
       feats: uniqueById([...character.feats, ...(selectedFeat && !character.feats.some((feat) => feat.id === selectedFeat.id) ? [selectedFeat] : []), ...chosenFeats]),
-      spells: uniqueById([...character.spells, ...chosenSpells]),
+      spells: uniqueById([...character.spells, ...chosenSpells, ...ancestrySpells]),
       features: [...character.features, ...[...newFeatures, ...newSubclassFeatures].filter((feature) => !character.features.some((existing) => existing.name === feature.name))],
       advancementHistory: [...character.advancementHistory, {
         id: crypto.randomUUID(), createdAt: new Date().toISOString(), totalLevel: nextLevel,
@@ -1953,7 +2045,7 @@ export function CharacterManager() {
                 <button className="text-button" onClick={() => document.getElementById("character-features")?.scrollIntoView({ behavior: "smooth", block: "start" })}>View all features <span>→</span></button>
               </div>
             </CollapsiblePanel>
-            {creationSetupVisible && <CreationGuide key={`creation-guide-${character.id}`} character={character} patchCharacter={patchCharacter} background={selectedBackground} feats={feats} equipment={equipment} campaignProfile={characterCampaignProfile} locked={creationLocked} />}
+            {creationSetupVisible && <CreationGuide key={`creation-guide-${character.id}`} character={character} patchCharacter={patchCharacter} ancestry={selectedAncestry} background={selectedBackground} feats={feats} spells={spells} equipment={equipment} campaignProfile={characterCampaignProfile} locked={creationLocked} />}
             <AdvancementPanel character={character} onRollback={rollbackLatestAdvancement} />
           </div>
         )}

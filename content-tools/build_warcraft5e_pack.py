@@ -282,6 +282,10 @@ SUBCLASS_OVERVIEWS = {
 }
 
 ANCESTRY_TRAIT_DESCRIPTIONS = {
+    "dwarf-stonecunning": (
+        "As a Bonus Action, you gain Tremorsense with a range of 60 feet for 10 minutes. You must be on a stone surface or touching a stone surface to use this Tremorsense. The stone can be natural or worked. "
+        "You can use this Bonus Action a number of times equal to your Proficiency Bonus, and you regain all expended uses when you finish a Long Rest."
+    ),
     "elf-elven-lineage": (
         "You know Minor Magic. Whenever you finish a Long Rest, you can replace that cantrip with another cantrip from the Mage spell list. "
         "At level 3, you always have Detect Magic prepared. At level 5, you always have Misty Step prepared. You can cast each lineage spell once without a spell slot, regaining that use when you finish a Long Rest, and you can also cast it with your available spell slots. Choose Intellect, Spirit, or Charisma as the spellcasting ability for these spells."
@@ -356,6 +360,10 @@ TRUNCATED_FEAT_IDS = {
 }
 
 FEAT_TEXT_OVERRIDES = {
+    "skilled": (
+        "Skill Proficiencies: You gain proficiency in any combination of three skills or tools of your choice. "
+        "Repeatable: You can take this feat more than once."
+    ),
     "telepathic": (
         "Ability Score Increase: Increase your Intellect, Spirit, or Charisma score by 1, to a maximum of 20. "
         "Telepathic Utterance: You can speak telepathically to a creature you can see within 60 feet. Your message uses a language you know, and the creature understands only if it knows that language; this feature doesn't let it reply telepathically. "

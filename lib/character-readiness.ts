@@ -1,4 +1,4 @@
-import { classTrainingFor, featPrerequisiteIssues, preparedSpellLimitFor, progressionSpellSlots, spellcastingAbilityForClass, spellListsGrantedByFeats, spellMatchesLists, startingSpellRequirementsFor } from "./character-rules";
+import { classTrainingFor, featPrerequisiteIssues, preparedSpellLimitFor, progressionSpellSlots, spellcastingAbilityForClass, spellListsGrantedByFeats, spellMatchesLists, startingHitPoints, startingSpellRequirementsFor } from "./character-rules";
 import type {
   AncestryDefinition,
   BackgroundDefinition,
@@ -40,6 +40,10 @@ function push(issues: ReadinessIssue[], severity: ReadinessSeverity, id: string,
   issues.push({ id, severity, title, detail });
 }
 
+function ancestryTraitChoiceId(trait: AncestryDefinition["traits"][number]) {
+  return trait.id ?? `ancestry-trait-${trait.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
 export function evaluateCharacterReadiness(character: CharacterData, context: CharacterReadinessContext): CharacterReadinessReport {
   const issues: ReadinessIssue[] = [];
   const selectedAncestry = context.ancestries.find((entry) => entry.name === character.ancestry);
@@ -55,6 +59,43 @@ export function evaluateCharacterReadiness(character: CharacterData, context: Ch
   else if (!primaryClass) push(issues, "error", "identity-class-missing", "Class content is unavailable", `${character.className} is not present in the enabled campaign content.`);
   if (!character.background) push(issues, "error", "identity-background", "Choose a background", "A background is required.");
   else if (!selectedBackground) push(issues, "error", "identity-background-missing", "Background content is unavailable", `${character.background} is not present in the enabled campaign content.`);
+
+  if (selectedAncestry) {
+    const skillTrait = selectedAncestry.traits.find((trait) => trait.name === "Skillful" || trait.name === "Keen Senses");
+    if (skillTrait) {
+      const featureId = ancestryTraitChoiceId(skillTrait);
+      const choice = character.advancementChoices.find((entry) => entry.featureId === featureId && entry.level === 1)?.selections[0];
+      const allowed = skillTrait.name === "Keen Senses" ? ["Insight", "Perception", "Survival"] : null;
+      if (!choice || (allowed && !allowed.includes(choice)) || !character.skillProficiencies.includes(choice)) push(issues, "error", `ancestry-skill-${featureId}`, `Complete ${skillTrait.name}`, allowed ? `Choose Insight, Perception, or Survival as the proficiency granted by ${skillTrait.name}.` : `Choose the skill proficiency granted by ${skillTrait.name}.`);
+    }
+    const featTrait = selectedAncestry.traits.find((trait) => trait.name === "Versatile");
+    if (featTrait) {
+      const featureId = ancestryTraitChoiceId(featTrait);
+      const featId = character.advancementChoices.find((entry) => entry.featureId === featureId && entry.level === 1)?.selections[0];
+      const selectedFeat = context.feats.find((feat) => feat.id === featId && feat.category.toLowerCase() === "origin");
+      if (!selectedFeat || !character.feats.some((feat) => feat.id === selectedFeat.id) || selectedFeat.id === selectedBackground?.featId) push(issues, "error", `ancestry-feat-${featureId}`, "Choose the Versatile Origin feat", "Human Versatile grants one Origin feat in addition to the background feat; choose a different feat from the one granted by the background.");
+      else if (["skilled", "crafter", "musician"].includes(selectedFeat.id)) {
+        const selections = character.advancementChoices.find((entry) => entry.featureId === `origin-feat-${selectedFeat.id}` && entry.level === 1)?.selections ?? [];
+        if (selections.length !== 3 || new Set(selections).size !== 3) push(issues, "error", `ancestry-feat-options-${selectedFeat.id}`, `Complete ${selectedFeat.name}`, `Choose all three proficiencies granted by ${selectedFeat.name}.`);
+      }
+    }
+    const magicTrait = selectedAncestry.traits.find((trait) => trait.name === "High Elf Lineage" || trait.name === "Rock Gnome Lineage");
+    if (magicTrait) {
+      const featureId = ancestryTraitChoiceId(magicTrait);
+      const choice = character.featSpellcastingChoices.find((entry) => entry.featId === featureId);
+      const requiredSpellIds = magicTrait.name === "High Elf Lineage" ? ["prestidigitation"] : ["mending", "prestidigitation"];
+      if (magicTrait.name === "High Elf Lineage" && character.level >= 3) requiredSpellIds.push("detect-magic");
+      if (magicTrait.name === "High Elf Lineage" && character.level >= 5) requiredSpellIds.push("misty-step");
+      const complete = Boolean(choice?.ability && ["intellect", "spirit", "charisma"].includes(choice.ability) && requiredSpellIds.every((id) => character.spells.some((spell) => spell.id === id && spell.sourceFeatId === featureId && spell.castingAbility === choice.ability)));
+      if (!complete) push(issues, "error", `ancestry-magic-${featureId}`, `Complete ${magicTrait.name}`, "Choose the ancestry spellcasting ability and confirm its granted cantrips are recorded.");
+    }
+    if (selectedAncestry.traits.some((trait) => trait.name === "Dwarven Resilience") && !character.damageResistances.some((entry) => entry.toLowerCase() === "poison")) push(issues, "error", "ancestry-dwarf-poison", "Add Dwarven Resilience", "Dwarven Resilience should add Poison damage resistance to the living sheet.");
+    if (primaryClass && character.level === 1 && selectedAncestry.traits.some((trait) => trait.name === "Dwarven Toughness")) {
+      const toughBonus = character.feats.some((feat) => feat.id === "tough") ? 2 : 0;
+      const expected = startingHitPoints(primaryClass.hitDie, character.abilities.stamina) + 1 + toughBonus;
+      if (character.maxHp !== expected) push(issues, "error", "ancestry-dwarf-hp", "Apply Dwarven Toughness", `Level-one maximum Hit Points should be ${expected}, including Dwarven Toughness.`);
+    }
+  }
 
   if (!character.abilityScoresConfirmed) push(issues, "error", "abilities-unconfirmed", "Review the ability scores", "Confirm the completed ability assignment in Guided Setup.");
   if (character.abilityScoreMethod === "point-buy") {
