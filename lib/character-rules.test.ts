@@ -19,6 +19,7 @@ import {
   spellListsGrantedByFeats,
   spellMatchesLists,
   spellSaveAbility,
+  startingHitPoints,
   startingSpellRequirementsFor,
   syncEffectConditions,
 } from "./character-rules";
@@ -26,6 +27,12 @@ import { newCharacter } from "../src/character-manager";
 import type { SpellDefinition } from "./types";
 
 describe("living sheet rules", () => {
+  it("includes the current Stamina modifier in level-one hit points", () => {
+    expect(startingHitPoints(10, 13)).toBe(11);
+    expect(startingHitPoints(10, 16)).toBe(13);
+    expect(startingHitPoints(6, 1)).toBe(1);
+  });
+
   it("limits class skills to each class list while allowing Bard flexibility", () => {
     expect(classTrainingFor("Warrior").skillOptions).toContain("Athletics");
     expect(classTrainingFor("Warrior").skillOptions).not.toContain("Arcana");

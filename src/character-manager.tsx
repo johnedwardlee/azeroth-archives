@@ -65,6 +65,7 @@ import {
   syncEffectConditions,
   syncProgressionSpellSlots,
   spellcastingAbilityForClass,
+  startingHitPoints,
 } from "../lib/character-rules";
 import {
   ABILITY_LABELS,
@@ -790,7 +791,18 @@ export function CharacterManager() {
       setStatus("DM review copies are read-only");
       return;
     }
-    setCharacter((current) => ({ ...current, ...patch, updatedAt: new Date().toISOString() }));
+    setCharacter((current) => {
+      const nextLevel = patch.level ?? current.level;
+      const nextFinalizedAt = "finalizedAt" in patch ? patch.finalizedAt : current.finalizedAt;
+      const nextClassName = patch.className ?? current.className;
+      const definition = classes.find((item) => item.name === nextClassName);
+      let hpPatch: Partial<CharacterData> = {};
+      if (patch.abilities && definition && nextLevel === 1 && !nextFinalizedAt) {
+        const maxHp = startingHitPoints(definition.hitDie, patch.abilities.stamina);
+        hpPatch = { maxHp, currentHp: maxHp };
+      }
+      return { ...current, ...patch, ...hpPatch, updatedAt: new Date().toISOString() };
+    });
     setStatus("Unsaved changes");
   }
 
@@ -951,7 +963,7 @@ export function CharacterManager() {
     const classFeatureNames = new Set(classes.flatMap((item) => Object.values(item.levelFeatures).flat().map((feature) => feature.name)));
     const subclassFeatureNames = new Set(classes.flatMap((item) => (item.subclasses ?? []).flatMap((subclass) => Object.values(subclass.levelFeatures).flat().map((feature) => feature.name))));
     const progressionSlots = syncProgressionSpellSlots(character.spellSlots, name, "", character.level);
-    const startingHp = selectedClass && character.level === 1 ? Math.max(1, selectedClass.hitDie + abilityModifier(character.abilities.stamina)) : null;
+    const startingHp = selectedClass && character.level === 1 ? startingHitPoints(selectedClass.hitDie, character.abilities.stamina) : null;
     const retainedSkills = [...new Set([...character.skillProficiencies.filter((skill) => !character.classSkillChoices.includes(skill)), ...(selectedBackground?.skills ?? [])])];
     const fightingStyleIds = new Set(feats.filter((feat) => feat.category.toLowerCase() === "fighting style").map((feat) => feat.id));
     patchCharacter({

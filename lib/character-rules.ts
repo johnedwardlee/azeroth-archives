@@ -27,6 +27,10 @@ const incapacitatingConditions = new Set(["incapacitated", "paralyzed", "petrifi
 export const DAMAGE_TYPES = ["Acid", "Bludgeoning", "Cold", "Fire", "Force", "Lightning", "Necrotic", "Piercing", "Poison", "Psychic", "Radiant", "Slashing", "Thunder"];
 export const METAMAGIC_OPTIONS = ["Careful Spell", "Distant Spell", "Empowered Spell", "Extended Spell", "Heightened Spell", "Quickened Spell", "Seeking Spell", "Subtle Spell", "Transmuted Spell", "Twinned Spell"];
 
+export function startingHitPoints(hitDie: number, staminaScore: number) {
+  return Math.max(1, hitDie + abilityModifier(staminaScore));
+}
+
 export function featAbilityIncrease(feat?: FeatDefinition) {
   if (!feat) return null;
   const sentence = feat.description.match(/Ability Score Increase:\s*([^.]*)\./i)?.[1] ?? "";
