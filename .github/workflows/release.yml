@@ -51,6 +51,9 @@ jobs:
 
       - name: Build Windows release
         run: pnpm release:win
+        env:
+          AZEROTH_SUPABASE_URL: ${{ secrets.AZEROTH_SUPABASE_URL }}
+          AZEROTH_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.AZEROTH_SUPABASE_PUBLISHABLE_KEY }}
 
       - name: Create installer checksum
         shell: pwsh

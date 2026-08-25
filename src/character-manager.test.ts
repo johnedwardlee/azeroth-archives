@@ -56,6 +56,16 @@ describe("character save migrations", () => {
     expect(store.campaignProfiles).toEqual([]);
     expect(store.onboardingCompleted).toBe(true);
     expect(store.appRole).toBe("player");
+    expect(store.syncLinks).toEqual([]);
+    expect(store.syncOutbox).toEqual([]);
+  });
+
+  it("adds empty live-sync state when migrating a version-five library", () => {
+    const store = migrateOfflineStore({ version: 5, characters: [{ id: "hero", name: "Hero" }], packs: [], disabledPackIds: [], campaignProfiles: [], onboardingCompleted: true, appRole: "player" });
+    expect(store.version).toBe(CURRENT_STORE_VERSION);
+    expect(store.characters).toHaveLength(1);
+    expect(store.syncLinks).toEqual([]);
+    expect(store.syncOutbox).toEqual([]);
   });
 
   it("rejects stores created by a newer application version", () => {

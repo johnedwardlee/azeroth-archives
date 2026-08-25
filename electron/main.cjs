@@ -1,11 +1,13 @@
-const { app, BrowserWindow, dialog, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { assertContentPack } = require("./content-validation.cjs");
 const { createStorage } = require("./storage.cjs");
+const syncConfig = require("./sync-config.cjs");
+const { createLiveSync } = require("./live-sync.cjs");
+const { isAllowedNetworkRequest } = require("./network-policy.cjs");
 
-const UPDATE_HOSTS = new Set(["api.github.com", "github.com"]);
 let updateStatus = { state: "idle", version: null, percent: 0, message: "Updates are checked automatically." };
 
 function publishUpdateStatus(patch) {
@@ -13,25 +15,20 @@ function publishUpdateStatus(patch) {
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send("updates:status", updateStatus);
 }
 
-function isAllowedNetworkRequest(requestUrl) {
-  const devUrl = process.env.AZEROTH_DEV_URL;
-  if (devUrl && requestUrl.startsWith(devUrl)) return true;
-
-  try {
-    const url = new URL(requestUrl);
-    return (
-      app.isPackaged &&
-      url.protocol === "https:" &&
-      (UPDATE_HOSTS.has(url.hostname) || url.hostname.endsWith(".githubusercontent.com"))
-    );
-  } catch {
-    return false;
-  }
-}
-
 const storage = createStorage({
   getUserDataPath: () => app.getPath("userData"),
   validatePack: assertContentPack,
+});
+
+function publishLiveSyncEvent(event) {
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send("live-sync:event", event);
+}
+
+const liveSync = createLiveSync({
+  getUserDataPath: () => app.getPath("userData"),
+  safeStorage,
+  config: syncConfig,
+  onEvent: publishLiveSyncEvent,
 });
 
 ipcMain.handle("storage:load", () => storage.load());
@@ -41,7 +38,25 @@ ipcMain.handle("storage:save-pack", (_event, pack) => storage.savePack(pack));
 ipcMain.handle("storage:delete-pack", (_event, id) => storage.deletePack(id));
 ipcMain.handle("storage:set-pack-enabled", (_event, id, enabled) => storage.setPackEnabled(id, enabled));
 ipcMain.handle("storage:save-campaign-state", (_event, campaignState) => storage.saveCampaignState(campaignState));
+ipcMain.handle("storage:save-sync-state", (_event, syncState) => storage.saveSyncState(syncState));
 ipcMain.handle("storage:replace", (_event, replacement) => storage.replaceStore(replacement));
+ipcMain.handle("live-sync:status", () => liveSync.status());
+ipcMain.handle("live-sync:request-dm-link", (_event, email) => liveSync.requestDmMagicLink(email));
+ipcMain.handle("live-sync:sign-out", () => liveSync.signOut());
+ipcMain.handle("live-sync:list-campaigns", () => liveSync.listCampaigns());
+ipcMain.handle("live-sync:create-campaign", (_event, name) => liveSync.createCampaign(name));
+ipcMain.handle("live-sync:create-invitation", (_event, campaignId, characterId, validHours) => liveSync.createInvitation(campaignId, characterId, validHours));
+ipcMain.handle("live-sync:redeem-invitation", (_event, code, character, playerName) => {
+  const { portraitDataUrl: _portraitDataUrl, readOnlyReview: _readOnlyReview, reviewImportedAt: _reviewImportedAt, ...syncCharacter } = character;
+  return liveSync.redeemInvitation(code, syncCharacter, playerName);
+});
+ipcMain.handle("live-sync:list-members", (_event, campaignId) => liveSync.listMembers(campaignId));
+ipcMain.handle("live-sync:list-characters", (_event, campaignId) => liveSync.listCharacters(campaignId));
+ipcMain.handle("live-sync:apply-mutation", (_event, mutation) => liveSync.applyMutation(mutation));
+ipcMain.handle("live-sync:record-roll", (_event, roll) => liveSync.recordRoll(roll));
+ipcMain.handle("live-sync:list-rolls", (_event, campaignId) => liveSync.listRolls(campaignId));
+ipcMain.handle("live-sync:subscribe", (_event, campaignId, presence, characterId) => liveSync.subscribe(campaignId, presence, characterId));
+ipcMain.handle("live-sync:unsubscribe", () => liveSync.unsubscribe());
 
 ipcMain.handle("app:info", () => ({
   version: app.getVersion(),
@@ -188,26 +203,58 @@ function configureAutoUpdater() {
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
+let pendingAuthUrl = process.argv.find((argument) => argument.startsWith("azeroth-archives://"));
+
+function focusMainWindow() {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (!window) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+async function handleAuthUrl(authUrl) {
+  if (!authUrl?.startsWith("azeroth-archives://")) return;
+  try {
+    await liveSync.handleAuthCallback(authUrl);
+  } catch (error) {
+    publishLiveSyncEvent({ type: "auth-error", message: error instanceof Error ? error.message : "DM sign-in failed." });
+  }
+  focusMainWindow();
+}
 
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    const window = BrowserWindow.getAllWindows()[0];
-    if (!window) return;
-    if (window.isMinimized()) window.restore();
-    window.show();
-    window.focus();
+  if (process.defaultApp && process.argv[1]) app.setAsDefaultProtocolClient("azeroth-archives", process.execPath, [path.resolve(process.argv[1])]);
+  else app.setAsDefaultProtocolClient("azeroth-archives");
+
+  app.on("second-instance", (_event, commandLine) => {
+    const authUrl = commandLine.find((argument) => argument.startsWith("azeroth-archives://"));
+    if (authUrl) handleAuthUrl(authUrl);
+    else focusMainWindow();
   });
 
-  app.whenReady().then(() => {
+  app.on("open-url", (event, authUrl) => {
+    event.preventDefault();
+    if (app.isReady()) handleAuthUrl(authUrl);
+    else pendingAuthUrl = authUrl;
+  });
+
+  app.whenReady().then(async () => {
+    await liveSync.initialize();
     session.defaultSession.webRequest.onBeforeRequest(
-      { urls: ["http://*/*", "https://*/*"] },
+      { urls: ["http://*/*", "https://*/*", "ws://*/*", "wss://*/*"] },
       (details, callback) => {
-        callback({ cancel: !isAllowedNetworkRequest(details.url) });
+        callback({ cancel: !isAllowedNetworkRequest(details.url, { devUrl: process.env.AZEROTH_DEV_URL, packaged: app.isPackaged, supabaseUrl: syncConfig.supabaseUrl }) });
       },
     );
     createWindow();
+    if (pendingAuthUrl) {
+      const authUrl = pendingAuthUrl;
+      pendingAuthUrl = undefined;
+      await handleAuthUrl(authUrl);
+    }
     configureAutoUpdater();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

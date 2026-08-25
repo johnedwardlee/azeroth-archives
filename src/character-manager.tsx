@@ -2,6 +2,7 @@
 
 import {
   BookOpen,
+  Cloud,
   Copy,
   Download,
   Eye,
@@ -39,6 +40,8 @@ import { ContentPackWorkshop } from "./content-pack-workshop";
 import { CampaignPanel } from "./campaign-panel";
 import { Onboarding } from "./onboarding";
 import { ReadinessPanel } from "./readiness-panel";
+import { LiveSyncPanel } from "./live-sync-panel";
+import { DmPartyWorkspace } from "./dm-party-workspace";
 import { CollapsiblePanel, setVisiblePanelsExpanded } from "./collapsible-panel";
 import { buildCharacterPdf, type CharacterPdfSection } from "./character-pdf";
 import bundledWarcraftPackJson from "../content-packs/warcraft5e-campaign.w5e?raw";
@@ -47,6 +50,7 @@ import { assertContentPack, contentPackValidationError } from "../lib/content-va
 import { normalizeCampaignProfile, parseCampaignProfileFile, serializeCampaignProfile } from "../lib/campaign-profile";
 import { evaluateCharacterReadiness } from "../lib/character-readiness";
 import { createDmReviewExport } from "../lib/dm-review";
+import { acknowledgeSyncEntry, createCharacterMutation, createSharedRollEvent, dmMutationGuard, enqueueSyncEntry, mergeRemoteCharacter, type DmMutationIntent, type LocalRollEvent } from "../lib/live-sync";
 import {
   calculateArmorClass,
   calculateEffectiveSpeed,
@@ -80,17 +84,23 @@ import {
   type CampaignProfile,
   type CharacterData,
   type CharacterClassLevel,
+  type CharacterSyncLink,
   type ClassDefinition,
   type ContentPack,
+  type LiveCampaign,
+  type LiveCampaignMember,
+  type LiveSyncStatus,
   type RulesFeature,
   type SpellcastingProfile,
+  type SharedRollEvent,
+  type SyncOutboxEntry,
 } from "../lib/types";
 
-type Tab = "encounter" | "character" | "spellbook" | "inventory" | "companions" | "journal";
-export const CURRENT_STORE_VERSION = 5 as const;
+type Tab = "party" | "encounter" | "character" | "spellbook" | "inventory" | "companions" | "journal";
+export const CURRENT_STORE_VERSION = 6 as const;
 export const CURRENT_CHARACTER_SCHEMA_VERSION = 6 as const;
 export type OfflineStore = {
-  version: 5;
+  version: 6;
   characters: CharacterData[];
   packs: ContentPack[];
   disabledPackIds: string[];
@@ -98,6 +108,8 @@ export type OfflineStore = {
   activeCampaignProfileId?: string;
   onboardingCompleted: boolean;
   appRole: AppRole;
+  syncLinks: CharacterSyncLink[];
+  syncOutbox: SyncOutboxEntry[];
   recovery?: { restoredFrom?: string; migrationBackup?: string };
 };
 
@@ -114,7 +126,7 @@ function readBrowserStore(): OfflineStore {
   try {
     return migrateOfflineStore(JSON.parse(localStorage.getItem(browserStorageKey) ?? "null"));
   } catch {
-    return { version: CURRENT_STORE_VERSION, characters: [], packs: [], disabledPackIds: [], campaignProfiles: [], onboardingCompleted: false, appRole: "player" };
+    return { version: CURRENT_STORE_VERSION, characters: [], packs: [], disabledPackIds: [], campaignProfiles: [], onboardingCompleted: false, appRole: "player", syncLinks: [], syncOutbox: [] };
   }
 }
 
@@ -513,9 +525,16 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
   };
 }
 
+function normalizeSyncedCharacter(value: Partial<CharacterData>): CharacterData {
+  if (typeof value.schemaVersion === "number" && value.schemaVersion > CURRENT_CHARACTER_SCHEMA_VERSION) {
+    throw new Error("This live character was created by a newer version of Azeroth Archives.");
+  }
+  return normalizeCharacter(value);
+}
+
 export function migrateOfflineStore(value: unknown): OfflineStore {
   const parsed = value && typeof value === "object"
-    ? value as { version?: unknown; characters?: unknown; packs?: unknown; disabledPackIds?: unknown; campaignProfiles?: unknown; activeCampaignProfileId?: unknown; onboardingCompleted?: unknown; appRole?: unknown; recovery?: unknown }
+    ? value as { version?: unknown; characters?: unknown; packs?: unknown; disabledPackIds?: unknown; campaignProfiles?: unknown; activeCampaignProfileId?: unknown; onboardingCompleted?: unknown; appRole?: unknown; syncLinks?: unknown; syncOutbox?: unknown; recovery?: unknown }
     : {};
   const sourceVersion = Number.isInteger(parsed.version) ? Number(parsed.version) : 1;
   if (sourceVersion > CURRENT_STORE_VERSION) throw new Error("This character library was created by a newer version of Azeroth Archives.");
@@ -529,11 +548,14 @@ export function migrateOfflineStore(value: unknown): OfflineStore {
     activeCampaignProfileId: typeof parsed.activeCampaignProfileId === "string" ? parsed.activeCampaignProfileId : undefined,
     onboardingCompleted: typeof parsed.onboardingCompleted === "boolean" ? parsed.onboardingCompleted : false,
     appRole: parsed.appRole === "dm" ? "dm" as const : "player" as const,
+    syncLinks: Array.isArray(parsed.syncLinks) ? parsed.syncLinks : [],
+    syncOutbox: Array.isArray(parsed.syncOutbox) ? parsed.syncOutbox : [],
   };
   if (migrated.version === 1) migrated = { ...migrated, version: 2, packs: Array.isArray(migrated.packs) ? migrated.packs : [] };
   if (migrated.version === 2) migrated = { ...migrated, version: 3 };
   if (migrated.version === 3) migrated = { ...migrated, version: 4, disabledPackIds: [] };
   if (migrated.version === 4) migrated = { ...migrated, version: 5, campaignProfiles: [], activeCampaignProfileId: undefined, onboardingCompleted: migrated.characters.length > 0, appRole: "player" as const };
+  if (migrated.version === 5) migrated = { ...migrated, version: 6, syncLinks: [], syncOutbox: [] };
 
   const characters = Array.isArray(migrated.characters)
     ? migrated.characters.filter((item): item is Partial<CharacterData> => Boolean(item) && typeof item === "object").map(normalizeCharacter)
@@ -552,7 +574,10 @@ export function migrateOfflineStore(value: unknown): OfflineStore {
         ...(typeof recoverySource.migrationBackup === "string" ? { migrationBackup: recoverySource.migrationBackup } : {}),
       }
     : undefined;
-  return { version: CURRENT_STORE_VERSION, characters, packs, disabledPackIds: migrated.disabledPackIds, campaignProfiles, activeCampaignProfileId, onboardingCompleted: Boolean(migrated.onboardingCompleted), appRole: migrated.appRole === "dm" ? "dm" : "player", ...(recovery ? { recovery } : {}) };
+  const characterIds = new Set(characters.map((entry) => entry.id));
+  const syncLinks = migrated.syncLinks.filter((entry): entry is CharacterSyncLink => Boolean(entry) && typeof entry === "object" && typeof (entry as CharacterSyncLink).characterId === "string" && characterIds.has((entry as CharacterSyncLink).characterId) && typeof (entry as CharacterSyncLink).campaignId === "string" && typeof (entry as CharacterSyncLink).revision === "number");
+  const syncOutbox = migrated.syncOutbox.filter((entry): entry is SyncOutboxEntry => Boolean(entry) && typeof entry === "object" && typeof (entry as SyncOutboxEntry).id === "string" && typeof (entry as SyncOutboxEntry).characterId === "string" && characterIds.has((entry as SyncOutboxEntry).characterId));
+  return { version: CURRENT_STORE_VERSION, characters, packs, disabledPackIds: migrated.disabledPackIds, campaignProfiles, activeCampaignProfileId, onboardingCompleted: Boolean(migrated.onboardingCompleted), appRole: migrated.appRole === "dm" ? "dm" : "player", syncLinks, syncOutbox, ...(recovery ? { recovery } : {}) };
 }
 
 function uniqueById<T extends { id: string }>(items: T[]) {
@@ -643,6 +668,7 @@ export function CharacterManager() {
   const [showSettings, setShowSettings] = useState(false);
   const [showCampaigns, setShowCampaigns] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showLiveSync, setShowLiveSync] = useState(false);
   const [showCompletedSetup, setShowCompletedSetup] = useState(false);
   const [menuCharacterId, setMenuCharacterId] = useState<string | null>(null);
   const [showLevelUp, setShowLevelUp] = useState(false);
@@ -655,14 +681,33 @@ export function CharacterManager() {
   const [levelUpClassName, setLevelUpClassName] = useState("");
   const [levelUpSubclassName, setLevelUpSubclassName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<CharacterData | null>(null);
+  const [liveSyncStatus, setLiveSyncStatus] = useState<LiveSyncStatus>({ configured: false, connection: "unconfigured", authenticated: false, anonymous: false, message: "Live sync is not configured in this build." });
+  const [syncLinks, setSyncLinks] = useState<CharacterSyncLink[]>([]);
+  const [syncOutbox, setSyncOutbox] = useState<SyncOutboxEntry[]>([]);
+  const [liveCampaigns, setLiveCampaigns] = useState<LiveCampaign[]>([]);
+  const [activeLiveCampaignId, setActiveLiveCampaignId] = useState<string>();
+  const [liveCampaignMembers, setLiveCampaignMembers] = useState<LiveCampaignMember[]>([]);
+  const [liveRolls, setLiveRolls] = useState<SharedRollEvent[]>([]);
+  const [livePresence, setLivePresence] = useState<Record<string, Array<Record<string, unknown>>>>({});
+  const [dmPartyCharacterId, setDmPartyCharacterId] = useState<string>();
+  const [dmFullEditCharacterId, setDmFullEditCharacterId] = useState<string>();
   const fileInput = useRef<HTMLInputElement>(null);
   const characterFileInput = useRef<HTMLInputElement>(null);
   const fullBackupFileInput = useRef<HTMLInputElement>(null);
   const campaignFileInput = useRef<HTMLInputElement>(null);
   const portraitFileInput = useRef<HTMLInputElement>(null);
   const characterRef = useRef(character);
+  const charactersRef = useRef(characters);
+  const syncLinksRef = useRef(syncLinks);
+  const syncOutboxRef = useRef(syncOutbox);
+  const liveSyncStatusRef = useRef(liveSyncStatus);
+  const syncFlushActive = useRef(false);
   const deletedCharacterIds = useRef(new Set<string>());
   characterRef.current = character;
+  charactersRef.current = characters;
+  syncLinksRef.current = syncLinks;
+  syncOutboxRef.current = syncOutbox;
+  liveSyncStatusRef.current = liveSyncStatus;
 
   const activeCampaignProfile = useMemo(() => campaignProfiles.find((profile) => profile.id === activeCampaignProfileId), [campaignProfiles, activeCampaignProfileId]);
   const characterCampaignProfile = useMemo(() => campaignProfiles.find((profile) => profile.id === character.campaignProfileId) ?? activeCampaignProfile, [campaignProfiles, character.campaignProfileId, activeCampaignProfile]);
@@ -752,6 +797,15 @@ export function CharacterManager() {
     const sourceFeat = character.feats.find((feat) => feat.id === choice.featId);
     return [{ className: sourceFeat?.id === "magic-initiate" ? `Magic Initiate (${choice.spellList})` : `${character.ancestry} Magic`, ability: choice.ability, preparedLimit: null, sourceFeatId: choice.featId, spellList: choice.spellList }];
   })], [character.classLevels, character.featSpellcastingChoices, character.feats, character.ancestry, classes]);
+  const currentSyncLink = syncLinks.find((link) => link.characterId === character.id);
+  const currentDmLiveLocked = currentSyncLink?.role === "dm" && dmFullEditCharacterId !== character.id;
+  const partySyncLinks = syncLinks.filter((link) => link.role === "dm" && link.campaignId === activeLiveCampaignId);
+  const partyCharacters = partySyncLinks.flatMap((link) => {
+    const entry = characters.find((candidate) => candidate.id === link.characterId);
+    return entry ? [entry] : [];
+  });
+  const partyOwnerByCharacterId = new Map(partySyncLinks.flatMap((link) => link.ownerUserId ? [[link.characterId, link.ownerUserId] as const] : []));
+  const onlineLiveUserIds = new Set(Object.values(livePresence).flatMap((entries) => entries.flatMap((entry) => typeof entry.userId === "string" ? [entry.userId] : [])));
   const readinessReport = useMemo(() => evaluateCharacterReadiness(character, {
     ancestries,
     classes,
@@ -761,7 +815,7 @@ export function CharacterManager() {
     loadedPackIds: enabledContent.map((pack) => pack.pack.id),
     campaignProfile: characterCampaignProfile,
   }), [character, ancestries, classes, backgrounds, feats, enabledContent, characterCampaignProfile]);
-  const creationLocked = Boolean(character.finalizedAt || character.readOnlyReview);
+  const creationLocked = Boolean(character.readOnlyReview || currentDmLiveLocked || (character.finalizedAt && currentSyncLink?.role !== "dm"));
   const creationSetupVisible = !character.finalizedAt || showCompletedSetup;
   useEffect(() => {
     if (!storeLoaded || character.finalizedAt || character.readOnlyReview || !selectedAncestry) return;
@@ -793,6 +847,8 @@ export function CharacterManager() {
       setActiveCampaignProfileId(store.activeCampaignProfileId);
       setOnboardingCompleted(store.onboardingCompleted);
       setAppRole(store.appRole ?? "player");
+      setSyncLinks(store.syncLinks ?? []);
+      setSyncOutbox(store.syncOutbox ?? []);
       setShowOnboarding(!store.onboardingCompleted);
       setStoreLoaded(true);
       if (store.recovery?.restoredFrom) setStatus(`Recovered data from automatic backup ${store.recovery.restoredFrom}`);
@@ -800,6 +856,53 @@ export function CharacterManager() {
       else setStatus(store.characters.length ? "Saved on this device" : "Create your first hero");
     }).catch(() => { setStatus("Could not read local character data"); setStoreLoaded(true); });
   }, []);
+
+  useEffect(() => {
+    if (!window.azerothDesktop?.getLiveSyncStatus) return;
+    window.azerothDesktop.getLiveSyncStatus().then(setLiveSyncStatus).catch(() => undefined);
+    return window.azerothDesktop.onLiveSyncEvent((event) => {
+      if (event.type === "status") {
+        setLiveSyncStatus(event.status);
+        if (event.status.connection === "live") window.setTimeout(() => flushSyncOutbox(), 0);
+        return;
+      }
+      if (event.type === "auth-error") {
+        setStatus(event.message);
+        return;
+      }
+      if (event.type === "presence") {
+        if (event.campaignId === activeLiveCampaignId) setLivePresence(event.state);
+        return;
+      }
+      const change = (event.payload.payload ?? event.payload) as { table?: string; record?: Record<string, unknown>; old_record?: Record<string, unknown> };
+      const record = change.record;
+      if (!record) return;
+      if (change.table === "character_mutations" && typeof record.character_id === "string" && record.patch && typeof record.patch === "object") {
+        applyRemoteCharacterPatch(record.character_id, record.patch as Partial<CharacterData>);
+        if (typeof record.applied_revision === "number") updateSyncRevision(record.character_id, record.applied_revision);
+        if (typeof record.id === "string") acknowledgeOutbox(record.id);
+        if (record.actor_user_id !== liveSyncStatusRef.current.userId) setStatus("A live character was updated by the DM or player");
+      } else if (change.table === "roll_events") {
+        const roll = remoteRollEvent(record);
+        if (roll) setLiveRolls((current) => [roll, ...current.filter((entry) => entry.id !== roll.id)].slice(0, 500));
+      } else if (change.table === "characters" || change.table === "campaign_members") {
+        window.setTimeout(() => event.campaignId === activeLiveCampaignId && refreshLiveCampaign(event.campaignId), 0);
+      }
+    });
+  }, [activeLiveCampaignId]);
+
+  useEffect(() => {
+    if (!storeLoaded || !window.azerothDesktop?.saveSyncState) return;
+    const timer = window.setTimeout(() => {
+      window.azerothDesktop?.saveSyncState({ syncLinks, syncOutbox }).catch(() => setStatus("Live-sync queue could not be saved locally"));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [storeLoaded, syncLinks, syncOutbox]);
+
+  useEffect(() => {
+    if (!storeLoaded || !window.azerothDesktop?.getLiveSyncStatus) return;
+    initializeLiveSync().catch((error) => setStatus(error instanceof Error ? error.message : "Live sync could not initialize"));
+  }, [storeLoaded, appRole]);
 
   useEffect(() => {
     if (character.id === "draft") return;
@@ -830,26 +933,275 @@ export function CharacterManager() {
     return () => window.clearTimeout(timer);
   }, [character, status]);
 
-  function patchCharacter(patch: Partial<CharacterData>) {
-    if (characterRef.current.readOnlyReview) {
+  function buildPatchedCharacter(current: CharacterData, patch: Partial<CharacterData>) {
+    const nextLevel = patch.level ?? current.level;
+    const nextFinalizedAt = "finalizedAt" in patch ? patch.finalizedAt : current.finalizedAt;
+    const nextClassName = patch.className ?? current.className;
+    const definition = classes.find((item) => item.name === nextClassName);
+    const nextAncestry = ancestries.find((item) => item.name === (patch.ancestry ?? current.ancestry));
+    const nextFeats = patch.feats ?? current.feats;
+    let hpPatch: Partial<CharacterData> = {};
+    if (patch.abilities && definition && nextLevel === 1 && !nextFinalizedAt) {
+      const maxHp = startingHitPoints(definition.hitDie, patch.abilities.stamina) + ancestryHitPointBonus(nextAncestry, nextLevel) + toughFeatHitPointBonus(nextFeats, nextLevel);
+      hpPatch = { maxHp, currentHp: maxHp };
+    }
+    return { ...current, ...patch, ...hpPatch, updatedAt: new Date().toISOString() };
+  }
+
+  function patchCharacter(patch: Partial<CharacterData>, options: { dmIntent?: DmMutationIntent } = {}) {
+    const current = characterRef.current;
+    if (current.readOnlyReview) {
       setStatus("DM review copies are read-only");
       return;
     }
-    setCharacter((current) => {
-      const nextLevel = patch.level ?? current.level;
-      const nextFinalizedAt = "finalizedAt" in patch ? patch.finalizedAt : current.finalizedAt;
-      const nextClassName = patch.className ?? current.className;
-      const definition = classes.find((item) => item.name === nextClassName);
-      const nextAncestry = ancestries.find((item) => item.name === (patch.ancestry ?? current.ancestry));
-      const nextFeats = patch.feats ?? current.feats;
-      let hpPatch: Partial<CharacterData> = {};
-      if (patch.abilities && definition && nextLevel === 1 && !nextFinalizedAt) {
-        const maxHp = startingHitPoints(definition.hitDie, patch.abilities.stamina) + ancestryHitPointBonus(nextAncestry, nextLevel) + toughFeatHitPointBonus(nextFeats, nextLevel);
-        hpPatch = { maxHp, currentHp: maxHp };
-      }
-      return { ...current, ...patch, ...hpPatch, updatedAt: new Date().toISOString() };
-    });
+    const link = syncLinksRef.current.find((entry) => entry.characterId === current.id);
+    const guard = dmMutationGuard(options.dmIntent ?? "full-character-edit");
+    if (link?.role === "dm" && dmFullEditCharacterId !== current.id && guard !== "always") {
+      setStatus("Enable full editing from the Party tab to change this field");
+      return;
+    }
+    const next = buildPatchedCharacter(current, patch);
+    setCharacter(next);
     setStatus("Unsaved changes");
+    if (link) enqueueLiveSync(createCharacterMutation(link.campaignId, current.id, link.revision, { ...patch, updatedAt: next.updatedAt }));
+  }
+
+  function patchLiveCharacter(characterId: string, patch: Partial<CharacterData>, dmIntent: DmMutationIntent) {
+    if (characterRef.current.id === characterId) {
+      patchCharacter(patch, { dmIntent });
+      return;
+    }
+    const current = charactersRef.current.find((entry) => entry.id === characterId);
+    const link = syncLinksRef.current.find((entry) => entry.characterId === characterId);
+    if (!current || !link) return;
+    const guard = dmMutationGuard(dmIntent);
+    if (link.role === "dm" && dmFullEditCharacterId !== characterId && guard !== "always") {
+      setStatus("Enable full editing from the Party tab to change this field");
+      return;
+    }
+    const next = buildPatchedCharacter(current, patch);
+    setCharacters((entries) => entries.map((entry) => entry.id === characterId ? next : entry));
+    persistCharacter(next).catch(() => setStatus("The live character cache could not be saved"));
+    enqueueLiveSync(createCharacterMutation(link.campaignId, characterId, link.revision, { ...patch, updatedAt: next.updatedAt }));
+    setStatus("Live character updated");
+  }
+
+  function replaceSyncLinks(next: CharacterSyncLink[]) {
+    syncLinksRef.current = next;
+    setSyncLinks(next);
+  }
+
+  function replaceSyncOutbox(next: SyncOutboxEntry[]) {
+    syncOutboxRef.current = next;
+    setSyncOutbox(next);
+  }
+
+  function updateSyncRevision(characterId: string, revision: number) {
+    const next = syncLinksRef.current.map((link) => link.characterId === characterId ? { ...link, revision: Math.max(link.revision, revision), lastSyncedAt: new Date().toISOString() } : link);
+    replaceSyncLinks(next);
+  }
+
+  function acknowledgeOutbox(entryId: string) {
+    replaceSyncOutbox(acknowledgeSyncEntry(syncOutboxRef.current, entryId));
+  }
+
+  function enqueueLiveSync(entry: SyncOutboxEntry) {
+    replaceSyncOutbox(enqueueSyncEntry(syncOutboxRef.current, entry));
+    if (liveSyncStatusRef.current.connection === "live") window.setTimeout(() => flushSyncOutbox(), 0);
+    else setStatus("Saved locally; live-sync changes are queued");
+  }
+
+  async function flushSyncOutbox() {
+    if (syncFlushActive.current || !window.azerothDesktop || liveSyncStatusRef.current.connection !== "live") return;
+    syncFlushActive.current = true;
+    try {
+      while (syncOutboxRef.current.length) {
+        const entry = syncOutboxRef.current[0];
+        if (entry.kind === "character-mutation") {
+          const result = await window.azerothDesktop.applyCharacterMutation(entry);
+          updateSyncRevision(entry.characterId, result.revision);
+          if (result.characterState) applyRemoteCharacterPatch(entry.characterId, result.characterState);
+          if (result.wasConflict) setStatus("Live changes merged with a newer remote revision");
+        } else {
+          await window.azerothDesktop.publishRollEvent(entry);
+        }
+        acknowledgeOutbox(entry.id);
+      }
+      if (liveSyncStatusRef.current.connection === "live") setStatus("All live changes synchronized");
+    } catch (error) {
+      setLiveSyncStatus((current) => ({ ...current, connection: "offline", message: "Connection lost; local changes will retry when live sync reconnects." }));
+      setStatus(error instanceof Error ? error.message : "Live changes remain queued");
+    } finally {
+      syncFlushActive.current = false;
+    }
+  }
+
+  function applyRemoteCharacterPatch(characterId: string, patch: Partial<CharacterData>) {
+    const cached = charactersRef.current.find((entry) => entry.id === characterId);
+    if (!cached) return;
+    let next: CharacterData;
+    try {
+      next = normalizeSyncedCharacter({ ...cached, ...patch, id: cached.id, portraitDataUrl: cached.portraitDataUrl, readOnlyReview: false });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "A live character update was rejected");
+      return;
+    }
+    setCharacters((entries) => entries.map((entry) => entry.id === characterId ? next : entry));
+    if (characterRef.current.id === characterId) setCharacter(next);
+    window.azerothDesktop?.saveCharacter(next).catch(() => setStatus("A remote update could not be cached locally"));
+  }
+
+  function remoteRollEvent(record: Record<string, unknown>): SharedRollEvent | undefined {
+    if (typeof record.id !== "string" || typeof record.campaign_id !== "string" || typeof record.character_id !== "string" || typeof record.actor_name !== "string" || typeof record.label !== "string" || typeof record.total !== "number") return undefined;
+    return createSharedRollEvent({
+      id: record.id,
+      campaignId: record.campaign_id,
+      characterId: record.character_id,
+      actorName: record.actor_name,
+      category: typeof record.category === "string" ? record.category as SharedRollEvent["category"] : "other",
+      label: record.label,
+      formula: typeof record.formula === "string" ? record.formula : "",
+      dice: Array.isArray(record.dice) ? record.dice.filter((die): die is number => typeof die === "number") : [],
+      modifier: typeof record.modifier === "number" ? record.modifier : 0,
+      total: record.total,
+      mode: ["normal", "advantage", "disadvantage"].includes(String(record.mode)) ? record.mode as SharedRollEvent["mode"] : "normal",
+      detail: typeof record.detail === "string" ? record.detail : "",
+      createdAt: typeof record.created_at === "string" ? record.created_at : new Date().toISOString(),
+    });
+  }
+
+  async function initializeLiveSync() {
+    if (!window.azerothDesktop) return;
+    const nextStatus = await window.azerothDesktop.getLiveSyncStatus();
+    setLiveSyncStatus(nextStatus);
+    liveSyncStatusRef.current = nextStatus;
+    if (!nextStatus.configured || !nextStatus.authenticated) return;
+    const campaigns = await window.azerothDesktop.listLiveCampaigns();
+    setLiveCampaigns(campaigns);
+    const linkedCampaignId = syncLinksRef.current.find((link) => link.role === (appRole === "dm" ? "dm" : "player"))?.campaignId;
+    const campaignId = linkedCampaignId ?? campaigns.find((campaign) => campaign.role === appRole)?.id;
+    if (campaignId) await selectLiveCampaign(campaignId, campaigns);
+    if (syncOutboxRef.current.length) await flushSyncOutbox();
+  }
+
+  async function refreshLiveCampaign(campaignId: string, knownCampaigns = liveCampaigns) {
+    if (!window.azerothDesktop) return;
+    const [snapshots, members, rolls] = await Promise.all([
+      window.azerothDesktop.listSyncedCharacters(campaignId),
+      window.azerothDesktop.listCampaignMembers(campaignId),
+      appRole === "dm" ? window.azerothDesktop.listCampaignRolls(campaignId) : Promise.resolve([]),
+    ]);
+    const campaign = knownCampaigns.find((entry) => entry.id === campaignId);
+    const normalized = snapshots.flatMap((snapshot) => {
+      try {
+        const remote = normalizeSyncedCharacter(snapshot.character);
+        const local = charactersRef.current.find((entry) => entry.id === remote.id);
+        return [{ snapshot, character: local ? mergeRemoteCharacter(local, remote) : remote }];
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "A live character snapshot was rejected");
+        return [];
+      }
+    });
+    const remoteIds = new Set(normalized.map((entry) => entry.character.id));
+    const mergedCharacters = [
+      ...normalized.map((entry) => entry.character),
+      ...charactersRef.current.filter((entry) => !remoteIds.has(entry.id)),
+    ];
+    setCharacters(mergedCharacters);
+    charactersRef.current = mergedCharacters;
+    await Promise.all(normalized.map((entry) => window.azerothDesktop?.saveCharacter(entry.character)));
+    const role = appRole === "dm" ? "dm" : "player";
+    const retained = syncLinksRef.current.filter((link) => link.campaignId !== campaignId || !remoteIds.has(link.characterId));
+    const nextLinks = [
+      ...normalized.map(({ snapshot, character: synced }) => ({
+        characterId: synced.id,
+        campaignId,
+        campaignName: campaign?.name ?? syncLinksRef.current.find((link) => link.campaignId === campaignId)?.campaignName ?? "Live campaign",
+        role,
+        ownerUserId: snapshot.ownerUserId,
+        revision: snapshot.revision,
+        linkedAt: syncLinksRef.current.find((link) => link.characterId === synced.id && link.campaignId === campaignId)?.linkedAt ?? new Date().toISOString(),
+        lastSyncedAt: snapshot.updatedAt,
+      } satisfies CharacterSyncLink)),
+      ...retained,
+    ];
+    replaceSyncLinks(nextLinks);
+    setLiveCampaignMembers(members);
+    setLiveRolls(rolls);
+    setDmPartyCharacterId((current) => current && remoteIds.has(current) ? current : normalized[0]?.character.id);
+    if (characterRef.current.id && remoteIds.has(characterRef.current.id)) {
+      const replacement = normalized.find((entry) => entry.character.id === characterRef.current.id)?.character;
+      if (replacement) setCharacter(replacement);
+    }
+  }
+
+  async function selectLiveCampaign(campaignId: string, knownCampaigns = liveCampaigns) {
+    if (!window.azerothDesktop || !campaignId) return;
+    setActiveLiveCampaignId(campaignId);
+    setDmFullEditCharacterId(undefined);
+    await refreshLiveCampaign(campaignId, knownCampaigns);
+    const playerCharacterId = appRole === "player" ? syncLinksRef.current.find((link) => link.campaignId === campaignId && link.role === "player")?.characterId : undefined;
+    await window.azerothDesktop.subscribeLiveCampaign(campaignId, { role: appRole, displayName: appRole === "dm" ? "Dungeon Master" : characterRef.current.playerName || "Player" }, playerCharacterId);
+    if (appRole === "dm") setTab("party");
+  }
+
+  async function requestDmMagicLink(email: string) {
+    if (!window.azerothDesktop) return;
+    setLiveSyncStatus(await window.azerothDesktop.requestDmMagicLink(email));
+  }
+
+  async function createLiveCampaign(name: string) {
+    if (!window.azerothDesktop) return;
+    const campaignId = await window.azerothDesktop.createLiveCampaign(name);
+    const campaigns = await window.azerothDesktop.listLiveCampaigns();
+    setLiveCampaigns(campaigns);
+    await selectLiveCampaign(campaignId, campaigns);
+  }
+
+  async function createLiveInvitation() {
+    if (!window.azerothDesktop || !activeLiveCampaignId) return undefined;
+    return window.azerothDesktop.createCampaignInvitation(activeLiveCampaignId, undefined, 72);
+  }
+
+  async function redeemLiveInvitation(code: string, characterId: string, playerName: string) {
+    if (!window.azerothDesktop) return;
+    const local = charactersRef.current.find((entry) => entry.id === characterId);
+    if (!local) throw new Error("Choose a saved character to link.");
+    const result = await window.azerothDesktop.redeemCampaignInvitation(code, local, playerName);
+    const campaigns = await window.azerothDesktop.listLiveCampaigns();
+    setLiveCampaigns(campaigns);
+    const remote = mergeRemoteCharacter(local, normalizeSyncedCharacter(result.characterState));
+    setCharacters((entries) => [remote, ...entries.filter((entry) => entry.id !== remote.id)]);
+    setCharacter(remote);
+    replaceSyncLinks([{
+      characterId: remote.id,
+      campaignId: result.campaignId,
+      campaignName: campaigns.find((campaign) => campaign.id === result.campaignId)?.name ?? "Live campaign",
+      role: "player",
+      ownerUserId: liveSyncStatusRef.current.userId,
+      revision: result.revision,
+      linkedAt: new Date().toISOString(),
+      lastSyncedAt: new Date().toISOString(),
+    }, ...syncLinksRef.current.filter((link) => link.characterId !== remote.id)]);
+    await persistCharacter(remote);
+    await selectLiveCampaign(result.campaignId, campaigns);
+  }
+
+  async function signOutLiveSync() {
+    if (!window.azerothDesktop) return;
+    setLiveSyncStatus(await window.azerothDesktop.signOutLiveSync());
+    setLiveCampaigns([]);
+    setActiveLiveCampaignId(undefined);
+    setLivePresence({});
+  }
+
+  function publishCharacterRoll(input: LocalRollEvent) {
+    const current = characterRef.current;
+    const link = syncLinksRef.current.find((entry) => entry.characterId === current.id);
+    if (!link) return;
+    const event = createSharedRollEvent({ ...input, campaignId: link.campaignId, characterId: current.id, actorName: current.playerName || current.name });
+    enqueueLiveSync(event);
+    setLiveRolls((entries) => [event, ...entries.filter((entry) => entry.id !== event.id)].slice(0, 500));
   }
 
   function createCampaignDraft() {
@@ -916,6 +1268,7 @@ export function CharacterManager() {
   async function changeAppRole(role: AppRole) {
     try {
       await persistCampaignState(campaignProfiles, activeCampaignProfileId, onboardingCompleted, role);
+      if (role === "player" && tab === "party") setTab(character.finalizedAt ? "encounter" : "character");
       setStatus(role === "dm" ? "DM review mode enabled" : "Player mode enabled");
     } catch {
       setStatus("App role could not be saved");
@@ -1161,6 +1514,10 @@ export function CharacterManager() {
 
   function deleteCharacter(target: CharacterData) {
     setMenuCharacterId(null);
+    if (syncLinksRef.current.some((link) => link.characterId === target.id)) {
+      setStatus("Linked live characters must be unlinked from the campaign before their local cache can be deleted");
+      return;
+    }
     setDeleteTarget(target);
   }
 
@@ -1295,6 +1652,8 @@ export function CharacterManager() {
           activeCampaignProfileId: store.activeCampaignProfileId,
           onboardingCompleted: store.onboardingCompleted,
           appRole: store.appRole,
+          syncLinks: store.syncLinks ?? [],
+          syncOutbox: store.syncOutbox ?? [],
         },
       }, null, 2);
       const filename = `azeroth-archives-full-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -1339,6 +1698,8 @@ export function CharacterManager() {
       setActiveCampaignProfileId(saved.activeCampaignProfileId);
       setOnboardingCompleted(saved.onboardingCompleted);
       setAppRole(saved.appRole);
+      setSyncLinks(saved.syncLinks ?? []);
+      setSyncOutbox(saved.syncOutbox ?? []);
       setShowRoster(false);
       setStatus(`Full backup restored: ${loadedCharacters.length} character${loadedCharacters.length === 1 ? "" : "s"}`);
     } catch {
@@ -1925,10 +2286,11 @@ export function CharacterManager() {
           <span>Offline Warcraft 5E character manager</span>
         </div>
         <div className="topbar-actions">
+          <button className={`button button-quiet live-sync-button sync-${liveSyncStatus.connection}`} onClick={() => setShowLiveSync(true)}><Cloud size={16} /><span>Live sync</span>{syncOutbox.length > 0 && <b>{syncOutbox.length}</b>}</button>
           <button className="button button-quiet" onClick={() => setShowCampaigns(true)}><Flag size={16} /><span>Campaigns</span>{activeCampaignProfile && <b>1</b>}</button>
           <button className="button button-quiet" onClick={() => setShowLibrary(true)}><LibraryBig size={16} /><span>Content library</span><b>{content.length}</b></button>
           <button className="button button-outline" onClick={exportPdf}><Download size={16} /><span>Export PDF</span></button>
-          <button className="button button-primary" onClick={saveCharacter} disabled={saving || Boolean(character.readOnlyReview)}><Save size={16} />{saving ? "Saving" : "Save character"}</button>
+          <button className="button button-primary" onClick={saveCharacter} disabled={saving || Boolean(character.readOnlyReview) || Boolean(currentDmLiveLocked)}><Save size={16} />{saving ? "Saving" : "Save character"}</button>
           <button className="avatar-button" title="Settings, updates, and local data" aria-label="Open settings" onClick={() => setShowSettings(true)}><HardDrive size={19} /></button>
         </div>
       </header>
@@ -1940,9 +2302,9 @@ export function CharacterManager() {
         <div className="character-list">
           {visibleCharacters.map((item, index) => (
             <div key={item.id} className={`character-row ${item.id === character.id ? "active" : ""}`}>
-              <button className="character-row-select" onClick={() => { setCharacter(item); setTab(item.finalizedAt || item.readOnlyReview ? "encounter" : "character"); setMenuCharacterId(null); setShowRoster(false); }}>
+              <button className="character-row-select" onClick={() => { if (dmFullEditCharacterId !== item.id) setDmFullEditCharacterId(undefined); setCharacter(item); setTab(item.finalizedAt || item.readOnlyReview ? "encounter" : "character"); setMenuCharacterId(null); setShowRoster(false); }}>
                 <span className={`mini-portrait tone-${index % 4}`}>{item.portraitDataUrl ? <img src={item.portraitDataUrl} alt="" /> : initials(item.name)}</span>
-                <span><strong>{item.name}{item.readOnlyReview ? " · Review" : item.finalizedAt ? " · Final" : ""}</strong><small>Level {item.level} {item.className}</small></span>
+                <span><strong>{item.name}{syncLinks.some((link) => link.characterId === item.id) ? " · Live" : item.readOnlyReview ? " · Review" : item.finalizedAt ? " · Final" : ""}</strong><small>Level {item.level} {item.className}</small></span>
               </button>
               <button className="character-row-more" aria-label={`Actions for ${item.name}`} aria-expanded={menuCharacterId === item.id} onClick={() => setMenuCharacterId((current) => current === item.id ? null : item.id)}><MoreHorizontal size={16} /></button>
               {menuCharacterId === item.id && <div className="character-actions" role="menu">
@@ -1979,11 +2341,11 @@ export function CharacterManager() {
         <div className="sync-status"><span className={status.includes("not") || status.includes("Could") ? "status-dot warning" : "status-dot"} />{status}</div>
       </aside>
 
-      <section className={`workspace ${character.readOnlyReview ? "review-readonly" : ""}`}>
-        <div className="character-hero">
+      <section className={`workspace ${tab !== "party" && character.readOnlyReview ? "review-readonly" : ""} ${tab !== "party" && currentDmLiveLocked ? "dm-live-readonly" : ""}`}>
+        {tab !== "party" && <div className="character-hero">
           <div className={`portrait-large ${character.portraitDataUrl ? "has-image" : ""}`}>
             {character.portraitDataUrl ? <img src={character.portraitDataUrl} alt={`${character.name || "Character"} portrait`} /> : <span>{initials(character.name)}</span>}
-            <button disabled={Boolean(character.readOnlyReview)} aria-label={character.portraitDataUrl ? "Change portrait" : "Add portrait"} title={character.portraitDataUrl ? "Change portrait" : "Add portrait"} onClick={() => portraitFileInput.current?.click()}><Plus size={14} /></button>
+            <button disabled={Boolean(character.readOnlyReview) || Boolean(currentDmLiveLocked)} aria-label={character.portraitDataUrl ? "Change portrait" : "Add portrait"} title={character.portraitDataUrl ? "Change portrait" : "Add portrait"} onClick={() => portraitFileInput.current?.click()}><Plus size={14} /></button>
           </div>
           <div className="hero-identity">
             <label className="eyebrow" htmlFor="character-name">Character name</label>
@@ -1999,21 +2361,25 @@ export function CharacterManager() {
           </div>
           <div className="level-card">
             <div><span>Level</span><strong>{character.level}</strong></div>
-            <button className="button level-button" onClick={levelUp} disabled={character.level >= 20 || Boolean(character.readOnlyReview)}><Sparkles size={15} />Level up</button>
+            <button className="button level-button" onClick={levelUp} disabled={character.level >= 20 || Boolean(character.readOnlyReview) || Boolean(currentDmLiveLocked)}><Sparkles size={15} />Level up</button>
             <div className="xp-row"><span>{character.experience.toLocaleString()} XP</span><span>{nextLevelXp.toLocaleString()} XP</span></div>
             <div className="progress-track"><span style={{ width: `${xpProgress}%` }} /></div>
           </div>
-        </div>
+        </div>}
 
         <nav className="tabs" aria-label="Character sections">
-          {(["encounter", "character", "spellbook", "inventory", "companions", "journal"] as Tab[]).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "spellbook" && character.spells.length ? ` ${character.spells.length}` : ""}{item === "inventory" && character.inventory.length ? ` ${character.inventory.length}` : ""}{item === "companions" && character.companions.length ? ` ${character.companions.length}` : ""}</button>)}
+          {([...(appRole === "dm" ? ["party" as const] : []), "encounter", "character", "spellbook", "inventory", "companions", "journal"] as Tab[]).map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => { if (item === "party" && tab !== "party") setDmFullEditCharacterId(undefined); setTab(item); }}>{item}{item === "spellbook" && character.spells.length ? ` ${character.spells.length}` : ""}{item === "inventory" && character.inventory.length ? ` ${character.inventory.length}` : ""}{item === "companions" && character.companions.length ? ` ${character.companions.length}` : ""}</button>)}
         </nav>
 
-        <div className="section-collapse-controls" aria-label="Section display controls">
+        {tab !== "party" && currentDmLiveLocked && <div className="dm-live-readonly-banner"><Cloud size={16} /><span>This is a live player character. Resource adjustments, added equipment, and added spells remain available from Party; enable full editing there for other changes.</span><button className="button button-outline" onClick={() => setTab("party")}>Return to Party</button></div>}
+
+        {tab !== "party" && <div className="section-collapse-controls" aria-label="Section display controls">
           <span>Sections</span>
           <button type="button" onClick={() => setVisiblePanelsExpanded(true)}>Expand all</button>
           <button type="button" onClick={() => setVisiblePanelsExpanded(false)}>Collapse all</button>
-        </div>
+        </div>}
+
+        {tab === "party" && <DmPartyWorkspace characters={partyCharacters} members={liveCampaignMembers} rolls={liveRolls} onlineUserIds={onlineLiveUserIds} ownerByCharacterId={partyOwnerByCharacterId} selectedCharacterId={dmPartyCharacterId} fullEditCharacterId={dmFullEditCharacterId} equipment={equipment} spells={spells} onSelectCharacter={(characterId) => { if (characterId !== dmPartyCharacterId) setDmFullEditCharacterId(undefined); setDmPartyCharacterId(characterId); }} onToggleFullEdit={(characterId, enabled) => setDmFullEditCharacterId(enabled ? characterId : undefined)} onOpenSheet={(characterId) => { const selected = charactersRef.current.find((entry) => entry.id === characterId); if (selected) { setCharacter(selected); setTab("encounter"); } }} onPatch={patchLiveCharacter} />}
 
         {tab === "character" && (
           <div className="overview-grid">
@@ -2062,11 +2428,11 @@ export function CharacterManager() {
           </div>
         )}
 
-        {tab === "encounter" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} hitDicePools={hitDicePools} encumbranceRule={characterCampaignProfile?.encumbranceRule} />}
+        {tab === "encounter" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} hitDicePools={hitDicePools} encumbranceRule={characterCampaignProfile?.encumbranceRule} onRoll={publishCharacterRoll} />}
 
-        {tab === "character" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />}
+        {tab === "character" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} onRoll={publishCharacterRoll} />}
 
-          {tab === "spellbook" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingProfiles={spellcastingProfiles} creationLocked={creationLocked} showCreationSetup={creationSetupVisible} />}
+          {tab === "spellbook" && <SpellbookManager catalog={spells} equipmentCatalog={equipment} character={character} patchCharacter={patchCharacter} spellcastingProfiles={spellcastingProfiles} creationLocked={creationLocked} showCreationSetup={creationSetupVisible} onRoll={publishCharacterRoll} />}
 
         {tab === "inventory" && <InventoryManager catalog={equipment} character={character} patchCharacter={patchCharacter} encumbranceRule={characterCampaignProfile?.encumbranceRule} attunementLimit={characterCampaignProfile?.attunementLimit} />}
 
@@ -2074,7 +2440,7 @@ export function CharacterManager() {
 
         {tab === "journal" && <JournalManager character={character} patchCharacter={patchCharacter} />}
 
-        {character.finalizedAt && <div className="completed-setup-toggle completed-setup-toggle-bottom"><div><strong>Character setup complete</strong><span>Session-zero and creation choices are hidden during regular play.</span></div><button type="button" className="button button-outline" aria-expanded={showCompletedSetup} onClick={() => setShowCompletedSetup((current) => !current)}>{showCompletedSetup ? <EyeOff size={15} /> : <Eye size={15} />}{showCompletedSetup ? "Hide setup" : "Show setup"}</button></div>}
+        {tab !== "party" && character.finalizedAt && <div className="completed-setup-toggle completed-setup-toggle-bottom"><div><strong>Character setup complete</strong><span>Session-zero and creation choices are hidden during regular play.</span></div><button type="button" className="button button-outline" aria-expanded={showCompletedSetup} onClick={() => setShowCompletedSetup((current) => !current)}>{showCompletedSetup ? <EyeOff size={15} /> : <Eye size={15} />}{showCompletedSetup ? "Hide setup" : "Show setup"}</button></div>}
       </section>
 
       {deleteTarget && <div className="modal-scrim" onMouseDown={() => setDeleteTarget(null)}>
@@ -2131,6 +2497,7 @@ export function CharacterManager() {
       </div>}
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {showLiveSync && <LiveSyncPanel status={liveSyncStatus} appRole={appRole} characters={characters} links={syncLinks} campaigns={liveCampaigns} activeCampaignId={activeLiveCampaignId} onClose={() => setShowLiveSync(false)} onRequestDmLink={requestDmMagicLink} onCreateCampaign={createLiveCampaign} onSelectCampaign={(campaignId) => selectLiveCampaign(campaignId)} onCreateInvitation={createLiveInvitation} onRedeemInvitation={redeemLiveInvitation} onSignOut={signOutLiveSync} />}
 
       <div className={`drawer-scrim ${showLibrary || showRoster || showCampaigns ? "visible" : ""}`} onClick={() => { setShowLibrary(false); setShowRoster(false); setShowCampaigns(false); }} />
       {showLibrary && <ContentPackWorkshop packs={customPacks} disabledPackIds={disabledPackIds} bundledPackId={bundledPackId} onClose={() => setShowLibrary(false)} onImport={() => fileInput.current?.click()} onSave={saveContentPack} onRemove={removePack} onToggle={toggleContentPack} onExport={exportContentPack} />}

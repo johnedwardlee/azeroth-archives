@@ -6,6 +6,7 @@ import { ABILITY_LABELS, abilityModifier, type AbilityKey, type ActionTiming, ty
 import { CombatStatusStrip } from "./combat-status-strip";
 import { CollapsiblePanel } from "./collapsible-panel";
 import { SessionTracker } from "./living-sheet";
+import type { LocalRollEvent } from "../lib/live-sync";
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
 type UndoState = { message: string; patch: Partial<CharacterData> };
@@ -32,7 +33,7 @@ function signed(value: number) {
   return `${value >= 0 ? "+" : "−"}${Math.abs(value)}`;
 }
 
-export function ActionDashboard({ character, patchCharacter, catalog, hitDicePools, encumbranceRule = "standard" }: { character: CharacterData; patchCharacter: PatchCharacter; catalog: EquipmentDefinition[]; hitDicePools: HitDicePool[]; encumbranceRule?: EncumbranceRule }) {
+export function ActionDashboard({ character, patchCharacter, catalog, hitDicePools, encumbranceRule = "standard", onRoll }: { character: CharacterData; patchCharacter: PatchCharacter; catalog: EquipmentDefinition[]; hitDicePools: HitDicePool[]; encumbranceRule?: EncumbranceRule; onRoll?: (event: LocalRollEvent) => void }) {
   const [query, setQuery] = useState("");
   const [timingFilter, setTimingFilter] = useState<TimingFilter>("all");
   const [purposeFilter, setPurposeFilter] = useState<PurposeFilter>("all");
@@ -69,6 +70,7 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     const adjustedModifier = modifier + effects.modifier;
     const result: EncounterRollResult = { actionId: action.id, label, dice, kept, modifier: adjustedModifier, total: kept + adjustedModifier, mode, reasons: effects.reasons };
     setRollResult(result);
+    onRoll?.({ category: action.spellId ? "spell-attack" : "attack", label, formula: "d20", dice, modifier: adjustedModifier, total: result.total, mode, detail: effects.reasons.join("; ") });
     setPendingDamage(damage);
     setDamageResult("");
     return result;
@@ -86,6 +88,8 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     if (results.some((result) => !result)) { setDamageResult(`Enter damage as dice, such as 1d8.`); return; }
     const resolved = results.flatMap((result) => result ?? []);
     const type = damage.damageType ? ` ${damage.damageType}` : "";
+    const total = resolved.reduce((sum, result) => sum + result.total, 0);
+    onRoll?.({ category: "damage", label: `${damage.label}${critical ? " critical" : ""} damage`, formula: `${critical ? "Critical " : ""}${damage.instances > 1 ? `${damage.instances}×` : ""}${damage.formula}`, dice: resolved.flatMap((result) => result.rolls), modifier: resolved.reduce((sum, result) => sum + result.modifier, 0), total, mode: "normal", detail: damage.damageType ?? "" });
     if (resolved.length === 1) {
       const result = resolved[0];
       setDamageResult(`${damage.label}${critical ? " critical" : ""}: ${result.rolls.join(" + ")}${result.modifier ? ` ${signed(result.modifier)}` : ""} = ${result.total}${type} damage`);
@@ -93,7 +97,7 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     }
     const instance = damage.instanceLabel ?? "roll";
     const details = resolved.map((result, index) => `${instance} ${index + 1}: ${result.rolls.join(" + ")}${result.modifier ? ` ${signed(result.modifier)}` : ""} = ${result.total}`);
-    setDamageResult(`${damage.label}: ${details.join(" · ")} · Total ${resolved.reduce((sum, result) => sum + result.total, 0)}${type} damage`);
+    setDamageResult(`${damage.label}: ${details.join(" · ")} · Total ${total}${type} damage`);
   }
 
   function nextSlotLevel(spell: CharacterData["spells"][number]) {
@@ -266,7 +270,7 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
         <div className="encounter-action-grid">{visible.map((action) => actionCard(action))}{!visible.length && <p className="action-empty">No actions match these filters.</p>}</div>
       </div>
     </CollapsiblePanel>
-    <SessionTracker character={character} patchCharacter={patchCharacter} hitDicePools={hitDicePools} />
+    <SessionTracker character={character} patchCharacter={patchCharacter} hitDicePools={hitDicePools} onRoll={onRoll} />
     {character.recentActions.length > 0 && <CollapsiblePanel className="recent-action-panel" storageKey={`azeroth-panel-${character.id}-encounter-recent`} eyebrow="History" title="Recently used" summary={<span>{character.recentActions.length} entries</span>}><div className="recent-action-list">{character.recentActions.map((entry) => { const action = byId.get(entry.actionId); return <button key={`${entry.actionId}-${entry.usedAt}`} disabled={!action || Boolean(action && unavailableReason(action))} onClick={() => { if (action) useAction(action); }}><span>{entry.name}</span><small>{entry.result}</small></button>; })}</div></CollapsiblePanel>}
     {timingFilter === "all" && references.length > 0 && <CollapsiblePanel className="action-reference-panel" storageKey={`azeroth-panel-${character.id}-encounter-references`} eyebrow="Always available" title="Passive features" summary={<span>{references.length} references</span>} defaultExpanded={false}><div className="encounter-action-grid">{references.map((action) => actionCard(action))}</div></CollapsiblePanel>}
   </div>;

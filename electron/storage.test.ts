@@ -16,11 +16,12 @@ const { createStorage, STORE_VERSION } = require("./storage.cjs") as {
   }) => {
     dataPath: () => string;
     backupPath: () => string;
-    load: () => Promise<{ version: number; characters: Array<{ id: string; name: string }>; packs: Array<{ pack: { id: string } }>; disabledPackIds: string[]; campaignProfiles: Array<{ id: string; name: string }>; activeCampaignProfileId?: string; onboardingCompleted: boolean; appRole: "player" | "dm"; recovery?: { restoredFrom?: string; migrationBackup?: string } }>;
+    load: () => Promise<{ version: number; characters: Array<{ id: string; name: string }>; packs: Array<{ pack: { id: string } }>; disabledPackIds: string[]; campaignProfiles: Array<{ id: string; name: string }>; activeCampaignProfileId?: string; onboardingCompleted: boolean; appRole: "player" | "dm"; syncLinks: unknown[]; syncOutbox: unknown[]; recovery?: { restoredFrom?: string; migrationBackup?: string } }>;
     saveCharacter: (character: CharacterData) => Promise<CharacterData>;
     savePack: (pack: unknown) => Promise<unknown>;
     setPackEnabled: (id: string, enabled: boolean) => Promise<unknown>;
     saveCampaignState: (state: unknown) => Promise<unknown>;
+    saveSyncState: (state: unknown) => Promise<unknown>;
     replaceStore: (store: unknown) => Promise<unknown>;
   };
 };
@@ -102,6 +103,17 @@ describe("desktop storage", () => {
     await storage.saveCampaignState({ campaignProfiles: [profile], activeCampaignProfileId: profile.id, onboardingCompleted: true, appRole: "dm" });
     expect(await storage.load()).toMatchObject({ campaignProfiles: [{ id: "campaign" }], activeCampaignProfileId: "campaign", onboardingCompleted: true, appRole: "dm" });
     await expect(storage.saveCampaignState({ campaignProfiles: [{ ...profile, startingLevel: 50 }], onboardingCompleted: true, appRole: "dm" })).rejects.toThrow(/startingLevel/i);
+  });
+
+  it("persists valid live-sync links and outbox entries and rejects malformed state", async () => {
+    const storage = await testStorage();
+    const hero = validCharacter("sync-hero", "Sync Hero");
+    await storage.saveCharacter(hero);
+    const link = { characterId: hero.id, campaignId: "campaign", campaignName: "Campaign", role: "player", revision: 1, linkedAt: new Date().toISOString(), lastSyncedAt: new Date().toISOString() };
+    const mutation = { kind: "character-mutation", id: "mutation", campaignId: "campaign", characterId: hero.id, baseRevision: 1, category: "vitals", patch: { currentHp: 5 }, createdAt: new Date().toISOString() };
+    await storage.saveSyncState({ syncLinks: [link], syncOutbox: [mutation] });
+    expect(await storage.load()).toMatchObject({ syncLinks: [{ characterId: hero.id, revision: 1 }], syncOutbox: [{ id: "mutation" }] });
+    await expect(storage.saveSyncState({ syncLinks: [{ ...link, characterId: "missing" }], syncOutbox: [] })).rejects.toThrow(/sync link/i);
   });
 
   it("rejects malformed current-version character data at the desktop boundary", async () => {

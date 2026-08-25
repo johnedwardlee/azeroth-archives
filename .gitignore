@@ -43,6 +43,7 @@ yarn-error.log*
 /outputs/
 /output/
 /work/
+/electron/sync-config.generated.cjs
 
 # Old installer builds
 /release-*-build/

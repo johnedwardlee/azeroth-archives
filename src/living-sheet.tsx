@@ -42,6 +42,7 @@ import {
   startingSpellRequirementsFor,
   syncEffectConditions,
 } from "../lib/character-rules";
+import type { LocalRollEvent } from "../lib/live-sync";
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
 
@@ -76,7 +77,7 @@ function equipmentDescription(item: EquipmentDefinition) {
   ].filter(Boolean).join("\n\n");
 }
 
-export function SessionTracker({ character, patchCharacter, hitDicePools }: { character: CharacterData; patchCharacter: PatchCharacter; hitDicePools: HitDicePool[] }) {
+export function SessionTracker({ character, patchCharacter, hitDicePools, onRoll }: { character: CharacterData; patchCharacter: PatchCharacter; hitDicePools: HitDicePool[]; onRoll?: (event: LocalRollEvent) => void }) {
   const [hpAmount, setHpAmount] = useState(1);
   const [damageType, setDamageType] = useState("Bludgeoning");
   const [hpFeedback, setHpFeedback] = useState("");
@@ -103,6 +104,7 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
       ...(concentrationLost ? { concentratingSpellId: undefined, activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects) } : {}),
     });
     setHpFeedback(`${hpAmount} ${damageType} → ${amount} damage. ${resolution.reason}${absorbed ? `; ${absorbed} absorbed by temporary HP` : ""}.${concentration ? ` Concentration DC ${concentration.dc}: ${concentration.rolls.join("/")} + ${concentration.modifier} = ${concentration.total} — ${concentration.success ? "maintained" : "lost"}.` : ""}`);
+    if (concentration) onRoll?.({ category: "concentration", label: "Concentration save", formula: "d20", dice: concentration.rolls, modifier: concentration.modifier, total: concentration.total, mode: concentration.rolls.length > 1 ? "disadvantage" : "normal", detail: `DC ${concentration.dc} · ${concentration.success ? "maintained" : "lost"}` });
   }
 
   function heal() {
@@ -157,6 +159,7 @@ export function SessionTracker({ character, patchCharacter, hitDicePools }: { ch
     const restored = Math.min(Math.max(0, result.total), character.maxHp - character.currentHp);
     patchCharacter({ currentHp: character.currentHp + restored, hitDiceUsed: character.hitDiceUsed + count, hitDiceByClass: character.hitDiceByClass.map((pool) => pool.className === selectedHitDicePool.className ? { ...pool, used: pool.used + count } : pool) });
     setHitDiceFeedback(`Rolled ${result.rolls.join(" + ")}${staminaHealing ? ` ${staminaHealing >= 0 ? "+" : "−"} ${Math.abs(staminaHealing)} Stamina` : ""}; restored ${restored} HP.`);
+    onRoll?.({ category: "hit-dice", label: `${selectedHitDicePool.className} Hit Dice`, formula: `${count}d${selectedHitDicePool.die}`, dice: result.rolls, modifier: staminaHealing, total: result.total, mode: "normal", detail: `Restored ${restored} HP` });
   }
 
   function toggleDeathSave(kind: "success" | "failure", index: number) {
@@ -351,7 +354,7 @@ export function FeatManager({ catalog, character, patchCharacter }: { catalog: F
   );
 }
 
-export function SpellbookManager({ catalog, equipmentCatalog, character, patchCharacter, spellcastingProfiles, creationLocked = false, showCreationSetup = true }: { catalog: SpellDefinition[]; equipmentCatalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; spellcastingProfiles: SpellcastingProfile[]; creationLocked?: boolean; showCreationSetup?: boolean }) {
+export function SpellbookManager({ catalog, equipmentCatalog, character, patchCharacter, spellcastingProfiles, creationLocked = false, showCreationSetup = true, onRoll }: { catalog: SpellDefinition[]; equipmentCatalog: EquipmentDefinition[]; character: CharacterData; patchCharacter: PatchCharacter; spellcastingProfiles: SpellcastingProfile[]; creationLocked?: boolean; showCreationSetup?: boolean; onRoll?: (event: LocalRollEvent) => void }) {
   const [selectedId, setSelectedId] = useState("");
   const [selectedOwner, setSelectedOwner] = useState("");
   const [query, setQuery] = useState("");
@@ -508,6 +511,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
     const result = rollDiceFormula(formula);
     if (!result) return;
     setSpellRollResult(`${spell.name}: ${result.rolls.join(" + ")}${result.modifier ? ` ${result.modifier >= 0 ? "+" : "−"} ${Math.abs(result.modifier)}` : ""} = ${result.total}`);
+    onRoll?.({ category: /heal|regain|restore/i.test(spell.description) ? "healing" : /damage/i.test(spell.description) ? "damage" : "other", label: spell.name, formula, dice: result.rolls, modifier: result.modifier, total: result.total, mode: "normal", detail: "Spell effect" });
   }
 
   return (

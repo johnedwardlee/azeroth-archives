@@ -2,17 +2,18 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("v1.5 navigation and encounter workspace", () => {
-  it("uses the six consolidated primary destinations", () => {
+  it("uses the consolidated player destinations plus the DM Party workspace", () => {
     const source = readFileSync(new URL("./character-manager.tsx", import.meta.url), "utf8");
-    expect(source).toContain('type Tab = "encounter" | "character" | "spellbook" | "inventory" | "companions" | "journal"');
-    expect(source).toContain('["encounter", "character", "spellbook", "inventory", "companions", "journal"]');
+    expect(source).toContain('type Tab = "party" | "encounter" | "character" | "spellbook" | "inventory" | "companions" | "journal"');
+    expect(source).toContain('appRole === "dm" ? ["party" as const] : []');
+    expect(source).toContain('"encounter", "character", "spellbook", "inventory", "companions", "journal"');
     expect(source).toContain('character.finalizedAt || character.readOnlyReview ? "encounter" : "character"');
   });
 
   it("keeps detailed character and combat management together", () => {
     const source = readFileSync(new URL("./character-manager.tsx", import.meta.url), "utf8");
     expect(source.match(/tab === "character"/g)?.length).toBeGreaterThanOrEqual(3);
-    expect(source).toContain('<CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} />');
+    expect(source).toContain('<CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} onRoll={publishCharacterRoll} />');
   });
 
   it("provides action-economy and purpose filters without removing unavailable cards", () => {

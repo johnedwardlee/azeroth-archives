@@ -1,6 +1,6 @@
 {
   "name": "azeroth-archives-desktop",
-  "version": "1.5.5",
+  "version": "2.0.0-beta.1",
   "private": true,
   "description": "Offline Warcraft 5E character manager",
   "author": "Warcraft 5E Table",
@@ -10,13 +10,14 @@
     "dev": "concurrently -k \"pnpm dev:ui\" \"pnpm dev:desktop\"",
     "dev:ui": "vite",
     "dev:desktop": "cross-env AZEROTH_DEV_URL=http://localhost:5173 wait-on http://localhost:5173 && electron .",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/generate-sync-config.cjs && tsc --noEmit && vite build",
     "dist": "pnpm run build && electron-builder --win nsis",
     "release:win": "pnpm run build && electron-builder --win nsis --publish never",
     "test": "vitest run && tsc --noEmit && vite build",
     "test:unit": "vitest run"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "ajv": "^8.20.0",
     "electron-updater": "^6.8.9",
     "jspdf": "^4.2.1",

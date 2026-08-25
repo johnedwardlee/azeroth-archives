@@ -3,7 +3,7 @@ const path = require("node:path");
 const { assertCharacter } = require("./character-validation.cjs");
 const { assertCampaignProfile } = require("./campaign-validation.cjs");
 
-const STORE_VERSION = 5;
+const STORE_VERSION = 6;
 const DEFAULT_BACKUP_LIMIT = 10;
 const DEFAULT_BACKUP_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -30,6 +30,8 @@ function migrateStore(value) {
     activeCampaignProfileId: typeof parsed.activeCampaignProfileId === "string" ? parsed.activeCampaignProfileId : undefined,
     onboardingCompleted: typeof parsed.onboardingCompleted === "boolean" ? parsed.onboardingCompleted : false,
     appRole: parsed.appRole === "dm" ? "dm" : "player",
+    syncLinks: Array.isArray(parsed.syncLinks) ? parsed.syncLinks : [],
+    syncOutbox: Array.isArray(parsed.syncOutbox) ? parsed.syncOutbox : [],
   };
 
   if (migrated.version === 1) {
@@ -43,6 +45,9 @@ function migrateStore(value) {
   }
   if (migrated.version === 4) {
     migrated = { ...migrated, version: 5, campaignProfiles: [], activeCampaignProfileId: undefined, onboardingCompleted: migrated.characters.length > 0, appRole: "player" };
+  }
+  if (migrated.version === 5) {
+    migrated = { ...migrated, version: 6, syncLinks: [], syncOutbox: [] };
   }
 
   return { store: migrated, sourceVersion, migrated: sourceVersion !== STORE_VERSION };
@@ -112,7 +117,7 @@ function createStorage({
   }
 
   function validateStore(store) {
-    if (!store || !Array.isArray(store.characters) || !Array.isArray(store.packs) || !Array.isArray(store.disabledPackIds) || !Array.isArray(store.campaignProfiles)) {
+    if (!store || !Array.isArray(store.characters) || !Array.isArray(store.packs) || !Array.isArray(store.disabledPackIds) || !Array.isArray(store.campaignProfiles) || !Array.isArray(store.syncLinks) || !Array.isArray(store.syncOutbox)) {
       throw new Error("The character library must contain character and content-pack lists.");
     }
     for (const pack of store.packs) validatePack(pack);
@@ -120,6 +125,13 @@ function createStorage({
     if (store.activeCampaignProfileId !== undefined && (typeof store.activeCampaignProfileId !== "string" || !store.campaignProfiles.some((profile) => profile.id === store.activeCampaignProfileId))) throw new Error("The active campaign profile is invalid.");
     if (typeof store.onboardingCompleted !== "boolean") throw new Error("The onboarding state is invalid.");
     if (!["player", "dm"].includes(store.appRole)) throw new Error("The app role is invalid.");
+    const characterIds = new Set(store.characters.map((character) => character.id));
+    for (const link of store.syncLinks) {
+      if (!link || typeof link.characterId !== "string" || !characterIds.has(link.characterId) || typeof link.campaignId !== "string" || !link.campaignId || !["player", "dm"].includes(link.role) || !Number.isInteger(link.revision) || link.revision < 1) throw new Error("A character sync link is invalid.");
+    }
+    for (const entry of store.syncOutbox) {
+      if (!entry || typeof entry.id !== "string" || !entry.id || typeof entry.characterId !== "string" || !characterIds.has(entry.characterId) || !["character-mutation", "roll-event"].includes(entry.kind) || typeof entry.createdAt !== "string") throw new Error("A sync outbox entry is invalid.");
+    }
     return store;
   }
 
@@ -137,6 +149,8 @@ function createStorage({
       activeCampaignProfileId: store.activeCampaignProfileId,
       onboardingCompleted: Boolean(store.onboardingCompleted),
       appRole: store.appRole === "dm" ? "dm" : "player",
+      syncLinks: store.syncLinks ?? [],
+      syncOutbox: store.syncOutbox ?? [],
     });
     await fs.writeFile(temporary, JSON.stringify(normalized, null, 2), "utf8");
     await fs.rename(temporary, destination);
@@ -170,7 +184,7 @@ function createStorage({
       }
       return result.store;
     } catch (error) {
-      if (error?.code === "ENOENT") return { version: STORE_VERSION, characters: [], packs: [], disabledPackIds: [], campaignProfiles: [], activeCampaignProfileId: undefined, onboardingCompleted: false, appRole: "player" };
+      if (error?.code === "ENOENT") return { version: STORE_VERSION, characters: [], packs: [], disabledPackIds: [], campaignProfiles: [], activeCampaignProfileId: undefined, onboardingCompleted: false, appRole: "player", syncLinks: [], syncOutbox: [] };
       if (error?.code === "STORE_VERSION_TOO_NEW") throw error;
       const recovered = await recoverStore();
       if (recovered) return recovered;
@@ -233,6 +247,14 @@ function createStorage({
       Object.assign(store, candidate);
       await writeStoreUnlocked(store);
       return candidate;
+    }),
+    saveSyncState: (syncState) => enqueue(async () => {
+      const store = await readStoreUnlocked();
+      store.syncLinks = Array.isArray(syncState?.syncLinks) ? syncState.syncLinks : [];
+      store.syncOutbox = Array.isArray(syncState?.syncOutbox) ? syncState.syncOutbox : [];
+      validateStore(store);
+      await writeStoreUnlocked(store);
+      return { syncLinks: store.syncLinks, syncOutbox: store.syncOutbox };
     }),
     replaceStore: (replacement) => enqueue(async () => {
       const result = migrateStore(replacement);

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.0.0-beta.1
+
+- Add opt-in, offline-first live synchronization through a private Supabase campaign service, with encrypted desktop sessions, device-bound player identities, single-use invitations, revisioned mutations, and a persistent reconnect outbox.
+- Add the DM Party workspace with live character summaries, player presence, linked-sheet inspection, centralized party rolls, and per-character full-edit safety controls.
+- Let the DM add equipment and spells and increase or reduce current HP, spell slots, Hit Dice, class resources, charges, and ammunition without enabling full editing.
+- Publish initiative, attacks, spell attacks, checks, saves, damage, healing, Hit Dice, concentration, and spell-effect rolls to the DM feed while keeping local rolls functional offline.
+- Restrict players to owner-authorized character channels, keep campaign-wide changes DM-only, retain at most 500 rolls for 30 days, and preserve existing offline characters and backups through store version 6.
+
 ## 1.5.5
 
 - Add guided ancestry setup and finalization checks for Human Skillful and Versatile choices, High Elf Keen Senses and lineage magic, and Gnome lineage magic.

@@ -109,6 +109,10 @@ export type AbilityScoreMethod = "standard-array" | "point-buy" | "rolled" | "ma
 export type EncumbranceRule = "variant" | "standard" | "none";
 export type StartingEquipmentRule = "packages-or-gold" | "packages-only" | "gold-only";
 export type AppRole = "player" | "dm";
+export type SyncRole = "dm" | "player";
+export type SyncConnectionState = "unconfigured" | "signed-out" | "connecting" | "live" | "offline" | "error";
+export type MutationCategory = "vitals" | "resource" | "inventory" | "spells" | "identity" | "advancement" | "combat" | "features" | "journal" | "companions" | "preferences" | "other";
+export type RollEventCategory = "initiative" | "attack" | "spell-attack" | "check" | "save" | "damage" | "healing" | "hit-dice" | "concentration" | "other";
 
 export type CampaignProfile = {
   schemaVersion: 1;
@@ -417,6 +421,82 @@ export type CharacterData = {
   reviewImportedAt?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CharacterSyncLink = {
+  characterId: string;
+  campaignId: string;
+  campaignName: string;
+  role: SyncRole;
+  ownerUserId?: string;
+  revision: number;
+  linkedAt: string;
+  lastSyncedAt?: string;
+};
+
+export type CharacterMutation = {
+  kind: "character-mutation";
+  id: string;
+  campaignId: string;
+  characterId: string;
+  baseRevision: number;
+  category: MutationCategory;
+  patch: Partial<CharacterData>;
+  createdAt: string;
+};
+
+export type SharedRollEvent = {
+  kind: "roll-event";
+  id: string;
+  campaignId: string;
+  characterId: string;
+  actorName: string;
+  category: RollEventCategory;
+  label: string;
+  formula: string;
+  dice: number[];
+  modifier: number;
+  total: number;
+  mode: "normal" | "advantage" | "disadvantage";
+  detail: string;
+  createdAt: string;
+};
+
+export type SyncOutboxEntry = CharacterMutation | SharedRollEvent;
+
+export type LiveCampaign = {
+  id: string;
+  name: string;
+  role: SyncRole;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LiveCampaignMember = {
+  campaignId: string;
+  userId: string;
+  role: SyncRole;
+  displayName: string;
+  joinedAt: string;
+  revokedAt?: string;
+};
+
+export type SyncedCharacterSnapshot = {
+  character: CharacterData;
+  campaignId: string;
+  ownerUserId: string;
+  revision: number;
+  updatedAt: string;
+};
+
+export type LiveSyncStatus = {
+  configured: boolean;
+  connection: SyncConnectionState;
+  authenticated: boolean;
+  anonymous: boolean;
+  userId?: string;
+  email?: string;
+  message: string;
 };
 
 export const ABILITY_LABELS: Record<AbilityKey, string> = {

@@ -21,6 +21,7 @@ import {
   type RollKind,
   type RollMode,
 } from "../lib/character-rules";
+import type { LocalRollEvent } from "../lib/live-sync";
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
 
@@ -68,10 +69,12 @@ export function CombatManager({
   catalog,
   character,
   patchCharacter,
+  onRoll,
 }: {
   catalog: EquipmentDefinition[];
   character: CharacterData;
   patchCharacter: PatchCharacter;
+  onRoll?: (event: LocalRollEvent) => void;
 }) {
   const [mode, setMode] = useState<RollMode>("normal");
   const [weaponId, setWeaponId] = useState("");
@@ -88,7 +91,10 @@ export function CombatManager({
     const effects = conditionRollEffects(character, kind, ability, skillName, catalog);
     const actualMode = resolvedRollMode(mode, effects.forcedDisadvantage);
     const { dice, kept } = rollD20(actualMode);
-    setRollResult({ label, dice, kept, modifier: modifier + effects.modifier, mode: actualMode, reasons: effects.reasons });
+    const adjustedModifier = modifier + effects.modifier;
+    setRollResult({ label, dice, kept, modifier: adjustedModifier, mode: actualMode, reasons: effects.reasons });
+    const category = label === "Initiative" ? "initiative" : kind === "attack" ? "attack" : kind === "save" ? "save" : "check";
+    onRoll?.({ category, label, formula: "d20", dice, modifier: adjustedModifier, total: kept + adjustedModifier, mode: actualMode, detail: effects.reasons.join("; ") });
   }
 
   function rollAttack(attack: CharacterAttack, modifier: number) {
@@ -112,6 +118,7 @@ export function CombatManager({
       return;
     }
     setDamageResult(`${attack.name}${critical ? " critical" : ""}: ${result.rolls.join(" + ")}${result.modifier ? ` ${result.modifier >= 0 ? "+" : "−"} ${Math.abs(result.modifier)}` : ""} = ${result.total} ${attack.damageType}`);
+    onRoll?.({ category: "damage", label: `${attack.name}${critical ? " critical" : ""} damage`, formula: `${critical ? "Critical " : ""}${attack.damage}`, dice: result.rolls, modifier: result.modifier, total: result.total, mode: "normal", detail: attack.damageType });
   }
 
   function toggleSave(ability: AbilityKey) {
