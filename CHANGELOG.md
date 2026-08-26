@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 2.0.0-beta.2
+
+- Fix player invitation-code entry in the Live Sync panel by preserving input focus, normalizing typed or pasted codes, and formatting separators automatically.
+
 ## 2.0.0-beta.1
 
 - Add opt-in, offline-first live synchronization through a private Supabase campaign service, with encrypted desktop sessions, device-bound player identities, single-use invitations, revisioned mutations, and a persistent reconnect outbox.

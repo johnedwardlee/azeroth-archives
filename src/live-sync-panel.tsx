@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { Cloud, Copy, Link2, LogOut, Mail, Plus, Radio, X } from "lucide-react";
 import type { AppRole, CharacterData, CharacterSyncLink, LiveCampaign, LiveSyncStatus } from "../lib/types";
 
@@ -17,6 +17,15 @@ type Props = {
   onRedeemInvitation: (code: string, characterId: string, playerName: string) => Promise<void>;
   onSignOut: () => Promise<void>;
 };
+
+export function formatInvitationCodeInput(value: string) {
+  return value
+    .toUpperCase()
+    .replace(/[^0-9A-F]/g, "")
+    .slice(0, 24)
+    .match(/.{1,6}/g)
+    ?.join("-") ?? "";
+}
 
 export function LiveSyncPanel({ status, appRole, characters, links, campaigns, activeCampaignId, onClose, onRequestDmLink, onCreateCampaign, onSelectCampaign, onCreateInvitation, onRedeemInvitation, onSignOut }: Props) {
   const [email, setEmail] = useState("");
@@ -42,8 +51,12 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
     }
   }
 
-  return <div className="sync-panel-scrim" onMouseDown={onClose}>
-    <section className="sync-panel" role="dialog" aria-modal="true" aria-labelledby="sync-panel-title" onMouseDown={(event) => event.stopPropagation()}>
+  function closeFromScrim(event: MouseEvent<HTMLDivElement>) {
+    if (event.target === event.currentTarget) onClose();
+  }
+
+  return <div className="sync-panel-scrim" onMouseDown={closeFromScrim}>
+    <section className="sync-panel" role="dialog" aria-modal="true" aria-labelledby="sync-panel-title">
       <div className="sync-panel-heading"><div><span className="eyebrow">Private campaign connection</span><h2 id="sync-panel-title">Live sync</h2><p>Characters remain available locally while linked updates are shared with the campaign DM.</p></div><button className="icon-button" aria-label="Close live sync" onClick={onClose}><X size={18} /></button></div>
       <div className={`sync-connection sync-${status.connection}`}><span><Radio size={16} /></span><div><strong>{status.connection.replace("-", " ")}</strong><small>{status.message}</small></div></div>
 
@@ -67,7 +80,7 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
       </>}
 
       {status.configured && appRole === "player" && <section className="sync-form"><div><span className="eyebrow">Player link</span><h3>Join the DM’s campaign</h3><p>Choose one saved character and enter the single-use invitation from your DM.</p></div>
-        <label><span>Invitation code</span><input value={inviteCode} onChange={(event) => setInviteCode(event.target.value.toUpperCase())} placeholder="XXXXXX-XXXXXX-XXXXXX-XXXXXX" /></label>
+        <label><span>Invitation code</span><input className="sync-invite-input" type="text" name="invitation-code" autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={27} value={inviteCode} onChange={(event) => setInviteCode(formatInvitationCodeInput(event.currentTarget.value))} placeholder="XXXXXX-XXXXXX-XXXXXX-XXXXXX" /></label>
         <label><span>Player name</span><input value={playerName} onChange={(event) => setPlayerName(event.target.value)} placeholder="Your name" /></label>
         <label><span>Local character</span><select value={characterId} onChange={(event) => setCharacterId(event.target.value)}><option value="">Choose a saved character</option>{unlinkedCharacters.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · Level {entry.level} {entry.className}</option>)}</select></label>
         <button className="button button-primary" disabled={busy || !inviteCode.trim() || !playerName.trim() || !characterId} onClick={() => run(async () => { await onRedeemInvitation(inviteCode, characterId, playerName); setInviteCode(""); }, "Character linked. Live changes will now synchronize.")}><Link2 size={15} />Link character</button>
