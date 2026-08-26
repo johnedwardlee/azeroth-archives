@@ -20,6 +20,20 @@ function sessionSummary(session) {
   };
 }
 
+function normalizeServiceError(error, fallback = "Live-sync service request failed.") {
+  if (error instanceof Error) return error;
+  if (typeof error === "string" && error.trim()) return new Error(error.trim());
+  if (error && typeof error === "object") {
+    const message = [error.message, error.error_description, error.msg].find((value) => typeof value === "string" && value.trim());
+    const context = [error.details, error.hint]
+      .filter((value, index, values) => typeof value === "string" && value.trim() && value !== message && values.indexOf(value) === index);
+    const code = typeof error.code === "string" && error.code.trim() ? `[${error.code.trim()}]` : "";
+    const description = [message, ...context, code].filter(Boolean).join(" ");
+    if (description) return new Error(description);
+  }
+  return new Error(fallback);
+}
+
 function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => undefined }) {
   if (typeof getUserDataPath !== "function") throw new Error("getUserDataPath is required.");
   const sessionPath = () => path.join(getUserDataPath(), "azeroth-archives-sync-session.json");
@@ -83,7 +97,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       const decrypted = safeStorage.decryptString(Buffer.from(stored.encrypted, "base64"));
       const parsed = JSON.parse(decrypted);
       const result = await client.auth.setSession({ access_token: parsed.access_token, refresh_token: parsed.refresh_token });
-      if (result.error) throw result.error;
+      if (result.error) throw normalizeServiceError(result.error, "The saved live-sync session could not be restored.");
       session = result.data.session ?? undefined;
     } catch (error) {
       if (error?.code !== "ENOENT") await removeStoredSession().catch(() => undefined);
@@ -111,7 +125,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     const normalized = String(email ?? "").trim();
     if (!/^\S+@\S+\.\S+$/.test(normalized)) throw new Error("Enter a valid DM email address.");
     const result = await sync.auth.signInWithOtp({ email: normalized, options: { emailRedirectTo: config.authRedirectUrl, shouldCreateUser: true } });
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "The DM sign-in link could not be requested.");
     return publishStatus({ connection: "signed-out", message: `Magic link sent to ${normalized}.` });
   }
 
@@ -126,7 +140,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     const refreshToken = params.get("refresh_token");
     if (!accessToken || !refreshToken) throw new Error("The magic link did not include a complete session.");
     const result = await sync.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "The DM sign-in session could not be completed.");
     await persistSession(result.data.session);
     return publishStatus({ connection: "connecting", message: "DM sign-in complete." });
   }
@@ -136,7 +150,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     if (session?.user?.is_anonymous) return session;
     if (session?.user) throw new Error("Sign out of the DM live-sync account before linking a player character on this installation.");
     const result = await sync.auth.signInAnonymously();
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "The player device identity could not be created.");
     await persistSession(result.data.session);
     publishStatus({ connection: "connecting", message: "Player device identity created." });
     return result.data.session;
@@ -147,7 +161,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     await Promise.all(activeChannels.map((channel) => sync.removeChannel(channel)));
     activeChannels = [];
     const result = await sync.auth.signOut();
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "Live sync could not sign out.");
     await persistSession(undefined);
     return publishStatus({ connection: "signed-out", message: "Signed out of live sync." });
   }
@@ -156,11 +170,11 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     const sync = requireClient();
     requireSession();
     const memberships = await sync.from("campaign_members").select("campaign_id, role, joined_at").is("revoked_at", null);
-    if (memberships.error) throw memberships.error;
+    if (memberships.error) throw normalizeServiceError(memberships.error, "Campaign memberships could not be loaded.");
     const ids = (memberships.data ?? []).map((entry) => entry.campaign_id);
     if (!ids.length) return [];
     const campaigns = await sync.from("campaigns").select("id, name, created_at, updated_at").in("id", ids);
-    if (campaigns.error) throw campaigns.error;
+    if (campaigns.error) throw normalizeServiceError(campaigns.error, "Campaigns could not be loaded.");
     const roleById = new Map((memberships.data ?? []).map((entry) => [entry.campaign_id, entry.role]));
     return (campaigns.data ?? []).map((campaign) => ({
       id: campaign.id,
@@ -176,7 +190,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     const current = requireSession();
     if (current.user.is_anonymous) throw new Error("A DM email sign-in is required to create campaigns.");
     const result = await sync.rpc("create_campaign", { p_name: String(name ?? "").trim() });
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "The campaign could not be created.");
     return result.data;
   }
 
@@ -188,7 +202,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       p_character_id: characterId || null,
       p_valid_hours: validHours,
     });
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "The campaign invitation could not be created.");
     const invitation = Array.isArray(result.data) ? result.data[0] : result.data;
     return invitation ? { invitationId: invitation.invitation_id, invitationCode: invitation.invitation_code, expiresAt: invitation.expires_at } : undefined;
   }
@@ -202,7 +216,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       p_character_state: character,
       p_player_name: playerName,
     });
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "The campaign invitation could not be redeemed.");
     const redeemed = Array.isArray(result.data) ? result.data[0] : result.data;
     return redeemed ? { campaignId: redeemed.campaign_id, characterId: redeemed.character_id, characterState: redeemed.character_state, revision: Number(redeemed.revision) } : undefined;
   }
@@ -211,7 +225,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     const sync = requireClient();
     requireSession();
     const result = await sync.from("campaign_members").select("campaign_id, user_id, role, display_name, joined_at, revoked_at").eq("campaign_id", campaignId).is("revoked_at", null);
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "Campaign members could not be loaded.");
     return (result.data ?? []).map((member) => ({
       campaignId: member.campaign_id,
       userId: member.user_id,
@@ -226,7 +240,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     const sync = requireClient();
     requireSession();
     const result = await sync.from("characters").select("id, campaign_id, owner_user_id, state, revision, updated_at").eq("campaign_id", campaignId).order("updated_at", { ascending: false });
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "Synchronized characters could not be loaded.");
     return (result.data ?? []).map((row) => ({ character: row.state, campaignId: row.campaign_id, ownerUserId: row.owner_user_id, revision: Number(row.revision), updatedAt: row.updated_at }));
   }
 
@@ -240,7 +254,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       p_category: mutation.category,
       p_patch: mutation.patch,
     });
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "The character update could not be synchronized.");
     const applied = Array.isArray(result.data) ? result.data[0] : result.data;
     return applied ? { characterState: applied.character_state, revision: Number(applied.revision), updatedAt: applied.updated_at, wasConflict: Boolean(applied.was_conflict) } : undefined;
   }
@@ -261,7 +275,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       p_mode: event.mode,
       p_detail: event.detail,
     });
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "The roll could not be published.");
     return result.data;
   }
 
@@ -270,7 +284,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     requireSession();
     const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const result = await sync.from("roll_events").select("id, campaign_id, character_id, actor_name, category, label, formula, dice, modifier, total, mode, detail, created_at").eq("campaign_id", campaignId).gte("created_at", cutoff).order("created_at", { ascending: false }).limit(500);
-    if (result.error) throw result.error;
+    if (result.error) throw normalizeServiceError(result.error, "Campaign rolls could not be loaded.");
     return (result.data ?? []).map((event) => ({
       kind: "roll-event",
       id: event.id,
@@ -317,7 +331,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
             if (trackPresence) await channel.track({ ...presence, userId: session.user.id, connectedAt: new Date().toISOString() });
             resolve();
           } else if (["CHANNEL_ERROR", "TIMED_OUT"].includes(nextStatus)) {
-            reject(error ?? new Error("Live campaign connection failed."));
+            reject(normalizeServiceError(error, "Live campaign connection failed."));
           }
         });
       });
@@ -370,4 +384,4 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
   };
 }
 
-module.exports = { configured, createLiveSync, sessionSummary };
+module.exports = { configured, createLiveSync, normalizeServiceError, sessionSummary };

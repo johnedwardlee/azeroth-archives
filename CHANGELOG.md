@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.0-beta.3
+
+- Fix campaign invitation redemption by removing an ambiguous `campaign_id` reference from the Supabase function and provide a follow-up migration for existing beta databases.
+- Preserve structured Supabase messages, details, hints, and error codes when live-sync failures cross the Electron IPC boundary.
+
 ## 2.0.0-beta.2
 
 - Fix player invitation-code entry in the Live Sync panel by preserving input focus, normalizing typed or pasted codes, and formatting separators automatically.

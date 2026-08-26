@@ -21,6 +21,10 @@ The application code is ready to remain fully offline when no service is configu
 
 The migration creates the campaign, membership, invitation, character, mutation-audit, and roll-event tables; enables row-level security; authorizes private campaign Realtime channels; and enforces the 30-day/500-roll retention policy.
 
+### Existing v2.0 beta projects
+
+If the original migration was installed before `v2.0.0-beta.3`, run `supabase/migrations/202608250001_fix_invitation_redemption.sql` once in the Supabase SQL editor. This replaces the invitation-redemption function without deleting campaigns, invitations, characters, or user accounts. New projects using the updated original migration do not need the follow-up migration.
+
 ## 3. Configure GitHub release builds
 
 In the GitHub repository, open **Settings → Secrets and variables → Actions** and create these repository secrets:

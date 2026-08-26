@@ -373,7 +373,7 @@ begin
 
   insert into public.campaign_members (campaign_id, user_id, role, display_name, revoked_at)
   values (v_invitation.campaign_id, v_user_id, 'player', v_player_name, null)
-  on conflict (campaign_id, user_id) do update
+  on conflict on constraint campaign_members_pkey do update
     set role = 'player', display_name = excluded.display_name, revoked_at = null, joined_at = now();
 
   if v_invitation.character_id is null then

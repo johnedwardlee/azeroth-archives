@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync(new URL("./migrations/202608240001_live_sync.sql", import.meta.url), "utf8");
+const invitationFix = readFileSync(new URL("./migrations/202608250001_fix_invitation_redemption.sql", import.meta.url), "utf8");
 
 describe("live-sync migration security contract", () => {
   it("keeps direct writes behind authenticated RPC functions", () => {
@@ -20,5 +21,12 @@ describe("live-sync migration security contract", () => {
   it("enforces the approved roll retention limits", () => {
     expect(migration).toContain("interval '30 days'");
     expect(migration).toContain("offset 500");
+  });
+
+  it("resolves invitation membership conflicts by named constraint", () => {
+    for (const sql of [migration, invitationFix]) {
+      expect(sql).toContain("on conflict on constraint campaign_members_pkey");
+      expect(sql).not.toContain("on conflict (campaign_id, user_id)");
+    }
   });
 });
