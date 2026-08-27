@@ -101,6 +101,9 @@ export function sanitizeCharacterPatch(patch: Partial<CharacterData>): Partial<C
   delete sanitized.portraitDataUrl;
   delete sanitized.readOnlyReview;
   delete sanitized.reviewImportedAt;
+  for (const key of Object.keys(sanitized) as Array<keyof CharacterData>) {
+    if (sanitized[key] === undefined) (sanitized as Record<string, unknown>)[key] = null;
+  }
   return sanitized;
 }
 

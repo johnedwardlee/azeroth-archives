@@ -34,13 +34,18 @@ function normalizeServiceError(error, fallback = "Live-sync service request fail
   return new Error(fallback);
 }
 
-function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => undefined }) {
+function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => undefined, clientFactory = createClient }) {
   if (typeof getUserDataPath !== "function") throw new Error("getUserDataPath is required.");
   const sessionPath = () => path.join(getUserDataPath(), "azeroth-archives-sync-session.json");
   const available = configured(config);
   let client;
   let session;
   let activeChannels = [];
+  let desiredSubscription;
+  let reconnectTimer;
+  let reconnectAttempts = 0;
+  let subscriptionGeneration = 0;
+  let subscriptionWasLive = false;
   let status = {
     configured: available,
     connection: available ? "signed-out" : "unconfigured",
@@ -68,6 +73,23 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
   function requireSession() {
     if (!session?.user) throw new Error("Sign in before using live sync.");
     return session;
+  }
+
+  function clearReconnectTimer() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  }
+
+  function scheduleReconnect(generation) {
+    if (!desiredSubscription || generation !== subscriptionGeneration || reconnectTimer) return;
+    const delay = Math.min(10_000, 4_000 * (2 ** reconnectAttempts));
+    reconnectAttempts += 1;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined;
+      if (!desiredSubscription || generation !== subscriptionGeneration) return;
+      const target = desiredSubscription;
+      openSubscription(target.campaignId, target.presence, target.characterId).catch(() => scheduleReconnect(subscriptionGeneration));
+    }, delay);
   }
 
   async function removeStoredSession() {
@@ -107,14 +129,21 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
 
   async function initialize() {
     if (!available) return status;
-    client = createClient(config.supabaseUrl, config.publishableKey, {
+    client = clientFactory(config.supabaseUrl, config.publishableKey, {
       auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false, flowType: "implicit" },
       realtime: { params: { eventsPerSecond: 20 } },
     });
     client.auth.onAuthStateChange((_event, nextSession) => {
       session = nextSession ?? undefined;
       persistSession(nextSession).catch(() => publishStatus({ connection: "error", message: "The live-sync session could not be stored securely." }));
-      publishStatus({ connection: nextSession ? "connecting" : "signed-out", message: nextSession ? "Live-sync identity restored." : "Signed out of live sync." });
+      if (nextSession?.access_token) {
+        client.realtime.setAuth(nextSession.access_token).catch(() => {
+          publishStatus({ connection: "offline", message: "Live-sync authorization changed; reconnecting automatically." });
+          scheduleReconnect(subscriptionGeneration);
+        });
+      }
+      const connection = nextSession ? desiredSubscription && status.connection === "live" ? "live" : "connecting" : "signed-out";
+      publishStatus({ connection, message: connection === "live" ? status.message : nextSession ? "Live-sync identity restored." : "Signed out of live sync." });
     });
     await restoreSession();
     return publishStatus({ connection: session ? "connecting" : "signed-out", message: session ? "Live-sync identity restored." : "Sign in or link a character to begin live sync." });
@@ -158,6 +187,10 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
 
   async function signOut() {
     const sync = requireClient();
+    desiredSubscription = undefined;
+    subscriptionWasLive = false;
+    subscriptionGeneration += 1;
+    clearReconnectTimer();
     await Promise.all(activeChannels.map((channel) => sync.removeChannel(channel)));
     activeChannels = [];
     const result = await sync.auth.signOut();
@@ -303,14 +336,18 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     }));
   }
 
-  async function subscribe(campaignId, presence, characterId) {
+  async function openSubscription(campaignId, presence, characterId) {
     const sync = requireClient();
     requireSession();
+    const generation = ++subscriptionGeneration;
+    clearReconnectTimer();
     await Promise.all(activeChannels.map((channel) => sync.removeChannel(channel)));
     activeChannels = [];
     if (presence?.role === "player" && !characterId) throw new Error("A linked character is required for player live sync.");
     publishStatus({ connection: "connecting", message: "Connecting to the live campaign…" });
     await sync.realtime.setAuth(session.access_token);
+    const expectedChannelCount = presence?.role === "player" ? 2 : 1;
+    const subscribedChannels = new Set();
     const campaignChannel = sync.channel(`campaign:${campaignId}`, {
       config: { private: true, presence: { key: session.user.id } },
     });
@@ -326,12 +363,32 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     async function connectChannel(channel, trackPresence = false) {
       activeChannels.push(channel);
       await new Promise((resolve, reject) => {
+        let initialSettled = false;
         channel.subscribe(async (nextStatus, error) => {
+          if (generation !== subscriptionGeneration) return;
           if (nextStatus === "SUBSCRIBED") {
+            subscribedChannels.add(channel);
             if (trackPresence) await channel.track({ ...presence, userId: session.user.id, connectedAt: new Date().toISOString() });
-            resolve();
-          } else if (["CHANNEL_ERROR", "TIMED_OUT"].includes(nextStatus)) {
-            reject(normalizeServiceError(error, "Live campaign connection failed."));
+            reconnectAttempts = 0;
+            if (subscribedChannels.size === expectedChannelCount) {
+              clearReconnectTimer();
+              const reconnected = subscriptionWasLive;
+              subscriptionWasLive = true;
+              publishStatus({ connection: "live", message: reconnected ? "Live campaign reconnected." : "Live campaign connected." });
+              if (reconnected) onEvent({ type: "resync", campaignId });
+            }
+            if (!initialSettled) {
+              initialSettled = true;
+              resolve();
+            }
+          } else if (["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(nextStatus)) {
+            subscribedChannels.delete(channel);
+            publishStatus({ connection: "offline", message: "Live campaign disconnected; reconnecting automatically." });
+            scheduleReconnect(generation);
+            if (!initialSettled) {
+              initialSettled = true;
+              reject(normalizeServiceError(error, "Live campaign connection failed."));
+            }
           }
         });
       });
@@ -350,13 +407,25 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       await Promise.all(activeChannels.map((channel) => sync.removeChannel(channel)));
       activeChannels = [];
       publishStatus({ connection: "offline", message: "Live campaign disconnected; local changes will remain queued." });
+      scheduleReconnect(generation);
       throw error;
     }
     publishStatus({ connection: "live", message: "Live campaign connected." });
     return status;
   }
 
+  async function subscribe(campaignId, presence, characterId) {
+    desiredSubscription = { campaignId, presence, characterId };
+    reconnectAttempts = 0;
+    subscriptionWasLive = false;
+    return openSubscription(campaignId, presence, characterId);
+  }
+
   async function unsubscribe() {
+    desiredSubscription = undefined;
+    subscriptionWasLive = false;
+    subscriptionGeneration += 1;
+    clearReconnectTimer();
     if (client) await Promise.all(activeChannels.map((channel) => client.removeChannel(channel)));
     activeChannels = [];
     return publishStatus({ connection: session ? "connecting" : "signed-out", message: session ? "Live campaign closed." : "Signed out of live sync." });

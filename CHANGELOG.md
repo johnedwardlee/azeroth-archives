@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.0-beta.4
+
+- Preserve cleared optional character fields, including concentration state, across JSON live-sync mutations so ended concentration stays ended on every connected app.
+- Monitor Realtime channel failures, rebuild private campaign and character subscriptions with bounded backoff, refresh authorization tokens, and reconcile a fresh server snapshot after reconnecting.
+
 ## 2.0.0-beta.3
 
 - Fix campaign invitation redemption by removing an ambiguous `campaign_id` reference from the Supabase function and provide a follow-up migration for existing beta databases.

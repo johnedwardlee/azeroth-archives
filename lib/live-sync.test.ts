@@ -8,6 +8,7 @@ import {
   mergeRemoteCharacter,
   mutationCategoryForPatch,
   sanitizeCharacterForSync,
+  sanitizeCharacterPatch,
 } from "./live-sync";
 import type { CharacterData } from "./types";
 
@@ -41,6 +42,12 @@ describe("live sync protocol", () => {
     expect(sanitizeCharacterForSync(character)).toMatchObject({ id: "hero-id", name: "Jaina" });
     expect(sanitizeCharacterForSync(character)).not.toHaveProperty("portraitDataUrl");
     expect(sanitizeCharacterForSync(character)).not.toHaveProperty("readOnlyReview");
+  });
+
+  it("preserves optional-field clearing across JSON transport", () => {
+    const patch = sanitizeCharacterPatch({ concentratingSpellId: undefined, subclassName: undefined, activeEffects: [] });
+    expect(patch).toEqual({ concentratingSpellId: null, subclassName: null, activeEffects: [] });
+    expect(JSON.parse(JSON.stringify(patch))).toEqual(patch);
   });
 
   it("creates deterministic testable mutation and roll envelopes", () => {

@@ -24,6 +24,7 @@ type UpdateStatus = {
 type LiveSyncEvent =
   | { type: "status"; status: LiveSyncStatus }
   | { type: "auth-error"; message: string }
+  | { type: "resync"; campaignId: string }
   | { type: "remote-change"; campaignId: string; event: "INSERT" | "UPDATE" | "DELETE"; payload: { payload?: { table?: string; record?: unknown; old_record?: unknown }; [key: string]: unknown } }
   | { type: "presence"; campaignId: string; state: Record<string, Array<Record<string, unknown>>> };
 

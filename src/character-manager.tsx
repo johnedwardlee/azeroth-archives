@@ -862,6 +862,7 @@ export function CharacterManager() {
     window.azerothDesktop.getLiveSyncStatus().then(setLiveSyncStatus).catch(() => undefined);
     return window.azerothDesktop.onLiveSyncEvent((event) => {
       if (event.type === "status") {
+        liveSyncStatusRef.current = event.status;
         setLiveSyncStatus(event.status);
         if (event.status.connection === "live") window.setTimeout(() => flushSyncOutbox(), 0);
         return;
@@ -872,6 +873,12 @@ export function CharacterManager() {
       }
       if (event.type === "presence") {
         if (event.campaignId === activeLiveCampaignId) setLivePresence(event.state);
+        return;
+      }
+      if (event.type === "resync") {
+        window.setTimeout(() => {
+          flushSyncOutbox().finally(() => refreshAfterSyncSettles(event.campaignId));
+        }, 0);
         return;
       }
       const change = (event.payload.payload ?? event.payload) as { table?: string; record?: Record<string, unknown>; old_record?: Record<string, unknown> };
@@ -1068,6 +1075,15 @@ export function CharacterManager() {
       detail: typeof record.detail === "string" ? record.detail : "",
       createdAt: typeof record.created_at === "string" ? record.created_at : new Date().toISOString(),
     });
+  }
+
+  function refreshAfterSyncSettles(campaignId: string, attempt = 0) {
+    if (campaignId !== activeLiveCampaignId) return;
+    if (syncFlushActive.current || syncOutboxRef.current.length > 0) {
+      if (attempt < 40) window.setTimeout(() => refreshAfterSyncSettles(campaignId, attempt + 1), 250);
+      return;
+    }
+    refreshLiveCampaign(campaignId).catch((error) => setStatus(error instanceof Error ? error.message : "The live campaign could not be refreshed"));
   }
 
   async function initializeLiveSync() {
