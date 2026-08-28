@@ -45,6 +45,7 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
   const [pendingDamage, setPendingDamage] = useState<EncounterDamage>();
   const [damageResult, setDamageResult] = useState("");
   const actions = useMemo(() => generatedCharacterActions(character, catalog), [character, catalog]);
+  const initiativeEffects = conditionRollEffects(character, "ability", "agility", "", catalog);
   const byId = useMemo(() => new Map(actions.map((action) => [action.id, action])), [actions]);
   const visible = favoriteActionsFirst(actions.filter((action) => {
     const matchesQuery = `${action.name} ${action.source} ${action.description}`.toLowerCase().includes(query.trim().toLowerCase());
@@ -75,19 +76,6 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     setPendingDamage(damage);
     setDamageResult("");
     return result;
-  }
-
-  function rollInitiative() {
-    const ability: AbilityKey = "agility";
-    const effects = conditionRollEffects(character, "ability", ability, "", catalog);
-    const mode = resolvedRollMode(rollMode, effects.forcedDisadvantage);
-    const { dice, kept } = rollD20(mode);
-    const modifier = abilityModifier(character.abilities.agility) + effects.modifier;
-    const result: EncounterRollResult = { actionId: "initiative", label: "Initiative", dice, kept, modifier, total: kept + modifier, mode, reasons: effects.reasons };
-    setRollResult(result);
-    setPendingDamage(undefined);
-    setDamageResult("");
-    onRoll?.({ category: "initiative", label: "Initiative", formula: "d20", dice, modifier, total: result.total, mode, detail: effects.reasons.join("; ") });
   }
 
   function spellcastingAbility(spell: CharacterData["spells"][number]) {
@@ -285,11 +273,12 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
   }
 
   return <div className="action-dashboard encounter-workspace">
+    {partyRolls && onRoll && <PartyRollWorkspace rolls={partyRolls} roller="player" storageKey={`azeroth-panel-${character.id}-encounter-party-rolls-v2`} sharingAvailable={partyRollsConnected} onRoll={onRoll} initiative={{ modifier: abilityModifier(character.abilities.agility) + initiativeEffects.modifier, forcedDisadvantage: initiativeEffects.forcedDisadvantage, detail: initiativeEffects.reasons.join("; ") }} />}
     <CombatStatusStrip character={character} catalog={catalog} patchCharacter={patchCharacter} encumbranceRule={encumbranceRule} />
     <CollapsiblePanel className="action-dashboard-header" storageKey={`azeroth-panel-${character.id}-encounter-library-v2`} eyebrow="Active play" title="Encounter workspace" summary={<span>{visible.length} choices</span>}>
       <p>Find attacks, spells, features, items, companion commands, and standard actions without leaving this screen.</p>
       <label className="catalog-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search every action" /></label>
-      <div className="encounter-roll-toolbar"><span>D20 roll mode</span><div className="roll-mode" aria-label="Encounter D20 roll mode">{(["normal", "advantage", "disadvantage"] as RollMode[]).map((mode) => <button type="button" key={mode} className={rollMode === mode ? "active" : ""} aria-pressed={rollMode === mode} onClick={() => setRollMode(mode)}>{mode === "normal" ? "Normal" : mode === "advantage" ? "Adv" : "Dis"}</button>)}</div><button type="button" className="encounter-initiative-button" onClick={rollInitiative}><Dices size={13} />Initiative · {d20Formula(abilityModifier(character.abilities.agility), "agility", "ability")}</button></div>
+      <div className="encounter-roll-toolbar"><span>D20 roll mode</span><div className="roll-mode" aria-label="Encounter D20 roll mode">{(["normal", "advantage", "disadvantage"] as RollMode[]).map((mode) => <button type="button" key={mode} className={rollMode === mode ? "active" : ""} aria-pressed={rollMode === mode} onClick={() => setRollMode(mode)}>{mode === "normal" ? "Normal" : mode === "advantage" ? "Adv" : "Dis"}</button>)}</div></div>
       <div className="encounter-filter-row" aria-label="Action economy filters">{timingFilters.map((filter) => <button type="button" className={timingFilter === filter ? "active" : ""} aria-pressed={timingFilter === filter} onClick={() => setTimingFilter(filter)} key={filter}>{timingLabels[filter]}</button>)}</div>
       <div className="encounter-filter-row purpose-filters" aria-label="Action purpose filters">{purposeFilters.map((filter) => <button type="button" className={purposeFilter === filter ? "active" : ""} aria-pressed={purposeFilter === filter} onClick={() => setPurposeFilter(filter)} key={filter}>{purposeLabels[filter]}</button>)}</div>
       {feedback && <div className="cast-feedback" role="status"><span>{feedback}</span>{undoState && <button className="feedback-undo" onClick={undoLastUse}><RotateCcw size={13} />Undo</button>}<button aria-label="Dismiss action message" onClick={() => setFeedback("")}>×</button></div>}
@@ -304,7 +293,6 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
       </div>
     </CollapsiblePanel>
     <SessionTracker character={character} patchCharacter={patchCharacter} hitDicePools={hitDicePools} onRoll={onRoll} />
-    {partyRolls && onRoll && <PartyRollWorkspace rolls={partyRolls} roller="player" storageKey={`azeroth-panel-${character.id}-encounter-party-rolls`} sharingAvailable={partyRollsConnected} onRoll={onRoll} />}
     {character.recentActions.length > 0 && <CollapsiblePanel className="recent-action-panel" storageKey={`azeroth-panel-${character.id}-encounter-recent`} eyebrow="History" title="Recently used" summary={<span>{character.recentActions.length} entries</span>}><div className="recent-action-list">{character.recentActions.map((entry) => { const action = byId.get(entry.actionId); return <button key={`${entry.actionId}-${entry.usedAt}`} disabled={!action || Boolean(action && unavailableReason(action))} onClick={() => { if (action) useAction(action); }}><span>{entry.name}</span><small>{entry.result}</small></button>; })}</div></CollapsiblePanel>}
     {timingFilter === "all" && references.length > 0 && <CollapsiblePanel className="action-reference-panel" storageKey={`azeroth-panel-${character.id}-encounter-references`} eyebrow="Always available" title="Passive features" summary={<span>{references.length} references</span>} defaultExpanded={false}><div className="encounter-action-grid">{references.map((action) => actionCard(action))}</div></CollapsiblePanel>}
   </div>;

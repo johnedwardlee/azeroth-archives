@@ -376,7 +376,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .encounter-roll-toolbar { justify-content: flex-start; }
 .encounter-roll-toolbar .roll-mode { margin-left: auto; }
-.encounter-initiative-button { min-height: 30px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid #b99650; border-radius: 5px; color: var(--forest-800); background: #fffaf0; cursor: pointer; font-size: 9px; font-weight: 900; }
 .dm-party-workspace { max-width: 1160px; display: flex; flex-direction: column; gap: 16px; margin: 0 auto; }
 .party-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .party-card { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 9px; color: inherit; background: #f9f7f1; cursor: pointer; text-align: left; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
@@ -453,6 +452,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dm-dice-options > div { display: flex; flex-wrap: wrap; gap: 4px; }
 .dm-dice-options > div:first-child button { padding: 3px 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: white; cursor: pointer; font-size: 8px; font-weight: 800; }
 .dm-dice-options > div:first-child button.active { border-color: var(--gold); color: #6c4a1f; background: var(--gold-soft); }
+.dm-dice-options > div:first-child .party-initiative-button { display: inline-flex; align-items: center; gap: 4px; border-color: #b99650; border-radius: 5px; color: var(--forest-800); background: #fffaf0; }
+.dm-dice-options > div:first-child .party-initiative-button:disabled { opacity: .45; cursor: default; }
 .dm-dice-result { display: grid; grid-template-columns: 16px minmax(0, 1fr) 24px; align-items: center; gap: 6px; margin-top: 8px; padding: 7px 8px; border-radius: 6px; color: var(--forest-800); background: white; font-size: 10px; font-weight: 800; }
 .dm-dice-result > button { border: 0; color: var(--muted); background: transparent; cursor: pointer; }
 .hidden-roll-toggle { width: fit-content; display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; color: #76551f; cursor: pointer; font-size: 9px; font-weight: 800; }

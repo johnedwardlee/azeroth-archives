@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.0-beta.8
+
+- Move the shared Party Rolls workspace to the top of the player Encounter view and place Initiative inside its dice roller, with character modifiers and d20 advantage or disadvantage applied before publishing the result to the party.
+- Reset the Party Rolls expansion preference so the relocated Initiative control opens visibly for existing players after updating.
+
 ## 2.0.0-beta.7
 
 - Add a collapsible player dice workspace and live party roll feed to Encounter, including common dice, custom formulas and modifiers, and d20 advantage or disadvantage.

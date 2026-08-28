@@ -32,12 +32,17 @@ describe("v1.5 navigation and encounter workspace", () => {
 
   it("moves During Play into Encounter and resolves attack and damage rolls inline", () => {
     const encounter = readFileSync(new URL("./action-dashboard.tsx", import.meta.url), "utf8");
+    const partyRolls = readFileSync(new URL("./party-roll-workspace.tsx", import.meta.url), "utf8");
     const character = readFileSync(new URL("./character-manager.tsx", import.meta.url), "utf8");
     expect(encounter).toContain("<SessionTracker");
     expect(character).not.toContain("<SessionTracker");
     expect(encounter).toContain('aria-label="Encounter D20 roll mode"');
-    expect(encounter).toContain("function rollInitiative()");
-    expect(encounter).toContain('category: "initiative"');
+    expect(encounter).not.toContain("function rollInitiative()");
+    expect(encounter.indexOf("<PartyRollWorkspace")).toBeLessThan(encounter.indexOf("<CombatStatusStrip"));
+    expect(encounter).toContain("initiative={{ modifier:");
+    expect(encounter).toContain("encounter-party-rolls-v2");
+    expect(partyRolls).toContain("function rollInitiative()");
+    expect(partyRolls).toContain("createInitiativeRoll(initiative, diceMode)");
     expect(encounter).toContain("resolveD20(action");
     expect(encounter).toContain("rollResolvedDamage(true)");
     expect(encounter).toContain('mode === "advantage" ? "2d20 high"');
