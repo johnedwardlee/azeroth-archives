@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld("azerothDesktop", {
   publishRollEvent: (roll) => ipcRenderer.invoke("live-sync:record-roll", roll),
   listCampaignRolls: (campaignId) => ipcRenderer.invoke("live-sync:list-rolls", campaignId),
   clearCampaignRolls: (campaignId) => ipcRenderer.invoke("live-sync:clear-rolls", campaignId),
+  unlinkLiveCharacter: (campaignId, characterId, deleteRollHistory) => ipcRenderer.invoke("live-sync:unlink-character", campaignId, characterId, deleteRollHistory),
   subscribeLiveCampaign: (campaignId, presence, characterId) => ipcRenderer.invoke("live-sync:subscribe", campaignId, presence, characterId),
   unsubscribeLiveCampaign: () => ipcRenderer.invoke("live-sync:unsubscribe"),
   onLiveSyncEvent: (callback) => {

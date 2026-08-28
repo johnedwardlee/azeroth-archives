@@ -27,6 +27,7 @@ create table public.characters (
   state jsonb not null check (jsonb_typeof(state) = 'object'),
   revision bigint not null default 1 check (revision > 0),
   updated_by uuid not null references auth.users(id) on delete restrict,
+  unlinked_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (campaign_id, id)
@@ -397,19 +398,30 @@ begin
     set role = 'player', display_name = excluded.display_name, revoked_at = null, joined_at = now();
 
   if v_invitation.character_id is null then
-    insert into public.characters (id, campaign_id, owner_user_id, state, updated_by)
+    insert into public.characters as existing (id, campaign_id, owner_user_id, state, updated_by, unlinked_at)
     values (
       p_character_id,
       v_invitation.campaign_id,
       v_user_id,
       (p_character_state - 'portraitDataUrl' - 'readOnlyReview' - 'reviewImportedAt')
         || jsonb_build_object('id', p_character_id::text),
-      v_user_id
+      v_user_id,
+      null
     )
+    on conflict (id) do update
+      set owner_user_id = excluded.owner_user_id,
+          state = excluded.state,
+          revision = existing.revision + 1,
+          updated_by = excluded.updated_by,
+          updated_at = now(),
+          unlinked_at = null
+      where existing.campaign_id = excluded.campaign_id
+        and existing.unlinked_at is not null
     returning * into v_character;
+    if not found then raise exception 'This character is already linked to a campaign.'; end if;
   else
     update public.characters character
-    set owner_user_id = v_user_id, updated_by = v_user_id, updated_at = now()
+    set owner_user_id = v_user_id, updated_by = v_user_id, updated_at = now(), unlinked_at = null
     where character.id = v_invitation.character_id
       and character.campaign_id = v_invitation.campaign_id
     returning * into v_character;
@@ -457,6 +469,7 @@ begin
   where character.id = p_character_id
   for update;
   if not found then raise exception 'Character was not found.'; end if;
+  if v_character.unlinked_at is not null then raise exception 'Character is no longer linked to this campaign.'; end if;
   if v_character.owner_user_id <> v_user_id and not public.is_campaign_dm(v_character.campaign_id, v_user_id) then
     raise exception 'You do not have permission to edit this character.';
   end if;
@@ -519,6 +532,7 @@ begin
   if v_user_id is null then raise exception 'Authentication is required.'; end if;
   select character.* into v_character from public.characters character where character.id = p_character_id;
   if not found then raise exception 'Character was not found.'; end if;
+  if v_character.unlinked_at is not null then raise exception 'Character is no longer linked to this campaign.'; end if;
   if v_character.owner_user_id <> v_user_id and not public.is_campaign_dm(v_character.campaign_id, v_user_id) then
     raise exception 'You do not have permission to roll for this character.';
   end if;
@@ -557,6 +571,62 @@ begin
 end;
 $$;
 
+create or replace function public.unlink_campaign_character(
+  p_campaign_id uuid,
+  p_character_id uuid,
+  p_delete_roll_history boolean default false
+)
+returns table (character_id uuid, owner_user_id uuid, deleted_roll_count bigint)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_character public.characters%rowtype;
+  v_deleted bigint := 0;
+begin
+  if v_user_id is null then raise exception 'Authentication is required.'; end if;
+
+  select character.* into v_character
+  from public.characters character
+  where character.id = p_character_id
+    and character.campaign_id = p_campaign_id
+  for update;
+  if not found or v_character.unlinked_at is not null then
+    raise exception 'Linked character was not found.';
+  end if;
+  if v_character.owner_user_id <> v_user_id and not public.is_campaign_dm(p_campaign_id, v_user_id) then
+    raise exception 'Only the character owner or campaign DM can unlink this character.';
+  end if;
+
+  if p_delete_roll_history then
+    delete from public.roll_events event
+    where event.campaign_id = p_campaign_id and event.character_id = p_character_id;
+    get diagnostics v_deleted = row_count;
+  end if;
+
+  update public.characters character
+  set unlinked_at = now(), updated_by = v_user_id, updated_at = now()
+  where character.id = p_character_id;
+
+  update public.campaign_members member
+  set revoked_at = now()
+  where member.campaign_id = p_campaign_id
+    and member.user_id = v_character.owner_user_id
+    and member.role = 'player'
+    and not exists (
+      select 1 from public.characters other
+      where other.campaign_id = p_campaign_id
+        and other.owner_user_id = v_character.owner_user_id
+        and other.id <> p_character_id
+        and other.unlinked_at is null
+    );
+
+  return query select v_character.id, v_character.owner_user_id, v_deleted;
+end;
+$$;
+
 create or replace function public.clear_campaign_roll_events(p_campaign_id uuid)
 returns bigint
 language plpgsql
@@ -581,6 +651,7 @@ revoke execute on function public.redeem_campaign_invitation(text, uuid, jsonb, 
 revoke execute on function public.apply_character_mutation(uuid, uuid, bigint, text, jsonb) from public, anon;
 revoke execute on function public.record_roll_event(uuid, uuid, text, text, text, text, jsonb, integer, integer, text, text, boolean) from public, anon;
 revoke execute on function public.revoke_campaign_member(uuid, uuid) from public, anon;
+revoke execute on function public.unlink_campaign_character(uuid, uuid, boolean) from public, anon;
 revoke execute on function public.clear_campaign_roll_events(uuid) from public, anon;
 grant execute on function public.create_campaign(text) to authenticated;
 grant execute on function public.create_campaign_invitation(uuid, uuid, integer) to authenticated;
@@ -588,6 +659,7 @@ grant execute on function public.redeem_campaign_invitation(text, uuid, jsonb, t
 grant execute on function public.apply_character_mutation(uuid, uuid, bigint, text, jsonb) to authenticated;
 grant execute on function public.record_roll_event(uuid, uuid, text, text, text, text, jsonb, integer, integer, text, text, boolean) to authenticated;
 grant execute on function public.revoke_campaign_member(uuid, uuid) to authenticated;
+grant execute on function public.unlink_campaign_character(uuid, uuid, boolean) to authenticated;
 grant execute on function public.clear_campaign_roll_events(uuid) to authenticated;
 
 create or replace function public.prune_campaign_roll_events()
@@ -654,6 +726,12 @@ $$;
 create trigger broadcast_character_link_changes
 after insert or delete on public.characters
 for each row execute function public.broadcast_campaign_change();
+
+create trigger broadcast_character_unlink_changes
+after update of unlinked_at on public.characters
+for each row
+when (old.unlinked_at is distinct from new.unlinked_at)
+execute function public.broadcast_campaign_change();
 
 create trigger broadcast_character_mutations
 after insert on public.character_mutations

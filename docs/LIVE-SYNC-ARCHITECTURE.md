@@ -132,7 +132,7 @@ DM installations gain a primary Party tab containing:
 - JSON character backups, full-library backups, DM review exports, and PDFs remain available.
 - Importing a DM review does not automatically link it.
 - Store migrations add sync metadata and outboxes without changing character IDs or deleting local data.
-- Unlinking removes the remote relationship, not the local character.
+- Unlinking archives the shared snapshot, revokes the player membership, clears pending sync work for that character, and never removes the local character. The confirming player or DM separately chooses whether shared roll history is retained or deleted.
 
 ## Release gates
 

@@ -1,5 +1,6 @@
 import type {
   CharacterData,
+  CharacterSyncLink,
   CharacterMutation,
   MutationCategory,
   RollEventCategory,
@@ -189,6 +190,18 @@ export function enqueueSyncEntry(outbox: SyncOutboxEntry[], entry: SyncOutboxEnt
 
 export function acknowledgeSyncEntry(outbox: SyncOutboxEntry[], entryId: string) {
   return outbox.filter((entry) => entry.id !== entryId);
+}
+
+export function removeCharacterSyncState(
+  links: CharacterSyncLink[],
+  outbox: SyncOutboxEntry[],
+  campaignId: string,
+  characterId: string,
+) {
+  return {
+    links: links.filter((link) => !(link.campaignId === campaignId && link.characterId === characterId)),
+    outbox: outbox.filter((entry) => !(entry.campaignId === campaignId && entry.characterId === characterId)),
+  };
 }
 
 export function mergeRemoteCharacter(local: CharacterData, remote: CharacterData): CharacterData {

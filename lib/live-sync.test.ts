@@ -7,6 +7,7 @@ import {
   enqueueSyncEntry,
   mergeRemoteCharacter,
   mutationCategoryForPatch,
+  removeCharacterSyncState,
   sanitizeCharacterForSync,
   sanitizeCharacterPatch,
 } from "./live-sync";
@@ -85,5 +86,16 @@ describe("live sync protocol", () => {
   it("preserves the local portrait while applying a remote snapshot", () => {
     const remote = { ...character, name: "Jaina Proudmoore", portraitDataUrl: undefined, readOnlyReview: false };
     expect(mergeRemoteCharacter(character, remote)).toMatchObject({ name: "Jaina Proudmoore", portraitDataUrl: character.portraitDataUrl, readOnlyReview: false });
+  });
+
+  it("removes only the unlinked character's links and queued work", () => {
+    const heroMutation = createCharacterMutation("campaign", "hero-id", 1, { currentHp: 4 }, { id: "hero-mutation" });
+    const allyMutation = createCharacterMutation("campaign", "ally-id", 1, { currentHp: 8 }, { id: "ally-mutation" });
+    const result = removeCharacterSyncState([
+      { characterId: "hero-id", campaignId: "campaign", campaignName: "Test", role: "player", revision: 1, linkedAt: "now" },
+      { characterId: "ally-id", campaignId: "campaign", campaignName: "Test", role: "dm", revision: 1, linkedAt: "now" },
+    ], [heroMutation, allyMutation], "campaign", "hero-id");
+    expect(result.links.map((link) => link.characterId)).toEqual(["ally-id"]);
+    expect(result.outbox.map((entry) => entry.id)).toEqual(["ally-mutation"]);
   });
 });

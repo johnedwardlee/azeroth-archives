@@ -5,6 +5,7 @@ const migration = readFileSync(new URL("./migrations/202608240001_live_sync.sql"
 const invitationFix = readFileSync(new URL("./migrations/202608250001_fix_invitation_redemption.sql", import.meta.url), "utf8");
 const rollClear = readFileSync(new URL("./migrations/202608280001_clear_campaign_rolls.sql", import.meta.url), "utf8");
 const sharedRolls = readFileSync(new URL("./migrations/202608280002_shared_party_rolls.sql", import.meta.url), "utf8");
+const characterUnlink = readFileSync(new URL("./migrations/202608280003_character_unlink.sql", import.meta.url), "utf8");
 
 describe("live-sync migration security contract", () => {
   it("keeps direct writes behind authenticated RPC functions", () => {
@@ -49,6 +50,26 @@ describe("live-sync migration security contract", () => {
     for (const sql of [migration, invitationFix]) {
       expect(sql).toContain("on conflict on constraint campaign_members_pkey");
       expect(sql).not.toContain("on conflict (campaign_id, user_id)");
+    }
+  });
+
+  it("archives unlinked characters, revokes membership, and makes roll deletion explicit", () => {
+    for (const sql of [migration, characterUnlink]) {
+      expect(sql).toContain("unlinked_at");
+      expect(sql).toContain("public.unlink_campaign_character");
+      expect(sql).toContain("p_delete_roll_history");
+      expect(sql).toContain("set revoked_at = now()");
+      expect(sql).toContain("Only the character owner or campaign DM can unlink this character.");
+      expect(sql).toContain("grant execute on function public.unlink_campaign_character(uuid, uuid, boolean) to authenticated");
+      expect(sql).toContain("after update of unlinked_at on public.characters");
+    }
+  });
+
+  it("blocks mutations and rolls after unlink while allowing the same local id to relink", () => {
+    for (const sql of [migration, characterUnlink]) {
+      expect(sql).toContain("Character is no longer linked to this campaign.");
+      expect(sql).toContain("and existing.unlinked_at is not null");
+      expect(sql).toContain("unlinked_at = null");
     }
   });
 });

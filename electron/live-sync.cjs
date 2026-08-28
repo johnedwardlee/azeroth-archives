@@ -272,7 +272,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
   async function listCharacters(campaignId) {
     const sync = requireClient();
     requireSession();
-    const result = await sync.from("characters").select("id, campaign_id, owner_user_id, state, revision, updated_at").eq("campaign_id", campaignId).order("updated_at", { ascending: false });
+    const result = await sync.from("characters").select("id, campaign_id, owner_user_id, state, revision, updated_at").eq("campaign_id", campaignId).is("unlinked_at", null).order("updated_at", { ascending: false });
     if (result.error) throw normalizeServiceError(result.error, "Synchronized characters could not be loaded.");
     return (result.data ?? []).map((row) => ({ character: row.state, campaignId: row.campaign_id, ownerUserId: row.owner_user_id, revision: Number(row.revision), updatedAt: row.updated_at }));
   }
@@ -344,6 +344,23 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     const result = await sync.rpc("clear_campaign_roll_events", { p_campaign_id: campaignId });
     if (result.error) throw normalizeServiceError(result.error, "Campaign rolls could not be cleared.");
     return Number(result.data ?? 0);
+  }
+
+  async function unlinkCharacter(campaignId, characterId, deleteRollHistory = false) {
+    const sync = requireClient();
+    requireSession();
+    const result = await sync.rpc("unlink_campaign_character", {
+      p_campaign_id: campaignId,
+      p_character_id: characterId,
+      p_delete_roll_history: Boolean(deleteRollHistory),
+    });
+    if (result.error) throw normalizeServiceError(result.error, "The character could not be unlinked.");
+    const unlinked = Array.isArray(result.data) ? result.data[0] : result.data;
+    return unlinked ? {
+      characterId: unlinked.character_id,
+      ownerUserId: unlinked.owner_user_id,
+      deletedRollCount: Number(unlinked.deleted_roll_count ?? 0),
+    } : undefined;
   }
 
   async function openSubscription(campaignId, presence, characterId) {
@@ -464,6 +481,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     recordRoll,
     listRolls,
     clearRolls,
+    unlinkCharacter,
     subscribe,
     unsubscribe,
   };

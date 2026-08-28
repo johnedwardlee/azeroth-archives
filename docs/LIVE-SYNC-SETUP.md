@@ -19,7 +19,7 @@ The application code is ready to remain fully offline when no service is configu
 3. Run it once and confirm the transaction succeeds.
 4. Do not expose table write grants or add a service-role key to the app. All writes intentionally pass through the migration's authenticated RPC functions.
 
-The migration creates the campaign, membership, invitation, character, mutation-audit, and roll-event tables; enables row-level security; authorizes private campaign and party-roll Realtime channels; protects hidden DM rolls; and enforces the 30-day/500-roll retention policy. This baseline is consolidated through `v2.0.0`; a new project runs only this file.
+The migration creates the campaign, membership, invitation, character, mutation-audit, and roll-event tables; enables row-level security; authorizes private campaign and party-roll Realtime channels; protects hidden DM rolls; and enforces the 30-day/500-roll retention policy. This baseline is consolidated through `v2.0.1`; a new project runs only this file.
 
 ### Upgrade an existing v2.0 beta project
 
@@ -27,12 +27,13 @@ Do not rerun the consolidated baseline against an existing beta database. Apply 
 
 | Existing database state | Required follow-up migrations |
 | --- | --- |
-| Created before `v2.0.0-beta.3` | `202608250001_fix_invitation_redemption.sql`, `202608280001_clear_campaign_rolls.sql`, `202608280002_shared_party_rolls.sql` |
-| Created on beta.3 through beta.5 | `202608280001_clear_campaign_rolls.sql`, `202608280002_shared_party_rolls.sql` |
-| Created on beta.6 | `202608280002_shared_party_rolls.sql` |
-| Created on beta.7 or beta.8 with the shared-roll migration already applied | None |
+| Created before `v2.0.0-beta.3` | `202608250001_fix_invitation_redemption.sql`, `202608280001_clear_campaign_rolls.sql`, `202608280002_shared_party_rolls.sql`, `202608280003_character_unlink.sql` |
+| Created on beta.3 through beta.5 | `202608280001_clear_campaign_rolls.sql`, `202608280002_shared_party_rolls.sql`, `202608280003_character_unlink.sql` |
+| Created on beta.6 | `202608280002_shared_party_rolls.sql`, `202608280003_character_unlink.sql` |
+| Created on beta.7, beta.8, or stable `v2.0.0` | `202608280003_character_unlink.sql` |
+| Created from the consolidated `v2.0.1` baseline | None |
 
-The follow-ups replace functions and policies without deleting campaigns, invitations, characters, accounts, or existing roll history. The final migration lets players receive visible party rolls while keeping hidden DM rolls protected by row-level security and a separate private Realtime channel.
+The follow-ups replace functions and policies without deleting campaigns, invitations, characters, accounts, or existing roll history. The shared-roll migration lets players receive visible party rolls while keeping hidden DM rolls protected. The character-unlink migration adds a confirmed archive operation; existing roll history is retained unless the player or DM explicitly chooses to delete it.
 
 ## 3. Configure GitHub release builds
 

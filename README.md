@@ -37,7 +37,7 @@ Use **Back up everything** before major campaign or application changes. A full 
 
 ## Privacy and diagnostics
 
-Characters remain stored locally and all offline features work without an account. If a player explicitly links a character to Live Sync, the linked character snapshot, campaign membership, mutation metadata, presence, and recent shared roll history are also sent to the configured Supabase project so authorized campaign members can synchronize. Unlinked characters and imported content packs are not uploaded by Live Sync.
+Characters remain stored locally and all offline features work without an account. If a player explicitly links a character to Live Sync, the linked character snapshot, campaign membership, mutation metadata, presence, and recent shared roll history are also sent to the configured Supabase project so authorized campaign members can synchronize. Unlinked characters and imported content packs are not uploaded by Live Sync. Unlinking always keeps the local sheet and lets the user choose whether that character's previous shared rolls remain in campaign history.
 
 The desktop network allowlist permits GitHub hosts used for application updates and, when configured, the campaign's Supabase HTTPS and secure WebSocket hosts. Authentication sessions are protected with the operating system's encrypted credential storage. Exported diagnostics contain application versions, connection state, and record counts, but not character-sheet contents or authentication tokens.
 

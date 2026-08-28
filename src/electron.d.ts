@@ -64,6 +64,7 @@ declare global {
       publishRollEvent: (roll: SharedRollEvent) => Promise<string>;
       listCampaignRolls: (campaignId: string) => Promise<SharedRollEvent[]>;
       clearCampaignRolls: (campaignId: string) => Promise<number>;
+      unlinkLiveCharacter: (campaignId: string, characterId: string, deleteRollHistory: boolean) => Promise<{ characterId: string; ownerUserId: string; deletedRollCount: number } | undefined>;
       subscribeLiveCampaign: (campaignId: string, presence: { role: AppRole; displayName: string }, characterId?: string) => Promise<LiveSyncStatus>;
       unsubscribeLiveCampaign: () => Promise<LiveSyncStatus>;
       onLiveSyncEvent: (callback: (event: LiveSyncEvent) => void) => () => void;

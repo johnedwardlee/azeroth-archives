@@ -50,7 +50,7 @@ import { assertContentPack, contentPackValidationError } from "../lib/content-va
 import { normalizeCampaignProfile, parseCampaignProfileFile, serializeCampaignProfile } from "../lib/campaign-profile";
 import { evaluateCharacterReadiness } from "../lib/character-readiness";
 import { createDmReviewExport } from "../lib/dm-review";
-import { acknowledgeSyncEntry, createCharacterMutation, createSharedRollEvent, dmMutationGuard, enqueueSyncEntry, mergeRemoteCharacter, type DmMutationIntent, type LocalRollEvent } from "../lib/live-sync";
+import { acknowledgeSyncEntry, createCharacterMutation, createSharedRollEvent, dmMutationGuard, enqueueSyncEntry, mergeRemoteCharacter, removeCharacterSyncState, type DmMutationIntent, type LocalRollEvent } from "../lib/live-sync";
 import {
   calculateArmorClass,
   calculateEffectiveSpeed,
@@ -1169,7 +1169,7 @@ export function CharacterManager() {
     charactersRef.current = mergedCharacters;
     await Promise.all(normalized.map((entry) => window.azerothDesktop?.saveCharacter(entry.character)));
     const role = appRole === "dm" ? "dm" : "player";
-    const retained = syncLinksRef.current.filter((link) => link.campaignId !== campaignId || !remoteIds.has(link.characterId));
+    const retained = syncLinksRef.current.filter((link) => link.campaignId !== campaignId);
     const nextLinks = [
       ...normalized.map(({ snapshot, character: synced }) => ({
         characterId: synced.id,
@@ -1243,6 +1243,49 @@ export function CharacterManager() {
     }, ...syncLinksRef.current.filter((link) => link.characterId !== remote.id)]);
     await persistCharacter(remote);
     await selectLiveCampaign(result.campaignId, campaigns);
+  }
+
+  async function unlinkLiveCharacter(characterId: string, deleteRollHistory: boolean) {
+    if (!window.azerothDesktop) return;
+    const link = syncLinksRef.current.find((entry) => entry.characterId === characterId);
+    if (!link) throw new Error("This character is not linked to a live campaign.");
+
+    for (let attempt = 0; syncFlushActive.current && attempt < 40; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+    }
+    if (syncFlushActive.current) throw new Error("Live changes are still being saved. Try unlinking again in a moment.");
+
+    await window.azerothDesktop.unlinkLiveCharacter(link.campaignId, characterId, deleteRollHistory);
+    const nextSync = removeCharacterSyncState(syncLinksRef.current, syncOutboxRef.current, link.campaignId, characterId);
+    replaceSyncLinks(nextSync.links);
+    replaceSyncOutbox(nextSync.outbox);
+    for (const entryId of [...syncEntriesInFlight.current]) {
+      if (!nextSync.outbox.some((entry) => entry.id === entryId)) syncEntriesInFlight.current.delete(entryId);
+    }
+    if (deleteRollHistory) setLiveRolls((entries) => entries.filter((entry) => entry.characterId !== characterId));
+    if (dmFullEditCharacterId === characterId) setDmFullEditCharacterId(undefined);
+
+    if (link.role === "player") {
+      const remainingPlayerLink = nextSync.links.find((entry) => entry.campaignId === link.campaignId && entry.role === "player");
+      if (remainingPlayerLink) {
+        await selectLiveCampaign(link.campaignId);
+        setStatus("Character unlinked; its local sheet was kept and the remaining campaign link is still live");
+        return;
+      }
+      const nextStatus = await window.azerothDesktop.unsubscribeLiveCampaign();
+      setLiveSyncStatus(nextStatus);
+      liveSyncStatusRef.current = nextStatus;
+      setActiveLiveCampaignId(undefined);
+      setLiveCampaignMembers([]);
+      setLiveRolls([]);
+      setLivePresence({});
+      setLiveCampaigns(await window.azerothDesktop.listLiveCampaigns());
+      setStatus("Character unlinked; the complete local sheet was kept");
+      return;
+    }
+
+    await refreshLiveCampaign(link.campaignId);
+    setStatus(`Character removed from the live campaign${deleteRollHistory ? " and shared rolls deleted" : "; shared rolls retained"}`);
   }
 
   async function signOutLiveSync() {
@@ -2454,7 +2497,7 @@ export function CharacterManager() {
           <button type="button" onClick={() => setVisiblePanelsExpanded(false)}>Collapse all</button>
         </div>}
 
-        {tab === "party" && <DmPartyWorkspace characters={partyCharacters} members={liveCampaignMembers} rolls={liveRolls} onlineUserIds={onlineLiveUserIds} ownerByCharacterId={partyOwnerByCharacterId} selectedCharacterId={dmPartyCharacterId} fullEditCharacterId={dmFullEditCharacterId} equipment={equipment} spells={spells} onSelectCharacter={(characterId) => { if (characterId !== dmPartyCharacterId) setDmFullEditCharacterId(undefined); setDmPartyCharacterId(characterId); }} onToggleFullEdit={(characterId, enabled) => setDmFullEditCharacterId(enabled ? characterId : undefined)} onOpenSheet={(characterId) => { const selected = charactersRef.current.find((entry) => entry.id === characterId); if (selected) { setCharacter(selected); setTab("encounter"); } }} onPatch={patchLiveCharacter} onRoll={publishDmRoll} onClearRolls={clearLiveCampaignRolls} />}
+        {tab === "party" && <DmPartyWorkspace characters={partyCharacters} members={liveCampaignMembers} rolls={liveRolls} onlineUserIds={onlineLiveUserIds} ownerByCharacterId={partyOwnerByCharacterId} selectedCharacterId={dmPartyCharacterId} fullEditCharacterId={dmFullEditCharacterId} equipment={equipment} spells={spells} onSelectCharacter={(characterId) => { if (characterId !== dmPartyCharacterId) setDmFullEditCharacterId(undefined); setDmPartyCharacterId(characterId); }} onToggleFullEdit={(characterId, enabled) => setDmFullEditCharacterId(enabled ? characterId : undefined)} onOpenSheet={(characterId) => { const selected = charactersRef.current.find((entry) => entry.id === characterId); if (selected) { setCharacter(selected); setTab("encounter"); } }} onPatch={patchLiveCharacter} onRoll={publishDmRoll} onClearRolls={clearLiveCampaignRolls} onRemoveCharacter={unlinkLiveCharacter} />}
 
         {tab === "character" && (
           <div className="overview-grid">
@@ -2572,7 +2615,7 @@ export function CharacterManager() {
       </div>}
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-      {showLiveSync && <LiveSyncPanel status={liveSyncStatus} appRole={appRole} characters={characters} links={syncLinks} campaigns={liveCampaigns} activeCampaignId={activeLiveCampaignId} onClose={() => setShowLiveSync(false)} onRequestDmLink={requestDmMagicLink} onCreateCampaign={createLiveCampaign} onSelectCampaign={(campaignId) => selectLiveCampaign(campaignId)} onCreateInvitation={createLiveInvitation} onRedeemInvitation={redeemLiveInvitation} onSignOut={signOutLiveSync} />}
+      {showLiveSync && <LiveSyncPanel status={liveSyncStatus} appRole={appRole} characters={characters} links={syncLinks} campaigns={liveCampaigns} activeCampaignId={activeLiveCampaignId} onClose={() => setShowLiveSync(false)} onRequestDmLink={requestDmMagicLink} onCreateCampaign={createLiveCampaign} onSelectCampaign={(campaignId) => selectLiveCampaign(campaignId)} onCreateInvitation={createLiveInvitation} onRedeemInvitation={redeemLiveInvitation} onUnlinkCharacter={unlinkLiveCharacter} onSignOut={signOutLiveSync} />}
 
       <div className={`drawer-scrim ${showLibrary || showRoster || showCampaigns ? "visible" : ""}`} onClick={() => { setShowLibrary(false); setShowRoster(false); setShowCampaigns(false); }} />
       {showLibrary && <ContentPackWorkshop packs={customPacks} disabledPackIds={disabledPackIds} bundledPackId={bundledPackId} onClose={() => setShowLibrary(false)} onImport={() => fileInput.current?.click()} onSave={saveContentPack} onRemove={removePack} onToggle={toggleContentPack} onExport={exportContentPack} />}

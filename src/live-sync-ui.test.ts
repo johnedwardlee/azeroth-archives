@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 describe("live-sync user interface contract", () => {
   const manager = readFileSync(new URL("./character-manager.tsx", import.meta.url), "utf8");
+  const syncPanel = readFileSync(new URL("./live-sync-panel.tsx", import.meta.url), "utf8");
   const party = readFileSync(new URL("./dm-party-workspace.tsx", import.meta.url), "utf8");
   const roller = readFileSync(new URL("./party-roll-workspace.tsx", import.meta.url), "utf8");
   const encounter = readFileSync(new URL("./action-dashboard.tsx", import.meta.url), "utf8");
@@ -52,5 +53,17 @@ describe("live-sync user interface contract", () => {
     expect(roller).toContain("allowHidden && hideRoll");
     expect(party).toContain("allowHidden");
     expect(manager).toContain("window.azerothDesktop.listCampaignRolls(campaignId)");
+  });
+
+  it("offers confirmed player unlink and DM removal without deleting local sheets", () => {
+    expect(syncPanel).toContain("Confirm unlink");
+    expect(syncPanel).toContain("The local sheet was kept.");
+    expect(syncPanel).toContain("Delete shared roll history");
+    expect(party).toContain("Remove from campaign");
+    expect(party).toContain("The player keeps their local sheet.");
+    expect(manager).toContain("removeCharacterSyncState");
+    expect(manager).toContain("unlinkLiveCharacter");
+    expect(preload).toContain('ipcRenderer.invoke("live-sync:unlink-character"');
+    expect(main).toContain('ipcMain.handle("live-sync:unlink-character"');
   });
 });

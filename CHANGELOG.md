@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.0.1
+
+- Add confirmed character unlinking for players and campaign removal for DMs while always preserving the complete local sheet.
+- Let either role explicitly retain or delete that character's shared campaign roll history during unlinking.
+- Archive unlinked server snapshots, revoke their player membership, block further mutations and rolls, clear stale local sync queues, and support safely relinking the same local character later.
+- Correct live-campaign refresh so removed characters do not retain stale link metadata on the DM device.
+
 ## 2.0.0
 
 - Release opt-in, offline-first Live Sync for private campaigns, including authenticated invitations, encrypted local sessions, revisioned character updates, durable offline queues, reconnect recovery, and database-enforced membership permissions.

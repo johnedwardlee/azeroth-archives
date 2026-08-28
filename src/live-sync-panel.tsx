@@ -1,5 +1,5 @@
 import { useMemo, useState, type MouseEvent } from "react";
-import { Cloud, Copy, Link2, LogOut, Mail, Plus, Radio, X } from "lucide-react";
+import { Cloud, Copy, Link2, LogOut, Mail, Plus, Radio, Unlink, X } from "lucide-react";
 import type { AppRole, CharacterData, CharacterSyncLink, LiveCampaign, LiveSyncStatus } from "../lib/types";
 
 type Props = {
@@ -15,6 +15,7 @@ type Props = {
   onSelectCampaign: (campaignId: string) => Promise<void>;
   onCreateInvitation: () => Promise<{ invitationCode: string; expiresAt: string } | undefined>;
   onRedeemInvitation: (code: string, characterId: string, playerName: string) => Promise<void>;
+  onUnlinkCharacter: (characterId: string, deleteRollHistory: boolean) => Promise<void>;
   onSignOut: () => Promise<void>;
 };
 
@@ -27,7 +28,7 @@ export function formatInvitationCodeInput(value: string) {
     ?.join("-") ?? "";
 }
 
-export function LiveSyncPanel({ status, appRole, characters, links, campaigns, activeCampaignId, onClose, onRequestDmLink, onCreateCampaign, onSelectCampaign, onCreateInvitation, onRedeemInvitation, onSignOut }: Props) {
+export function LiveSyncPanel({ status, appRole, characters, links, campaigns, activeCampaignId, onClose, onRequestDmLink, onCreateCampaign, onSelectCampaign, onCreateInvitation, onRedeemInvitation, onUnlinkCharacter, onSignOut }: Props) {
   const [email, setEmail] = useState("");
   const [campaignName, setCampaignName] = useState("");
   const [inviteCode, setInviteCode] = useState("");
@@ -36,6 +37,8 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
   const [generatedInvite, setGeneratedInvite] = useState<{ invitationCode: string; expiresAt: string }>();
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [unlinkTarget, setUnlinkTarget] = useState<CharacterSyncLink>();
+  const [deleteRollHistory, setDeleteRollHistory] = useState(false);
   const unlinkedCharacters = useMemo(() => characters.filter((entry) => entry.id !== "draft" && !links.some((link) => link.characterId === entry.id)), [characters, links]);
 
   async function run(operation: () => Promise<void>, success: string) {
@@ -86,7 +89,8 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
         <button className="button button-primary" disabled={busy || !inviteCode.trim() || !playerName.trim() || !characterId} onClick={() => run(async () => { await onRedeemInvitation(inviteCode, characterId, playerName); setInviteCode(""); }, "Character linked. Live changes will now synchronize.")}><Link2 size={15} />Link character</button>
       </section>}
 
-      {links.length > 0 && <section className="sync-linked-list"><span className="eyebrow">Linked on this device</span>{links.map((link) => <div key={`${link.campaignId}-${link.characterId}`}><strong>{characters.find((entry) => entry.id === link.characterId)?.name ?? link.characterId}</strong><span>{link.campaignName} · {link.role} · revision {link.revision}</span></div>)}</section>}
+      {links.length > 0 && <section className="sync-linked-list"><span className="eyebrow">Linked on this device</span>{links.map((link) => <div className="sync-linked-row" key={`${link.campaignId}-${link.characterId}`}><div><strong>{characters.find((entry) => entry.id === link.characterId)?.name ?? link.characterId}</strong><span>{link.campaignName} · {link.role} · revision {link.revision}</span></div>{link.role === "player" && <button className="button button-quiet" disabled={busy} onClick={() => { setDeleteRollHistory(false); setUnlinkTarget(link); }}><Unlink size={14} />Unlink</button>}</div>)}</section>}
+      {unlinkTarget && <section className="sync-unlink-confirm" aria-label="Confirm character unlink"><div><span className="eyebrow">Unlink character</span><h3>{characters.find((entry) => entry.id === unlinkTarget.characterId)?.name ?? "This character"}</h3><p>The character will leave <strong>{unlinkTarget.campaignName}</strong>, but its complete local sheet will stay on this device. The DM will no longer receive changes.</p></div><label className="sync-history-choice"><input type="checkbox" checked={deleteRollHistory} onChange={(event) => setDeleteRollHistory(event.target.checked)} /><span><strong>Delete shared roll history</strong><small>Otherwise this character’s previous shared rolls remain in the campaign history.</small></span></label><div className="sync-confirm-actions"><button className="button button-quiet" disabled={busy} onClick={() => setUnlinkTarget(undefined)}>Cancel</button><button className="button button-danger" disabled={busy} onClick={() => run(async () => { await onUnlinkCharacter(unlinkTarget.characterId, deleteRollHistory); setUnlinkTarget(undefined); }, "Character unlinked. The local sheet was kept.")}><Unlink size={14} />Confirm unlink</button></div></section>}
       {feedback && <p className="sync-feedback" role="status">{feedback}</p>}
       {status.authenticated && appRole === "dm" && <button className="button button-quiet sync-signout" disabled={busy} onClick={() => run(onSignOut, "Signed out.")}><LogOut size={14} />Sign out of live sync</button>}
     </section>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Backpack, BookOpen, Heart, Minus, Plus, Radio, Shield, Sparkles, Users } from "lucide-react";
+import { Activity, Backpack, BookOpen, Heart, Minus, Plus, Radio, Shield, Sparkles, UserMinus, Users } from "lucide-react";
 import { calculateEncumbrance, STANDARD_CONDITIONS, syncEffectConditions } from "../lib/character-rules";
 import type { LocalRollEvent } from "../lib/live-sync";
 import type { CharacterData, EquipmentDefinition, InventoryItem, LiveCampaignMember, SharedRollEvent, SpellDefinition } from "../lib/types";
@@ -25,6 +25,7 @@ type Props = {
   onPatch: (characterId: string, patch: Partial<CharacterData>, intent: DmIntent) => void;
   onRoll: (characterId: string, roll: LocalRollEvent) => void;
   onClearRolls: () => Promise<void>;
+  onRemoveCharacter: (characterId: string, deleteRollHistory: boolean) => Promise<void>;
 };
 
 function equipmentDescription(item: EquipmentDefinition) {
@@ -79,12 +80,15 @@ export function removeDmConditionPatch(character: CharacterData, condition: stri
   };
 }
 
-export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ownerByCharacterId, selectedCharacterId, fullEditCharacterId, equipment, spells, onSelectCharacter, onToggleFullEdit, onOpenSheet, onPatch, onRoll, onClearRolls }: Props) {
+export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ownerByCharacterId, selectedCharacterId, fullEditCharacterId, equipment, spells, onSelectCharacter, onToggleFullEdit, onOpenSheet, onPatch, onRoll, onClearRolls, onRemoveCharacter }: Props) {
   const selected = characters.find((entry) => entry.id === selectedCharacterId) ?? characters[0];
   const [itemId, setItemId] = useState("");
   const [spellId, setSpellId] = useState("");
   const [customItemName, setCustomItemName] = useState("");
   const [condition, setCondition] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [deleteRollHistory, setDeleteRollHistory] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const memberById = useMemo(() => new Map(members.map((member) => [member.userId, member])), [members]);
   const availableSpells = useMemo(() => selected ? spells
     .filter((spell) => !selected.spells.some((known) => known.id === spell.id))
@@ -96,6 +100,8 @@ export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ow
     setSpellId("");
     setCustomItemName("");
     setCondition("");
+    setConfirmRemove(false);
+    setDeleteRollHistory(false);
   }, [selected?.id]);
 
   function ownerName(character: CharacterData) {
@@ -216,6 +222,8 @@ export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ow
           </CollapsiblePanel>
           <CollapsiblePanel contained className="dm-control-section" storageKey={`azeroth-panel-dm-${selected.id}-spells`} eyebrow="Spell controls" title={<span className="dm-collapsible-title"><BookOpen size={15} />Spells</span>} summary={<span>{selected.spells.length} known</span>}><div className="dm-add-row"><DescriptionPicker ariaLabel="Available spells" value={spellId} placeholder="Choose a known spell" onChange={setSpellId} options={availableSpells.map((spell) => ({ value: spell.id, label: spell.name, meta: `${spell.level ? `Level ${spell.level}` : "Cantrip"} · ${spell.school} · ${spell.classes.join(", ")}`, description: [`Casting time: ${spell.castingTime}`, `Range: ${spell.range}`, `Components: ${spell.components}`, `Duration: ${spell.duration}`, spell.description].join("\n") }))} /><button className="button button-outline" disabled={!spellId} onClick={addSpell}>Add</button></div></CollapsiblePanel>
           <button className="button button-primary dm-open-sheet" onClick={() => onOpenSheet(selected.id)}>Open live character sheet</button>
+          {!confirmRemove && <button className="button button-quiet dm-remove-character" onClick={() => setConfirmRemove(true)}><UserMinus size={14} />Remove from campaign</button>}
+          {confirmRemove && <div className="dm-remove-confirm"><div><strong>Remove {selected.name} from this campaign?</strong><p>The player keeps their local sheet. This device also keeps its cached copy until you delete it normally.</p></div><label className="sync-history-choice"><input type="checkbox" checked={deleteRollHistory} onChange={(event) => setDeleteRollHistory(event.target.checked)} /><span><strong>Delete shared roll history</strong><small>Leave unchecked to keep this character’s previous rolls in party history.</small></span></label><div className="sync-confirm-actions"><button className="button button-quiet" disabled={removing} onClick={() => setConfirmRemove(false)}>Cancel</button><button className="button button-danger" disabled={removing} onClick={async () => { setRemoving(true); try { await onRemoveCharacter(selected.id, deleteRollHistory); setConfirmRemove(false); } finally { setRemoving(false); } }}><UserMinus size={14} />{removing ? "Removing…" : "Confirm removal"}</button></div></div>}
         </>}
       </section>
 
