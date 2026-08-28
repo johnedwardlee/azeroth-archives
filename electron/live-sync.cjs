@@ -336,6 +336,14 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     }));
   }
 
+  async function clearRolls(campaignId) {
+    const sync = requireClient();
+    requireSession();
+    const result = await sync.rpc("clear_campaign_roll_events", { p_campaign_id: campaignId });
+    if (result.error) throw normalizeServiceError(result.error, "Campaign rolls could not be cleared.");
+    return Number(result.data ?? 0);
+  }
+
   async function openSubscription(campaignId, presence, characterId) {
     const sync = requireClient();
     requireSession();
@@ -448,6 +456,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     applyMutation,
     recordRoll,
     listRolls,
+    clearRolls,
     subscribe,
     unsubscribe,
   };

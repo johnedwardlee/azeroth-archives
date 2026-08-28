@@ -55,6 +55,7 @@ ipcMain.handle("live-sync:list-characters", (_event, campaignId) => liveSync.lis
 ipcMain.handle("live-sync:apply-mutation", (_event, mutation) => liveSync.applyMutation(mutation));
 ipcMain.handle("live-sync:record-roll", (_event, roll) => liveSync.recordRoll(roll));
 ipcMain.handle("live-sync:list-rolls", (_event, campaignId) => liveSync.listRolls(campaignId));
+ipcMain.handle("live-sync:clear-rolls", (_event, campaignId) => liveSync.clearRolls(campaignId));
 ipcMain.handle("live-sync:subscribe", (_event, campaignId, presence, characterId) => liveSync.subscribe(campaignId, presence, characterId));
 ipcMain.handle("live-sync:unsubscribe", () => liveSync.unsubscribe());
 

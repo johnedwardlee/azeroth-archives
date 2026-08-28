@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.0.0-beta.6
+
+- Add a DM dice roller with common dice shortcuts, custom formulas and modifiers, d20 advantage/disadvantage, and live publication to the party roll feed.
+- Add a confirmed, DM-authorized action to clear campaign roll history, including a safe follow-up Supabase migration for existing campaigns.
+- Add Initiative to the player Encounter workspace and identify shared player rolls by character name instead of player name.
+- Roll imported Healing Potions directly from Encounter and consume them, even when they were not manually marked as equipped consumables.
+- Correct Priest and other healing-spell rolls by applying spellcasting ability modifiers, spell-slot upcasting, and separate healing-versus-damage formula detection.
+
 ## 2.0.0-beta.5
 
 - Replace the DM equipment and spell selectors with searchable, description-rich pickers matching the player-facing library controls.

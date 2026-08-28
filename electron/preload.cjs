@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld("azerothDesktop", {
   applyCharacterMutation: (mutation) => ipcRenderer.invoke("live-sync:apply-mutation", mutation),
   publishRollEvent: (roll) => ipcRenderer.invoke("live-sync:record-roll", roll),
   listCampaignRolls: (campaignId) => ipcRenderer.invoke("live-sync:list-rolls", campaignId),
+  clearCampaignRolls: (campaignId) => ipcRenderer.invoke("live-sync:clear-rolls", campaignId),
   subscribeLiveCampaign: (campaignId, presence, characterId) => ipcRenderer.invoke("live-sync:subscribe", campaignId, presence, characterId),
   unsubscribeLiveCampaign: () => ipcRenderer.invoke("live-sync:unsubscribe"),
   onLiveSyncEvent: (callback) => {

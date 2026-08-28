@@ -883,6 +883,11 @@ export function CharacterManager() {
       }
       const change = (event.payload.payload ?? event.payload) as { table?: string; record?: Record<string, unknown>; old_record?: Record<string, unknown> };
       const record = change.record;
+      if (change.table === "roll_events" && !record) {
+        const removedId = change.old_record?.id;
+        if (typeof removedId === "string") setLiveRolls((current) => current.filter((entry) => entry.id !== removedId));
+        return;
+      }
       if (!record) return;
       if (change.table === "character_mutations" && typeof record.character_id === "string" && record.patch && typeof record.patch === "object") {
         applyRemoteCharacterPatch(record.character_id, record.patch as Partial<CharacterData>);
@@ -1215,9 +1220,26 @@ export function CharacterManager() {
     const current = characterRef.current;
     const link = syncLinksRef.current.find((entry) => entry.characterId === current.id);
     if (!link) return;
-    const event = createSharedRollEvent({ ...input, campaignId: link.campaignId, characterId: current.id, actorName: current.playerName || current.name });
+    const event = createSharedRollEvent({ ...input, campaignId: link.campaignId, characterId: current.id, actorName: current.name || current.playerName });
     enqueueLiveSync(event);
     setLiveRolls((entries) => [event, ...entries.filter((entry) => entry.id !== event.id)].slice(0, 500));
+  }
+
+  function publishDmRoll(characterId: string, input: LocalRollEvent) {
+    const current = charactersRef.current.find((entry) => entry.id === characterId);
+    const link = syncLinksRef.current.find((entry) => entry.characterId === characterId && entry.role === "dm");
+    const campaignId = link?.campaignId ?? activeLiveCampaignId;
+    if (!current || !campaignId) return;
+    const event = createSharedRollEvent({ ...input, campaignId, characterId, actorName: "Dungeon Master" });
+    enqueueLiveSync(event);
+    setLiveRolls((entries) => [event, ...entries.filter((entry) => entry.id !== event.id)].slice(0, 500));
+  }
+
+  async function clearLiveCampaignRolls() {
+    if (!window.azerothDesktop || !activeLiveCampaignId) return;
+    const deleted = await window.azerothDesktop.clearCampaignRolls(activeLiveCampaignId);
+    setLiveRolls([]);
+    setStatus(`${deleted} party ${deleted === 1 ? "roll" : "rolls"} cleared`);
   }
 
   function createCampaignDraft() {
@@ -2395,7 +2417,7 @@ export function CharacterManager() {
           <button type="button" onClick={() => setVisiblePanelsExpanded(false)}>Collapse all</button>
         </div>}
 
-        {tab === "party" && <DmPartyWorkspace characters={partyCharacters} members={liveCampaignMembers} rolls={liveRolls} onlineUserIds={onlineLiveUserIds} ownerByCharacterId={partyOwnerByCharacterId} selectedCharacterId={dmPartyCharacterId} fullEditCharacterId={dmFullEditCharacterId} equipment={equipment} spells={spells} onSelectCharacter={(characterId) => { if (characterId !== dmPartyCharacterId) setDmFullEditCharacterId(undefined); setDmPartyCharacterId(characterId); }} onToggleFullEdit={(characterId, enabled) => setDmFullEditCharacterId(enabled ? characterId : undefined)} onOpenSheet={(characterId) => { const selected = charactersRef.current.find((entry) => entry.id === characterId); if (selected) { setCharacter(selected); setTab("encounter"); } }} onPatch={patchLiveCharacter} />}
+        {tab === "party" && <DmPartyWorkspace characters={partyCharacters} members={liveCampaignMembers} rolls={liveRolls} onlineUserIds={onlineLiveUserIds} ownerByCharacterId={partyOwnerByCharacterId} selectedCharacterId={dmPartyCharacterId} fullEditCharacterId={dmFullEditCharacterId} equipment={equipment} spells={spells} onSelectCharacter={(characterId) => { if (characterId !== dmPartyCharacterId) setDmFullEditCharacterId(undefined); setDmPartyCharacterId(characterId); }} onToggleFullEdit={(characterId, enabled) => setDmFullEditCharacterId(enabled ? characterId : undefined)} onOpenSheet={(characterId) => { const selected = charactersRef.current.find((entry) => entry.id === characterId); if (selected) { setCharacter(selected); setTab("encounter"); } }} onPatch={patchLiveCharacter} onRoll={publishDmRoll} onClearRolls={clearLiveCampaignRolls} />}
 
         {tab === "character" && (
           <div className="overview-grid">

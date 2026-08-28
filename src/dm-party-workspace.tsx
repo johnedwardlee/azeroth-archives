@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Backpack, BookOpen, Heart, Minus, Plus, Radio, Shield, Sparkles, Users } from "lucide-react";
-import { calculateEncumbrance } from "../lib/character-rules";
+import { Activity, Backpack, BookOpen, Dices, Heart, Minus, Plus, Radio, Shield, Sparkles, Trash2, Users } from "lucide-react";
+import { calculateEncumbrance, rollD20, rollDiceFormula, type RollMode } from "../lib/character-rules";
+import type { LocalRollEvent } from "../lib/live-sync";
 import type { CharacterData, EquipmentDefinition, InventoryItem, LiveCampaignMember, SharedRollEvent, SpellDefinition } from "../lib/types";
 import { DescriptionPicker } from "./description-picker";
 
@@ -20,6 +21,8 @@ type Props = {
   onToggleFullEdit: (characterId: string, enabled: boolean) => void;
   onOpenSheet: (characterId: string) => void;
   onPatch: (characterId: string, patch: Partial<CharacterData>, intent: DmIntent) => void;
+  onRoll: (characterId: string, roll: LocalRollEvent) => void;
+  onClearRolls: () => Promise<void>;
 };
 
 function equipmentDescription(item: EquipmentDefinition) {
@@ -51,11 +54,16 @@ export function patchDmInventoryItem(inventory: InventoryItem[], itemId: string,
   });
 }
 
-export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ownerByCharacterId, selectedCharacterId, fullEditCharacterId, equipment, spells, onSelectCharacter, onToggleFullEdit, onOpenSheet, onPatch }: Props) {
+export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ownerByCharacterId, selectedCharacterId, fullEditCharacterId, equipment, spells, onSelectCharacter, onToggleFullEdit, onOpenSheet, onPatch, onRoll, onClearRolls }: Props) {
   const selected = characters.find((entry) => entry.id === selectedCharacterId) ?? characters[0];
   const [itemId, setItemId] = useState("");
   const [spellId, setSpellId] = useState("");
   const [customItemName, setCustomItemName] = useState("");
+  const [diceFormula, setDiceFormula] = useState("1d20");
+  const [diceModifier, setDiceModifier] = useState(0);
+  const [diceLabel, setDiceLabel] = useState("DM roll");
+  const [diceMode, setDiceMode] = useState<RollMode>("normal");
+  const [diceResult, setDiceResult] = useState("");
   const memberById = useMemo(() => new Map(members.map((member) => [member.userId, member])), [members]);
   const availableSpells = useMemo(() => selected ? spells
     .filter((spell) => !selected.spells.some((known) => known.id === spell.id))
@@ -141,6 +149,28 @@ export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ow
     setSpellId("");
   }
 
+  function rollDmDice() {
+    if (!selected) return;
+    const formula = diceFormula.trim();
+    if (/^(?:1)?d20$/i.test(formula)) {
+      const { dice, kept } = rollD20(diceMode);
+      const total = kept + diceModifier;
+      setDiceResult(`${dice.join(" / ")}${diceModifier ? ` ${diceModifier >= 0 ? "+" : "−"}${Math.abs(diceModifier)}` : ""} = ${total}`);
+      onRoll(selected.id, { category: "other", label: diceLabel.trim() || "DM roll", formula: diceMode === "normal" ? "d20" : `2d20 ${diceMode === "advantage" ? "keep highest" : "keep lowest"}`, dice, modifier: diceModifier, total, mode: diceMode, detail: `Rolled by the DM for ${selected.name}` });
+      return;
+    }
+    const result = rollDiceFormula(formula, false, diceModifier);
+    if (!result) { setDiceResult("Use dice notation such as 2d6+3."); return; }
+    setDiceResult(`${result.rolls.join(" + ")}${result.modifier ? ` ${result.modifier >= 0 ? "+" : "−"}${Math.abs(result.modifier)}` : ""} = ${result.total}`);
+    onRoll(selected.id, { category: "other", label: diceLabel.trim() || "DM roll", formula, dice: result.rolls, modifier: result.modifier, total: result.total, mode: "normal", detail: `Rolled by the DM for ${selected.name}` });
+  }
+
+  async function clearRollFeed() {
+    if (!rolls.length || !window.confirm("Clear every roll in this campaign's shared roll history? This cannot be undone.")) return;
+    await onClearRolls();
+    setDiceResult("");
+  }
+
   return <div className="dm-party-workspace">
     <section className="party-overview-panel panel"><div className="section-heading"><div><span className="eyebrow">Live campaign</span><h2>Party overview</h2></div><span className="count-chip">{characters.length} linked</span></div>
       <div className="party-card-grid">{characters.map((character) => {
@@ -174,7 +204,8 @@ export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ow
         </>}
       </section>
 
-      <section className="panel roll-feed"><div className="section-heading"><div><span className="eyebrow">Last 30 days</span><h2>Party rolls</h2></div><span className="count-chip">{rolls.length}</span></div>
+      <section className="panel roll-feed"><div className="section-heading"><div><span className="eyebrow">Last 30 days</span><h2>Party rolls</h2></div><div className="roll-feed-heading-actions"><span className="count-chip">{rolls.length}</span><button type="button" disabled={!rolls.length} onClick={clearRollFeed}><Trash2 size={12} />Clear</button></div></div>
+        <div className="dm-dice-roller"><div className="dm-dice-fields"><input aria-label="DM roll label" value={diceLabel} onChange={(event) => setDiceLabel(event.target.value)} placeholder="Roll label" /><input aria-label="DM dice formula" value={diceFormula} onChange={(event) => setDiceFormula(event.target.value)} placeholder="2d6+3" /><label><span>Modifier</span><input aria-label="DM roll modifier" type="number" value={diceModifier} onChange={(event) => setDiceModifier(Number(event.target.value))} /></label><button type="button" disabled={!selected} onClick={rollDmDice}><Dices size={13} />Roll</button></div><div className="dm-dice-options"><div>{[4, 6, 8, 10, 12, 20].map((sides) => <button type="button" className={diceFormula.toLowerCase() === `1d${sides}` ? "active" : ""} onClick={() => setDiceFormula(`1d${sides}`)} key={sides}>d{sides}</button>)}</div>{/^(?:1)?d20$/i.test(diceFormula.trim()) && <div className="roll-mode" aria-label="DM d20 roll mode">{(["normal", "advantage", "disadvantage"] as RollMode[]).map((mode) => <button type="button" key={mode} className={diceMode === mode ? "active" : ""} onClick={() => setDiceMode(mode)}>{mode === "normal" ? "Normal" : mode === "advantage" ? "Adv" : "Dis"}</button>)}</div>}</div>{diceResult && <div className="dm-dice-result" role="status"><Dices size={15} /><span>{diceResult}</span><button aria-label="Clear DM dice result" onClick={() => setDiceResult("")}>×</button></div>}</div>
         <div className="roll-feed-list">{rolls.map((roll) => <article key={roll.id}><div><strong>{roll.actorName}</strong><span>{roll.label}</span><time>{new Date(roll.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time></div><div className="roll-feed-result"><b>{roll.total}</b><small>{roll.dice.join(" / ")}{roll.modifier ? ` ${roll.modifier >= 0 ? "+" : "−"}${Math.abs(roll.modifier)}` : ""}{roll.mode !== "normal" ? ` · ${roll.mode}` : ""}</small></div></article>)}</div>
         {!rolls.length && <div className="empty-state"><Activity size={24} /><p>Player rolls will appear here as they happen.</p></div>}
       </section>

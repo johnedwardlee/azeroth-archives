@@ -63,6 +63,7 @@ declare global {
       applyCharacterMutation: (mutation: CharacterMutation) => Promise<{ characterState: CharacterData; revision: number; updatedAt: string; wasConflict: boolean }>;
       publishRollEvent: (roll: SharedRollEvent) => Promise<string>;
       listCampaignRolls: (campaignId: string) => Promise<SharedRollEvent[]>;
+      clearCampaignRolls: (campaignId: string) => Promise<number>;
       subscribeLiveCampaign: (campaignId: string, presence: { role: AppRole; displayName: string }, characterId?: string) => Promise<LiveSyncStatus>;
       unsubscribeLiveCampaign: () => Promise<LiveSyncStatus>;
       onLiveSyncEvent: (callback: (event: LiveSyncEvent) => void) => () => void;

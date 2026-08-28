@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 describe("live-sync user interface contract", () => {
   const manager = readFileSync(new URL("./character-manager.tsx", import.meta.url), "utf8");
   const party = readFileSync(new URL("./dm-party-workspace.tsx", import.meta.url), "utf8");
+  const preload = readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8");
+  const main = readFileSync(new URL("../electron/main.cjs", import.meta.url), "utf8");
 
   it("keeps Party controls interactive while locking remote detail views", () => {
     expect(manager).toContain('tab !== "party" && currentDmLiveLocked ? "dm-live-readonly"');
@@ -21,6 +23,12 @@ describe("live-sync user interface contract", () => {
     expect(party).toContain('<DescriptionPicker ariaLabel="Available spells"');
     expect(party).toContain('aria-label="Custom item name"');
     expect(party).toContain("patchDmInventoryItem");
+    expect(party).toContain("rollDmDice");
+    expect(party).toContain("clearRollFeed");
+    expect(manager).toContain("current.name || current.playerName");
+    expect(manager).toContain("clearCampaignRolls(activeLiveCampaignId)");
+    expect(preload).toContain('ipcRenderer.invoke("live-sync:clear-rolls"');
+    expect(main).toContain('ipcMain.handle("live-sync:clear-rolls"');
   });
 
   it("publishes rolls from all current dice-producing character surfaces", () => {

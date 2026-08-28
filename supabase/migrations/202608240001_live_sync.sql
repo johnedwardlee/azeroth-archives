@@ -533,18 +533,38 @@ begin
 end;
 $$;
 
+create or replace function public.clear_campaign_roll_events(p_campaign_id uuid)
+returns bigint
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_deleted bigint;
+begin
+  if not public.is_campaign_dm(p_campaign_id, auth.uid()) then
+    raise exception 'Only the campaign DM can clear campaign rolls.';
+  end if;
+  delete from public.roll_events event where event.campaign_id = p_campaign_id;
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
 revoke execute on function public.create_campaign(text) from public, anon;
 revoke execute on function public.create_campaign_invitation(uuid, uuid, integer) from public, anon;
 revoke execute on function public.redeem_campaign_invitation(text, uuid, jsonb, text) from public, anon;
 revoke execute on function public.apply_character_mutation(uuid, uuid, bigint, text, jsonb) from public, anon;
 revoke execute on function public.record_roll_event(uuid, uuid, text, text, text, text, jsonb, integer, integer, text, text) from public, anon;
 revoke execute on function public.revoke_campaign_member(uuid, uuid) from public, anon;
+revoke execute on function public.clear_campaign_roll_events(uuid) from public, anon;
 grant execute on function public.create_campaign(text) to authenticated;
 grant execute on function public.create_campaign_invitation(uuid, uuid, integer) to authenticated;
 grant execute on function public.redeem_campaign_invitation(text, uuid, jsonb, text) to authenticated;
 grant execute on function public.apply_character_mutation(uuid, uuid, bigint, text, jsonb) to authenticated;
 grant execute on function public.record_roll_event(uuid, uuid, text, text, text, text, jsonb, integer, integer, text, text) to authenticated;
 grant execute on function public.revoke_campaign_member(uuid, uuid) to authenticated;
+grant execute on function public.clear_campaign_roll_events(uuid) to authenticated;
 
 create or replace function public.prune_campaign_roll_events()
 returns trigger
@@ -616,7 +636,7 @@ after insert on public.character_mutations
 for each row execute function public.broadcast_campaign_change();
 
 create trigger broadcast_roll_events
-after insert on public.roll_events
+after insert or delete on public.roll_events
 for each row execute function public.broadcast_campaign_change();
 
 create trigger broadcast_campaign_members

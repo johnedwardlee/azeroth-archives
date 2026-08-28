@@ -16,6 +16,7 @@ import {
   resolvedRollMode,
   rollD20,
   spellDamageProfile,
+  spellHealingProfile,
   spellListsGrantedByFeats,
   spellMatchesLists,
   spellSaveAbility,
@@ -111,6 +112,22 @@ describe("living sheet rules", () => {
     expect(spellDamageProfile(fireBolt, 0, 11)?.formula).toBe("3d10");
     expect(spellSaveAbility("The target makes a Constitution saving throw.")).toBe("stamina");
     expect(spellSaveAbility("The target makes a Wisdom saving throw.")).toBe("spirit");
+  });
+
+  it("resolves Priest healing dice, spellcasting modifiers, upcasting, and mixed healing/damage spells", () => {
+    const cureWounds = { level: 1, description: "A creature regains a number of Hit Points equal to 2d8 plus your spellcasting ability modifier. The healing increases by 2d8 for each spell slot level above 1." };
+    expect(spellHealingProfile(cureWounds, 3)).toEqual({ formula: "6d8", addsSpellcastingModifier: true });
+    const prayer = { level: 2, description: "The targets regain 2d8 Hit Points. The healing increases by 1d8 for each spell slot level above 2." };
+    expect(spellHealingProfile(prayer, 4)).toEqual({ formula: "4d8", addsSpellcastingModifier: false });
+    const naaru = { id: "conjure-celestial", name: "Call Naaru", level: 7, description: "Healing Light. The target regains Hit Points equal to 4d12 plus your spellcasting ability modifier. Searing Light. The target takes 6d12 Radiant damage." };
+    expect(spellHealingProfile(naaru, 7)).toEqual({ formula: "4d12", addsSpellcastingModifier: true });
+    expect(spellDamageProfile(naaru, 7, 13)?.formula).toBe("6d12");
+  });
+
+  it("uses imported equipment rules for consumable encounter actions", () => {
+    const character = { ...newCharacter(), inventory: [{ id: "potion", contentId: "potion-of-healing", name: "Potion of Healing", quantity: 1, equipped: false, notes: "" }] };
+    const equipment = [{ id: "potion-of-healing", name: "Potion of Healing", category: "Gear", description: "As a Bonus Action, you can drink or administer this potion. The creature regains 2d4 + 2 Hit Points." }];
+    expect(generatedCharacterActions(character, equipment)).toContainEqual(expect.objectContaining({ id: "item-potion", timing: "bonus", purpose: "healing", description: expect.stringContaining("2d4 + 2") }));
   });
 
   it("keeps shared effect conditions until the last source ends", () => {

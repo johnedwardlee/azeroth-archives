@@ -546,7 +546,13 @@ export function generatedCharacterActions(character: CharacterData, catalog: Equ
     const inventoryItem = attack.inventoryItemId ? character.inventory.find((item) => item.id === attack.inventoryItemId) : undefined;
     return { id: `attack-${attack.id}`, name: attack.name, timing: "action" as const, purpose: "attack" as const, source: "Attack", description: `${attack.damage} ${attack.damageType}${attack.notes ? ` · ${attack.notes}` : ""}`, attackId: attack.id, ...(inventoryItem?.ammunition !== undefined ? { ammunitionItemId: inventoryItem.id } : {}) };
   });
-  const itemActions = character.inventory.filter((item) => item.equipped && (item.consumable || item.maximumCharges !== undefined)).map((item) => ({ id: `item-${item.id}`, name: item.name, timing: "action" as const, purpose: (/heal|hit points?|restore/i.test(`${item.name} ${item.notes}`) ? "healing" : "item") as GeneratedAction["purpose"], source: "Equipment", description: item.notes || "Use this equipped item.", inventoryId: item.id }));
+  const itemActions = character.inventory.flatMap((item) => {
+    const definition = item.contentId ? catalog.find((entry) => entry.id === item.contentId) : undefined;
+    const description = [definition?.description, item.notes].filter(Boolean).join("\n\n") || "Use this equipped item.";
+    const describedConsumable = item.quantity > 0 && /\b(?:drink|administer|consume)\b[\s\S]*?\b(?:heal|regain|restore|hit points?)\b|\b(?:heal|regain|restore|hit points?)\b[\s\S]*?\b(?:drink|administer|consume)\b/i.test(description);
+    if (!(item.equipped && (item.consumable || item.maximumCharges !== undefined)) && !describedConsumable) return [];
+    return [{ id: `item-${item.id}`, name: item.name, timing: actionTiming(description), purpose: (/heal|hit points?|restore/i.test(`${item.name} ${description}`) ? "healing" : "item") as GeneratedAction["purpose"], source: "Equipment", description, inventoryId: item.id }];
+  });
   const companionActions = character.companions.filter((companion) => companion.active).map((companion) => ({
     id: `companion-${companion.id}`,
     name: `${companion.name} action`,
@@ -662,9 +668,42 @@ export type SpellDamageProfile = {
   automatic: boolean;
 };
 
+export type SpellHealingProfile = {
+  formula: string;
+  addsSpellcastingModifier: boolean;
+};
+
+function diceFormulaMatches(text: string) {
+  return Array.from(text.matchAll(/\b\d+d\d+(?:\s*[+-]\s*\d+)?\b/gi));
+}
+
+function healingDiceFormula(text: string) {
+  for (const match of diceFormulaMatches(text)) {
+    const index = match.index ?? 0;
+    const context = text.slice(Math.max(0, index - 90), Math.min(text.length, index + match[0].length + 90));
+    if (/regain|restore|healing|hit points?/i.test(context) && !/\b(?:takes?|deals?)\b[^.]{0,60}\bdamage\b/i.test(context)) return match[0].replace(/\s+/g, "");
+  }
+  return null;
+}
+
+export function spellHealingProfile(spell: Pick<SpellDefinition, "level" | "description">, slotLevel = spell.level): SpellHealingProfile | null {
+  if (!/regain|restore|healing|hit points?/i.test(spell.description)) return null;
+  const extracted = healingDiceFormula(spell.description);
+  if (!extracted) return null;
+  const parsed = extracted.match(/^(\d+)d(\d+)([+-]\d+)?$/i);
+  if (!parsed) return null;
+  let diceCount = Number(parsed[1]);
+  const sides = Number(parsed[2]);
+  const modifier = parsed[3] ?? "";
+  const slotIncrease = spell.description.match(/(?:healing|hit points?)[^.]*?increases by\s+(\d+)d(\d+)\s+for each spell slot level above\s+(\d+)/i);
+  if (slotIncrease && Number(slotIncrease[2]) === sides) diceCount += Number(slotIncrease[1]) * Math.max(0, slotLevel - Number(slotIncrease[3]));
+  return { formula: `${diceCount}d${sides}${modifier}`, addsSpellcastingModifier: /spellcasting ability modifier/i.test(spell.description) };
+}
+
 export function spellDamageProfile(spell: Pick<SpellDefinition, "id" | "name" | "level" | "description">, slotLevel = spell.level, characterLevel = 1): SpellDamageProfile | null {
   if (!/\bdamage\b/i.test(spell.description)) return null;
-  const extracted = extractDiceFormula(spell.description);
+  const damagePattern = new RegExp(`\\b(\\d+d\\d+(?:\\s*[+-]\\s*\\d+)?)\\s+(?:${DAMAGE_TYPES.join("|")})\\s+damage`, "i");
+  const extracted = spell.description.match(damagePattern)?.[1]?.replace(/\s+/g, "") ?? extractDiceFormula(spell.description);
   if (!extracted) return null;
   const parsed = extracted.match(/^(\d+)d(\d+)([+-]\d+)?$/i);
   if (!parsed) return null;

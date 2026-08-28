@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Dices, RotateCcw, Search, Sparkles, Star, Swords } from "lucide-react";
 import { favoriteActionsFirst, recordRecentAction, toggleFavoriteAction } from "../lib/action-history";
-import { activeEffectFromSpell, conditionRollEffects, generatedCharacterActions, hasUnproficientArmor, isEquipmentProficient, isIncapacitated, resolvedRollMode, rollD20, rollDiceFormula, spellcastingAbilityForClass, spellDamageProfile, spellSaveAbility, syncEffectConditions, type GeneratedAction, type RollMode, type SpellDamageProfile } from "../lib/character-rules";
+import { activeEffectFromSpell, conditionRollEffects, extractDiceFormula, generatedCharacterActions, hasUnproficientArmor, isEquipmentProficient, isIncapacitated, resolvedRollMode, rollD20, rollDiceFormula, spellcastingAbilityForClass, spellDamageProfile, spellHealingProfile, spellSaveAbility, syncEffectConditions, type GeneratedAction, type RollMode, type SpellDamageProfile } from "../lib/character-rules";
 import { ABILITY_LABELS, abilityModifier, type AbilityKey, type ActionTiming, type CharacterData, type EncumbranceRule, type EquipmentDefinition, type HitDicePool } from "../lib/types";
 import { CombatStatusStrip } from "./combat-status-strip";
 import { CollapsiblePanel } from "./collapsible-panel";
@@ -22,7 +22,7 @@ type EncounterRollResult = {
   mode: RollMode;
   reasons: string[];
 };
-type EncounterDamage = SpellDamageProfile & { label: string; modifier: number; allowCritical: boolean };
+type EncounterDamage = SpellDamageProfile & { label: string; modifier: number; allowCritical: boolean; category?: "damage" | "healing" };
 
 const timingLabels: Record<TimingFilter, string> = { all: "All", action: "Action", bonus: "Bonus action", reaction: "Reaction", movement: "Movement", other: "Free / Other" };
 const purposeLabels: Record<PurposeFilter, string> = { all: "All purposes", attack: "Attacks", spell: "Spells", healing: "Healing", defense: "Defense", control: "Control", item: "Items", utility: "Utility", companion: "Companions" };
@@ -76,6 +76,19 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     return result;
   }
 
+  function rollInitiative() {
+    const ability: AbilityKey = "agility";
+    const effects = conditionRollEffects(character, "ability", ability, "", catalog);
+    const mode = resolvedRollMode(rollMode, effects.forcedDisadvantage);
+    const { dice, kept } = rollD20(mode);
+    const modifier = abilityModifier(character.abilities.agility) + effects.modifier;
+    const result: EncounterRollResult = { actionId: "initiative", label: "Initiative", dice, kept, modifier, total: kept + modifier, mode, reasons: effects.reasons };
+    setRollResult(result);
+    setPendingDamage(undefined);
+    setDamageResult("");
+    onRoll?.({ category: "initiative", label: "Initiative", formula: "d20", dice, modifier, total: result.total, mode, detail: effects.reasons.join("; ") });
+  }
+
   function spellcastingAbility(spell: CharacterData["spells"][number]) {
     if (spell.castingAbility) return spell.castingAbility;
     const classEntry = character.classLevels.find((entry) => entry.className === spell.className) ?? character.classLevels[0];
@@ -89,15 +102,17 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     const resolved = results.flatMap((result) => result ?? []);
     const type = damage.damageType ? ` ${damage.damageType}` : "";
     const total = resolved.reduce((sum, result) => sum + result.total, 0);
-    onRoll?.({ category: "damage", label: `${damage.label}${critical ? " critical" : ""} damage`, formula: `${critical ? "Critical " : ""}${damage.instances > 1 ? `${damage.instances}×` : ""}${damage.formula}`, dice: resolved.flatMap((result) => result.rolls), modifier: resolved.reduce((sum, result) => sum + result.modifier, 0), total, mode: "normal", detail: damage.damageType ?? "" });
+    const category = damage.category ?? "damage";
+    const effectLabel = category === "healing" ? `${damage.label} healing` : `${damage.label}${critical ? " critical" : ""} damage`;
+    onRoll?.({ category, label: effectLabel, formula: `${critical ? "Critical " : ""}${damage.instances > 1 ? `${damage.instances}×` : ""}${damage.formula}`, dice: resolved.flatMap((result) => result.rolls), modifier: resolved.reduce((sum, result) => sum + result.modifier, 0), total, mode: "normal", detail: category === "healing" ? "Hit Points restored" : damage.damageType ?? "" });
     if (resolved.length === 1) {
       const result = resolved[0];
-      setDamageResult(`${damage.label}${critical ? " critical" : ""}: ${result.rolls.join(" + ")}${result.modifier ? ` ${signed(result.modifier)}` : ""} = ${result.total}${type} damage`);
+      setDamageResult(`${damage.label}${critical ? " critical" : ""}: ${result.rolls.join(" + ")}${result.modifier ? ` ${signed(result.modifier)}` : ""} = ${result.total}${category === "healing" ? " Hit Points restored" : `${type} damage`}`);
       return;
     }
     const instance = damage.instanceLabel ?? "roll";
     const details = resolved.map((result, index) => `${instance} ${index + 1}: ${result.rolls.join(" + ")}${result.modifier ? ` ${signed(result.modifier)}` : ""} = ${result.total}`);
-    setDamageResult(`${damage.label}: ${details.join(" · ")} · Total ${total}${type} damage`);
+    setDamageResult(`${damage.label}: ${details.join(" · ")} · Total ${total}${category === "healing" ? " Hit Points restored" : `${type} damage`}`);
   }
 
   function nextSlotLevel(spell: CharacterData["spells"][number]) {
@@ -168,6 +183,8 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     }
     if (action.inventoryId) {
       const item = character.inventory.find((entry) => entry.id === action.inventoryId)!;
+      const formula = extractDiceFormula(action.description);
+      if (formula) rollResolvedDamage(false, { label: item.name, formula, modifier: 0, damageType: "", instances: 1, automatic: true, allowCritical: false, category: /heal|regain|restore|hit points?/i.test(action.description) ? "healing" : "damage" });
       if (item.maximumCharges !== undefined) finishAction(action, `${item.name}: used one charge.`, { inventory: character.inventory.map((entry) => entry.id === item.id ? { ...entry, charges: (entry.charges ?? 0) - 1 } : entry) }, "Restore one charge");
       else finishAction(action, `${item.name}: used one item.`, { inventory: item.quantity === 1 ? character.inventory.filter((entry) => entry.id !== item.id) : character.inventory.map((entry) => entry.id === item.id ? { ...entry, quantity: entry.quantity - 1 } : entry) }, `Restore one ${item.name}`);
       return;
@@ -181,7 +198,14 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
       const activeEffects = effect ? [...character.activeEffects.filter((entry) => !(effect.concentration && entry.concentration)), effect] : character.activeEffects;
       const castingAbility = spellcastingAbility(spell);
       const damageProfile = spellDamageProfile(spell, slotLevel ?? spell.level, character.level);
-      const damage = damageProfile ? { ...damageProfile, label: spell.name, modifier: 0, allowCritical: /spell attack/i.test(spell.description) } : undefined;
+      const healingProfile = spellHealingProfile(spell, slotLevel ?? spell.level);
+      const damage = healingProfile && action.purpose === "healing"
+          ? { formula: healingProfile.formula, damageType: "", instances: 1, automatic: true, label: spell.name, modifier: healingProfile.addsSpellcastingModifier ? abilityModifier(character.abilities[castingAbility]) : 0, allowCritical: false, category: "healing" as const }
+          : damageProfile
+            ? { ...damageProfile, label: spell.name, modifier: 0, allowCritical: /spell attack/i.test(spell.description), category: "damage" as const }
+            : healingProfile
+              ? { formula: healingProfile.formula, damageType: "", instances: 1, automatic: true, label: spell.name, modifier: healingProfile.addsSpellcastingModifier ? abilityModifier(character.abilities[castingAbility]) : 0, allowCritical: false, category: "healing" as const }
+              : undefined;
       const spellAttack = /spell attack/i.test(spell.description);
       const attackRoll = spellAttack ? resolveD20(action, `${spell.name} spell attack`, abilityModifier(character.abilities[castingAbility]) + character.proficiencyBonus, castingAbility, damage) : undefined;
       const saveAbility = spellSaveAbility(spell.description);
@@ -192,7 +216,7 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
         setDamageResult("");
         if (damage?.automatic) rollResolvedDamage(false, damage);
       }
-      const resolution = attackRoll ? ` Attack: ${attackRoll.dice.join(" / ")} ${signed(attackRoll.modifier)} = ${attackRoll.total}${attackRoll.mode !== "normal" ? ` (${attackRoll.mode})` : ""}.` : saveAbility ? ` Target save: ${ABILITY_LABELS[saveAbility]} DC ${saveDc}.` : damage?.automatic ? ` Damage rolled automatically.` : "";
+      const resolution = attackRoll ? ` Attack: ${attackRoll.dice.join(" / ")} ${signed(attackRoll.modifier)} = ${attackRoll.total}${attackRoll.mode !== "normal" ? ` (${attackRoll.mode})` : ""}.` : damage?.category === "healing" && damage.automatic ? ` Healing rolled automatically.` : saveAbility ? ` Target save: ${ABILITY_LABELS[saveAbility]} DC ${saveDc}.` : damage?.automatic ? ` Damage rolled automatically.` : "";
       const result = `${spell.name} cast${usesFreeCast ? " with its once-per-Long-Rest casting" : slotLevel ? ` with a level ${slotLevel} slot` : " as a cantrip"}${effect ? "; effect tracked" : ""}.${resolution}`;
       finishAction(action, result, { spellSlots, ...(usesFreeCast ? { featSpellcastingChoices: spendFreeSourceCast(spell) } : {}), activeEffects, conditions: syncEffectConditions(character.conditions, character.activeEffects, activeEffects), ...(effect?.concentration ? { concentratingSpellId: spell.id } : {}) }, usesFreeCast ? `Restore ${spell.name}'s free casting` : slotLevel ? `Restore the level ${slotLevel} spell slot` : effect ? `Remove ${spell.name}'s tracked effect` : undefined);
       return;
@@ -214,8 +238,8 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     return "";
   }
 
-  function d20Formula(modifier: number, ability: AbilityKey) {
-    const effects = conditionRollEffects(character, "attack", ability, "", catalog);
+  function d20Formula(modifier: number, ability: AbilityKey, kind: "attack" | "ability" = "attack") {
+    const effects = conditionRollEffects(character, kind, ability, "", catalog);
     const mode = resolvedRollMode(rollMode, effects.forcedDisadvantage);
     const dice = mode === "advantage" ? "2d20 high" : mode === "disadvantage" ? "2d20 low" : "d20";
     return `${dice} ${signed(modifier + effects.modifier)}`;
@@ -234,13 +258,17 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
       const spell = character.spells.find((entry) => entry.id === action.spellId);
       if (!spell) return "Spell unavailable";
       const castingAbility = spellcastingAbility(spell);
+      const healing = spellHealingProfile(spell, nextSlotLevel(spell) ?? spell.level);
+      if (healing && action.purpose === "healing") return `${healing.formula}${healing.addsSpellcastingModifier ? ` ${signed(abilityModifier(character.abilities[castingAbility]))}` : ""}`;
       if (/spell attack/i.test(spell.description)) return d20Formula(abilityModifier(character.abilities[castingAbility]) + character.proficiencyBonus, castingAbility);
       const saveAbility = spellSaveAbility(spell.description);
       if (saveAbility) return `${ABILITY_LABELS[saveAbility]} DC ${8 + character.proficiencyBonus + abilityModifier(character.abilities[castingAbility])}`;
       const damage = spellDamageProfile(spell, nextSlotLevel(spell) ?? spell.level, character.level);
       if (damage?.automatic) return damage.instances > 1 ? `${damage.instances}×(${damage.formula})` : damage.formula;
+      if (healing) return `${healing.formula}${healing.addsSpellcastingModifier ? ` ${signed(abilityModifier(character.abilities[castingAbility]))}` : ""}`;
       return "Use · no roll";
     }
+    if (action.inventoryId) return extractDiceFormula(action.description) ?? "Use";
     return "Use";
   }
 
@@ -260,11 +288,15 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     <CollapsiblePanel className="action-dashboard-header" storageKey={`azeroth-panel-${character.id}-encounter-library-v2`} eyebrow="Active play" title="Encounter workspace" summary={<span>{visible.length} choices</span>}>
       <p>Find attacks, spells, features, items, companion commands, and standard actions without leaving this screen.</p>
       <label className="catalog-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search every action" /></label>
-      <div className="encounter-roll-toolbar"><span>Attack roll mode</span><div className="roll-mode" aria-label="Encounter attack roll mode">{(["normal", "advantage", "disadvantage"] as RollMode[]).map((mode) => <button type="button" key={mode} className={rollMode === mode ? "active" : ""} aria-pressed={rollMode === mode} onClick={() => setRollMode(mode)}>{mode === "normal" ? "Normal" : mode === "advantage" ? "Adv" : "Dis"}</button>)}</div></div>
+      <div className="encounter-roll-toolbar"><span>D20 roll mode</span><div className="roll-mode" aria-label="Encounter D20 roll mode">{(["normal", "advantage", "disadvantage"] as RollMode[]).map((mode) => <button type="button" key={mode} className={rollMode === mode ? "active" : ""} aria-pressed={rollMode === mode} onClick={() => setRollMode(mode)}>{mode === "normal" ? "Normal" : mode === "advantage" ? "Adv" : "Dis"}</button>)}</div><button type="button" className="encounter-initiative-button" onClick={rollInitiative}><Dices size={13} />Initiative · {d20Formula(abilityModifier(character.abilities.agility), "agility", "ability")}</button></div>
       <div className="encounter-filter-row" aria-label="Action economy filters">{timingFilters.map((filter) => <button type="button" className={timingFilter === filter ? "active" : ""} aria-pressed={timingFilter === filter} onClick={() => setTimingFilter(filter)} key={filter}>{timingLabels[filter]}</button>)}</div>
       <div className="encounter-filter-row purpose-filters" aria-label="Action purpose filters">{purposeFilters.map((filter) => <button type="button" className={purposeFilter === filter ? "active" : ""} aria-pressed={purposeFilter === filter} onClick={() => setPurposeFilter(filter)} key={filter}>{purposeLabels[filter]}</button>)}</div>
       {feedback && <div className="cast-feedback" role="status"><span>{feedback}</span>{undoState && <button className="feedback-undo" onClick={undoLastUse}><RotateCcw size={13} />Undo</button>}<button aria-label="Dismiss action message" onClick={() => setFeedback("")}>×</button></div>}
-      {(rollResult || pendingDamage || damageResult) && <div className="encounter-resolution" role="status">{rollResult && <div className="roll-result"><Dices size={18} /><div><span>{rollResult.label}</span><strong>{rollResult.total}</strong><small>{rollResult.dice.join(" / ")} {signed(rollResult.modifier)}{rollResult.mode !== "normal" ? ` · ${rollResult.mode}` : ""}</small>{rollResult.reasons.length > 0 && <small className="roll-effect-note">Disadvantage: {rollResult.reasons.join(", ")}</small>}{character.exhaustionLevel > 0 && <small className="roll-effect-note">Exhaustion: −{character.exhaustionLevel * 2} applied</small>}</div><button aria-label="Clear roll result" onClick={() => { setRollResult(undefined); setPendingDamage(undefined); setDamageResult(""); }}>×</button></div>}{pendingDamage && <div className="encounter-damage-actions"><span>{pendingDamage.instances > 1 ? `${pendingDamage.instances} × ` : ""}{pendingDamage.formula}{pendingDamage.modifier ? ` ${signed(pendingDamage.modifier)}` : ""}{pendingDamage.damageType ? ` ${pendingDamage.damageType}` : ""}</span><button type="button" onClick={() => rollResolvedDamage()}><Swords size={13} />Roll damage</button>{pendingDamage.allowCritical && <button type="button" onClick={() => rollResolvedDamage(true)}>Critical</button>}</div>}{damageResult && <div className="damage-roll-result"><Swords size={16} /><span>{damageResult}</span><button aria-label="Clear damage result" onClick={() => setDamageResult("")}>×</button></div>}</div>}
+      {(rollResult || pendingDamage || damageResult) && <div className="encounter-resolution" role="status">
+        {rollResult && <div className="roll-result"><Dices size={18} /><div><span>{rollResult.label}</span><strong>{rollResult.total}</strong><small>{rollResult.dice.join(" / ")} {signed(rollResult.modifier)}{rollResult.mode !== "normal" ? ` · ${rollResult.mode}` : ""}</small>{rollResult.reasons.length > 0 && <small className="roll-effect-note">Disadvantage: {rollResult.reasons.join(", ")}</small>}{character.exhaustionLevel > 0 && <small className="roll-effect-note">Exhaustion: −{character.exhaustionLevel * 2} applied</small>}</div><button aria-label="Clear roll result" onClick={() => { setRollResult(undefined); setPendingDamage(undefined); setDamageResult(""); }}>×</button></div>}
+        {pendingDamage && <div className="encounter-damage-actions"><span>{pendingDamage.instances > 1 ? `${pendingDamage.instances} × ` : ""}{pendingDamage.formula}{pendingDamage.modifier ? ` ${signed(pendingDamage.modifier)}` : ""}{pendingDamage.damageType ? ` ${pendingDamage.damageType}` : ""}</span><button type="button" onClick={() => rollResolvedDamage()}><Swords size={13} />Roll {pendingDamage.category === "healing" ? "healing" : "damage"}</button>{pendingDamage.allowCritical && <button type="button" onClick={() => rollResolvedDamage(true)}>Critical</button>}</div>}
+        {damageResult && <div className="damage-roll-result"><Swords size={16} /><span>{damageResult}</span><button aria-label="Clear damage result" onClick={() => setDamageResult("")}>×</button></div>}
+      </div>}
       <div className="encounter-library-inline" role="region" aria-labelledby="encounter-choices-title">
         <div className="encounter-library-heading"><h3 id="encounter-choices-title">Available choices</h3><span>{visible.length} shown · unavailable choices remain visible</span></div>
         <div className="encounter-action-grid">{visible.map((action) => actionCard(action))}{!visible.length && <p className="action-empty">No actions match these filters.</p>}</div>

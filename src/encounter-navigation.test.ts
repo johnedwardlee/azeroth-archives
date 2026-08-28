@@ -35,7 +35,9 @@ describe("v1.5 navigation and encounter workspace", () => {
     const character = readFileSync(new URL("./character-manager.tsx", import.meta.url), "utf8");
     expect(encounter).toContain("<SessionTracker");
     expect(character).not.toContain("<SessionTracker");
-    expect(encounter).toContain('aria-label="Encounter attack roll mode"');
+    expect(encounter).toContain('aria-label="Encounter D20 roll mode"');
+    expect(encounter).toContain("function rollInitiative()");
+    expect(encounter).toContain('category: "initiative"');
     expect(encounter).toContain("resolveD20(action");
     expect(encounter).toContain("rollResolvedDamage(true)");
     expect(encounter).toContain('mode === "advantage" ? "2d20 high"');
@@ -43,6 +45,8 @@ describe("v1.5 navigation and encounter workspace", () => {
     expect(encounter).toContain('return "Use · no roll"');
     expect(encounter).not.toContain('action.spellId ? "Cast"');
     expect(encounter).toContain("spellDamageProfile(spell");
+    expect(encounter).toContain("spellHealingProfile(spell");
+    expect(encounter).toContain("extractDiceFormula(action.description)");
     expect(encounter).toContain("if (damage?.automatic) rollResolvedDamage(false, damage)");
     expect(encounter).toContain("pendingDamage.allowCritical");
     expect(encounter).toContain('encumbranceRule = "standard"');

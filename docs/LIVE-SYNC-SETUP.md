@@ -25,6 +25,8 @@ The migration creates the campaign, membership, invitation, character, mutation-
 
 If the original migration was installed before `v2.0.0-beta.3`, run `supabase/migrations/202608250001_fix_invitation_redemption.sql` once in the Supabase SQL editor. This replaces the invitation-redemption function without deleting campaigns, invitations, characters, or user accounts. New projects using the updated original migration do not need the follow-up migration.
 
+If the original migration was installed before `v2.0.0-beta.6`, also run `supabase/migrations/202608280001_clear_campaign_rolls.sql` once. This adds the DM-only roll clearing function and broadcasts removed roll entries without changing campaigns, characters, or accounts.
+
 ## 3. Configure GitHub release builds
 
 In the GitHub repository, open **Settings → Secrets and variables → Actions** and create these repository secrets:
