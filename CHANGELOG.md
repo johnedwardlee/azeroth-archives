@@ -4,6 +4,7 @@
 
 ## 2.0.1
 
+- Automatically track Lucky feat Luck Points, scale their maximum with Proficiency Bonus, preserve spent points when that maximum increases, and restore them on a Long Rest.
 - Add confirmed character unlinking for players and campaign removal for DMs while always preserving the complete local sheet.
 - Let either role explicitly retain or delete that character's shared campaign roll history during unlinking.
 - Archive unlinked server snapshots, revoke their player membership, block further mutations and rolls, clear stale local sync queues, and support safely relinking the same local character later.

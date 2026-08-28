@@ -67,6 +67,7 @@ import {
   syncMulticlassSpellSlots,
   syncAutomaticResources,
   syncEffectConditions,
+  syncFeatResources,
   syncProgressionSpellSlots,
   spellcastingAbilityForClass,
   startingHitPoints,
@@ -521,7 +522,7 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
   return {
     ...normalized,
     ...(progressionSlots ? { spellSlots: progressionSlots } : {}),
-    resources: syncMulticlassResources(normalized.resources, normalized.classLevels, normalized.abilities),
+    resources: syncFeatResources(syncMulticlassResources(normalized.resources, normalized.classLevels, normalized.abilities), normalized.feats, normalized.proficiencyBonus),
   };
 }
 
@@ -954,12 +955,14 @@ export function CharacterManager() {
     const definition = classes.find((item) => item.name === nextClassName);
     const nextAncestry = ancestries.find((item) => item.name === (patch.ancestry ?? current.ancestry));
     const nextFeats = patch.feats ?? current.feats;
+    const nextProficiencyBonus = patch.proficiencyBonus ?? current.proficiencyBonus;
     let hpPatch: Partial<CharacterData> = {};
     if (patch.abilities && definition && nextLevel === 1 && !nextFinalizedAt) {
       const maxHp = startingHitPoints(definition.hitDie, patch.abilities.stamina) + ancestryHitPointBonus(nextAncestry, nextLevel) + toughFeatHitPointBonus(nextFeats, nextLevel);
       hpPatch = { maxHp, currentHp: maxHp };
     }
-    return { ...current, ...patch, ...hpPatch, updatedAt: new Date().toISOString() };
+    const resources = syncFeatResources(patch.resources ?? current.resources, nextFeats, nextProficiencyBonus);
+    return { ...current, ...patch, ...hpPatch, resources, updatedAt: new Date().toISOString() };
   }
 
   function patchCharacter(patch: Partial<CharacterData>, options: { dmIntent?: DmMutationIntent; liveSyncDebounce?: { key: string; delayMs: number; flush?: boolean } } = {}) {
@@ -979,7 +982,8 @@ export function CharacterManager() {
     setStatus("Unsaved changes");
     if (link) {
       const debounce = options.liveSyncDebounce;
-      enqueueLiveSync(createCharacterMutation(link.campaignId, current.id, link.revision, { ...patch, updatedAt: next.updatedAt }, debounce ? {
+      const syncPatch = next.resources !== (patch.resources ?? current.resources) ? { ...patch, resources: next.resources } : patch;
+      enqueueLiveSync(createCharacterMutation(link.campaignId, current.id, link.revision, { ...syncPatch, updatedAt: next.updatedAt }, debounce ? {
         debounceKey: debounce.key,
         deferredUntil: new Date(Date.now() + (debounce.flush ? 0 : debounce.delayMs)).toISOString(),
       } : {}));
@@ -1002,7 +1006,8 @@ export function CharacterManager() {
     const next = buildPatchedCharacter(current, patch);
     setCharacters((entries) => entries.map((entry) => entry.id === characterId ? next : entry));
     persistCharacter(next).catch(() => setStatus("The live character cache could not be saved"));
-    enqueueLiveSync(createCharacterMutation(link.campaignId, characterId, link.revision, { ...patch, updatedAt: next.updatedAt }));
+    const syncPatch = next.resources !== (patch.resources ?? current.resources) ? { ...patch, resources: next.resources } : patch;
+    enqueueLiveSync(createCharacterMutation(link.campaignId, characterId, link.revision, { ...syncPatch, updatedAt: next.updatedAt }));
     setStatus("Live character updated");
   }
 

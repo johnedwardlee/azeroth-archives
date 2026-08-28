@@ -294,7 +294,7 @@ export function SessionTracker({ character, patchCharacter, hitDicePools, onRoll
           {character.conditions.length > 0 && <div className="condition-effects">{character.conditions.map((item) => <p key={item}><strong>{item === "Exhaustion" ? `Exhaustion ${character.exhaustionLevel}` : item}</strong>{conditionEffectText(item, character.exhaustionLevel)}</p>)}</div>}
         </div>
       </div>
-      <CollapsiblePanel contained className="class-resource-panel" storageKey={`azeroth-panel-${character.id}-session-resources`} eyebrow="Rest recovery" title="Class resources" summary={<span>{character.resources.reduce((total, resource) => total + resource.current, 0)} uses available</span>}>
+      <CollapsiblePanel contained className="class-resource-panel" storageKey={`azeroth-panel-${character.id}-session-resources`} eyebrow="Rest recovery" title="Resources" summary={<span>{character.resources.reduce((total, resource) => total + resource.current, 0)} uses available</span>}>
         <div className="class-resource-heading class-resource-actions"><span /> <button className="button button-outline" onClick={addResource}><Plus size={14} />Add tracker</button></div>
         <div className="class-resource-list">{character.resources.map((resource) => <article key={resource.id}>
           <input className="resource-name" aria-label="Resource name" value={resource.name} onChange={(event) => updateResource(resource.id, { name: event.target.value })} />
@@ -303,7 +303,7 @@ export function SessionTracker({ character, patchCharacter, hitDicePools, onRoll
           {resource.automatic && <span className="automatic-resource" title={`Managed by ${resource.source ?? "class progression"}`}>Auto</span>}
           <button className="icon-button danger" disabled={resource.automatic} aria-label={`Remove ${resource.name}`} onClick={() => patchCharacter({ resources: character.resources.filter((item) => item.id !== resource.id) })}><Trash2 size={14} /></button>
         </article>)}</div>
-        {!character.resources.length && <p className="class-resource-empty">Add a reusable tracker for Rage, Focus, Channel Divinity, Sorcery Points, or another limited class feature.</p>}
+        {!character.resources.length && <p className="class-resource-empty">Add a reusable tracker for Rage, Focus, Luck Points, Sorcery Points, or another limited feature.</p>}
       </CollapsiblePanel>
       <CollapsiblePanel contained className="active-effect-panel" storageKey={`azeroth-panel-${character.id}-session-effects`} eyebrow="Turn tracking" title="Active effects" summary={<span>{character.activeEffects.length} tracked</span>}>
         <div className="class-resource-heading class-resource-actions"><span /><div className="effect-advance"><button onClick={() => advanceEffects(1)}>Next round</button><button onClick={() => advanceEffects(10, 1)}>+1 minute</button></div></div>

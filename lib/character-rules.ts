@@ -618,9 +618,9 @@ function automaticResourcesFor(className: string, level: number, abilities: Char
   return templates.map((template) => ({ ...template, id: crypto.randomUUID(), current: template.maximum }));
 }
 
-function syncResourceTemplates(resources: CharacterResource[], templates: CharacterResource[]) {
+function syncResourceTemplates(resources: CharacterResource[], templates: CharacterResource[], managesResource: (resource: CharacterResource) => boolean) {
   const templateNames = new Set(templates.map((template) => template.name.toLowerCase()));
-  const result = resources.filter((resource) => !resource.automatic || templateNames.has(resource.name.toLowerCase()));
+  const result = resources.filter((resource) => !managesResource(resource) || templateNames.has(resource.name.toLowerCase()));
   for (const template of templates) {
     const index = result.findIndex((resource) => resource.name.toLowerCase() === template.name.toLowerCase());
     if (index < 0) {
@@ -631,11 +631,17 @@ function syncResourceTemplates(resources: CharacterResource[], templates: Charac
     const gained = Math.max(0, template.maximum - current.maximum);
     result[index] = { ...current, ...template, id: current.id, current: Math.min(template.maximum, current.current + gained) };
   }
-  return result;
+  const unchanged = result.length === resources.length && result.every((resource, index) => {
+    const previous = resources[index];
+    return previous && resource.id === previous.id && resource.name === previous.name && resource.current === previous.current
+      && resource.maximum === previous.maximum && resource.recovery === previous.recovery
+      && resource.automatic === previous.automatic && resource.source === previous.source;
+  });
+  return unchanged ? resources : result;
 }
 
 export function syncAutomaticResources(resources: CharacterResource[], className: string, level: number, abilities: CharacterData["abilities"]) {
-  return syncResourceTemplates(resources, automaticResourcesFor(className, level, abilities));
+  return syncResourceTemplates(resources, automaticResourcesFor(className, level, abilities), (resource) => Boolean(resource.automatic && !/^(?:Feat|Ancestry):/i.test(resource.source ?? "")));
 }
 
 export function syncMulticlassResources(resources: CharacterResource[], classLevels: CharacterClassLevel[], abilities: CharacterData["abilities"]) {
@@ -647,7 +653,23 @@ export function syncMulticlassResources(resources: CharacterResource[], classLev
       if (!existing || template.maximum > existing.maximum) byName.set(key, template);
     }
   }
-  return syncResourceTemplates(resources, [...byName.values()]);
+  return syncResourceTemplates(resources, [...byName.values()], (resource) => Boolean(resource.automatic && !/^(?:Feat|Ancestry):/i.test(resource.source ?? "")));
+}
+
+export function syncFeatResources(resources: CharacterResource[], feats: CharacterData["feats"], proficiencyBonus: number) {
+  const templates: CharacterResource[] = [];
+  if (feats.some((feat) => feat.id === "lucky" || feat.name.trim().toLowerCase() === "lucky")) {
+    templates.push({
+      id: crypto.randomUUID(),
+      name: "Luck Points",
+      current: proficiencyBonus,
+      maximum: proficiencyBonus,
+      recovery: "long",
+      automatic: true,
+      source: "Feat: Lucky",
+    });
+  }
+  return syncResourceTemplates(resources, templates, (resource) => Boolean(resource.automatic && /^Feat:/i.test(resource.source ?? "")));
 }
 
 export function extractDiceFormula(text: string) {

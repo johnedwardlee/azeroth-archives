@@ -41,6 +41,17 @@ describe("character save migrations", () => {
     expect(character.armorProficiencies).toContain("Heavy Armor");
   });
 
+  it("adds the automatic Lucky resource to existing characters", () => {
+    const character = normalizeCharacter({
+      id: "lucky-hero",
+      name: "Lucky Hero",
+      level: 5,
+      feats: [{ id: "lucky", name: "Lucky", category: "Origin", description: "Luck Points equal your Proficiency Bonus." }],
+      resources: [],
+    });
+    expect(character.resources).toContainEqual(expect.objectContaining({ name: "Luck Points", current: 3, maximum: 3, recovery: "long", automatic: true }));
+  });
+
   it("migrates version-one stores and drops malformed records", () => {
     const store = migrateOfflineStore({
       version: 1,

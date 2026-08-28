@@ -23,6 +23,8 @@ import {
   startingHitPoints,
   startingSpellRequirementsFor,
   syncEffectConditions,
+  syncFeatResources,
+  syncMulticlassResources,
 } from "./character-rules";
 import { newCharacter } from "../src/character-manager";
 import type { SpellDefinition } from "./types";
@@ -76,6 +78,25 @@ describe("living sheet rules", () => {
     expect(generatedCharacterActions({ ...character, spells: [{ ...spell, prepared: true }] }, []).some((action) => action.spellId === spell.id)).toBe(true);
     expect(isIncapacitated({ conditions: ["Stunned"] })).toBe(true);
     expect(isIncapacitated({ conditions: [" unconscious "] })).toBe(true);
+  });
+
+  it("automatically tracks Lucky uses by proficiency bonus and preserves spent points", () => {
+    const lucky = { id: "lucky", name: "Lucky", category: "Origin", description: "Luck Points: You can spend 1 Luck Point to gain Advantage." };
+    const initial = syncFeatResources([], [lucky], 3);
+    expect(initial).toEqual([expect.objectContaining({ name: "Luck Points", current: 3, maximum: 3, recovery: "long", automatic: true, source: "Feat: Lucky" })]);
+    expect(syncFeatResources(initial, [lucky], 3)).toBe(initial);
+
+    const spent = initial.map((resource) => ({ ...resource, current: 2 }));
+    const leveled = syncFeatResources(spent, [lucky], 4);
+    expect(leveled[0]).toMatchObject({ current: 3, maximum: 4 });
+    expect(syncMulticlassResources(leveled, [{ className: "Warrior", level: 5 }], newCharacter().abilities).some((resource) => resource.name === "Luck Points")).toBe(true);
+    expect(syncFeatResources(leveled, [], 4).some((resource) => resource.name === "Luck Points")).toBe(false);
+  });
+
+  it("connects the Lucky encounter action to its automatic point tracker", () => {
+    const lucky = { id: "lucky", name: "Lucky", category: "Origin", description: "Luck Points: You can spend 1 Luck Point to gain Advantage." };
+    const character = { ...newCharacter(), feats: [lucky], resources: syncFeatResources([], [lucky], 2) };
+    expect(generatedCharacterActions(character, [])).toContainEqual(expect.objectContaining({ name: "Lucky", resourceId: character.resources[0].id, resourceCost: 1 }));
   });
 
   it("adds standard actions and active companion commands to the encounter library", () => {
