@@ -10,7 +10,7 @@ The application code is ready to remain fully offline when no service is configu
 
    `azeroth-archives://auth-callback`
 
-4. Keep leaked-password protection and the normal email rate limits enabled. CAPTCHA is optional for the initial private beta but should be enabled if invitation abuse appears.
+4. Keep leaked-password protection and the normal email rate limits enabled. CAPTCHA is optional for a private table, but should be enabled if invitation or sign-in abuse appears.
 
 ## 2. Install the database migration
 
@@ -19,15 +19,20 @@ The application code is ready to remain fully offline when no service is configu
 3. Run it once and confirm the transaction succeeds.
 4. Do not expose table write grants or add a service-role key to the app. All writes intentionally pass through the migration's authenticated RPC functions.
 
-The migration creates the campaign, membership, invitation, character, mutation-audit, and roll-event tables; enables row-level security; authorizes private campaign Realtime channels; and enforces the 30-day/500-roll retention policy.
+The migration creates the campaign, membership, invitation, character, mutation-audit, and roll-event tables; enables row-level security; authorizes private campaign and party-roll Realtime channels; protects hidden DM rolls; and enforces the 30-day/500-roll retention policy. This baseline is consolidated through `v2.0.0`; a new project runs only this file.
 
-### Existing v2.0 beta projects
+### Upgrade an existing v2.0 beta project
 
-If the original migration was installed before `v2.0.0-beta.3`, run `supabase/migrations/202608250001_fix_invitation_redemption.sql` once in the Supabase SQL editor. This replaces the invitation-redemption function without deleting campaigns, invitations, characters, or user accounts. New projects using the updated original migration do not need the follow-up migration.
+Do not rerun the consolidated baseline against an existing beta database. Apply only the follow-up files that have not already succeeded, in this order:
 
-If the original migration was installed before `v2.0.0-beta.6`, also run `supabase/migrations/202608280001_clear_campaign_rolls.sql` once. This adds the DM-only roll clearing function and broadcasts removed roll entries without changing campaigns, characters, or accounts.
+| Existing database state | Required follow-up migrations |
+| --- | --- |
+| Created before `v2.0.0-beta.3` | `202608250001_fix_invitation_redemption.sql`, `202608280001_clear_campaign_rolls.sql`, `202608280002_shared_party_rolls.sql` |
+| Created on beta.3 through beta.5 | `202608280001_clear_campaign_rolls.sql`, `202608280002_shared_party_rolls.sql` |
+| Created on beta.6 | `202608280002_shared_party_rolls.sql` |
+| Created on beta.7 or beta.8 with the shared-roll migration already applied | None |
 
-For builds after `v2.0.0-beta.6`, run `supabase/migrations/202608280002_shared_party_rolls.sql` once. This lets players receive visible party rolls while keeping hidden DM rolls protected by row-level security and a separate private Realtime channel. Existing roll history remains visible to the DM and visible rolls become available to campaign players.
+The follow-ups replace functions and policies without deleting campaigns, invitations, characters, accounts, or existing roll history. The final migration lets players receive visible party rolls while keeping hidden DM rolls protected by row-level security and a separate private Realtime channel.
 
 ## 3. Configure GitHub release builds
 
@@ -38,7 +43,7 @@ In the GitHub repository, open **Settings → Secrets and variables → Actions*
 
 The release workflow passes these values only to the Windows packaging step. `scripts/generate-sync-config.cjs` embeds them into the installer. Ordinary local and CI builds remain deliberately unconfigured unless both environment variables are set.
 
-## 4. Pre-release verification
+## 4. Release verification
 
 Use a prerelease tag and at least three Windows installations or profiles: one DM and two players.
 
@@ -55,4 +60,4 @@ Use a prerelease tag and at least three Windows installations or profiles: one D
 11. Verify a player cannot read another player's character or any hidden roll using the Supabase API explorer.
 12. Revoke a test player and confirm subsequent reads and writes fail.
 
-Do not promote the build from beta until the migration and these multi-client checks pass against the actual hosted project.
+Complete these checks against the actual hosted project before each stable release that changes Live Sync behavior.

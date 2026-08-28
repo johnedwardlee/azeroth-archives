@@ -141,7 +141,7 @@ DM installations gain a primary Party tab containing:
 - Electron tests for encrypted session persistence and the network allowlist.
 - Multi-client tests with one DM and at least two player sessions.
 - Disconnect, reconnect, duplicate delivery, stale revision, revoked membership, reinstall/reinvite, backup, migration, update, and rollback tests.
-- `v2.0.0-beta.1`: authentication, linking, and sync core.
-- `v2.0.0-beta.2`: DM Party workspace and permissions.
-- `v2.0.0-beta.3`: roll feed and reliability hardening.
-- `v2.0.0`: stable release after an actual-session beta.
+- `v2.0.0-beta.1` through `beta.4`: authentication, linking, synchronization, permissions, and reconnect hardening.
+- `v2.0.0-beta.5` and `beta.6`: DM controls, shared rolls, spell and item roll fixes, and campaign roll administration.
+- `v2.0.0-beta.7` and `beta.8`: party-wide visible rolls, hidden DM rolls, journal coalescing, conditions, concentration, Initiative, and final Encounter layout.
+- `v2.0.0`: stable release after the complete DM-and-two-player hosted verification checklist passed.

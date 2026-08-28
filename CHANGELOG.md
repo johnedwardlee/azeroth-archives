@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.0.0
+
+- Release opt-in, offline-first Live Sync for private campaigns, including authenticated invitations, encrypted local sessions, revisioned character updates, durable offline queues, reconnect recovery, and database-enforced membership permissions.
+- Add the DM Party workspace with live character summaries, controlled sheet editing, always-available resource, condition, spell, and equipment management, and safeguards around identity, advancement, and destructive changes.
+- Share visible initiative, attack, spell, damage, healing, resource, and custom dice rolls with the party while keeping hidden DM rolls private, including after reconnects and application restarts.
+- Consolidate active play around the Encounter workspace, with Party Rolls and Initiative first, rules-aware actions, exact roll math, combat status, session tracking, favorites, and recent actions.
+- Complete multi-client release verification with one DM and two player installations, including simultaneous edits, offline replay, hidden-roll isolation, cross-player access denial, membership revocation, updates, backups, and recovery.
+
 ## 2.0.0-beta.8
 
 - Move the shared Party Rolls workspace to the top of the player Encounter view and place Initiative inside its dice roller, with character modifiers and d20 advantage or disadvantage applied before publishing the result to the party.
