@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.0-beta.5
+
+- Replace the DM equipment and spell selectors with searchable, description-rich pickers matching the player-facing library controls.
+- Let the DM add custom equipment and directly adjust every carried item's quantity and ammunition without enabling full-sheet editing.
+- Keep charge restoration available and clear pending picker input when the DM changes the selected party member.
+
 ## 2.0.0-beta.4
 
 - Preserve cleared optional character fields, including concentration state, across JSON live-sync mutations so ended concentration stays ended on every connected app.

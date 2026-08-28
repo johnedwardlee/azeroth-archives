@@ -17,6 +17,10 @@ describe("live-sync user interface contract", () => {
     expect(party).toContain("adjustInventoryResource");
     expect(party).toContain('"add-inventory-item"');
     expect(party).toContain('"add-known-spell"');
+    expect(party).toContain('<DescriptionPicker ariaLabel="Available equipment"');
+    expect(party).toContain('<DescriptionPicker ariaLabel="Available spells"');
+    expect(party).toContain('aria-label="Custom item name"');
+    expect(party).toContain("patchDmInventoryItem");
   });
 
   it("publishes rolls from all current dice-producing character surfaces", () => {

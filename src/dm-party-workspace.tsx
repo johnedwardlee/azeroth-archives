@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Activity, Backpack, BookOpen, Heart, Minus, Plus, Radio, Shield, Sparkles, Users } from "lucide-react";
 import { calculateEncumbrance } from "../lib/character-rules";
-import type { CharacterData, EquipmentDefinition, LiveCampaignMember, SharedRollEvent, SpellDefinition } from "../lib/types";
+import type { CharacterData, EquipmentDefinition, InventoryItem, LiveCampaignMember, SharedRollEvent, SpellDefinition } from "../lib/types";
+import { DescriptionPicker } from "./description-picker";
 
 type DmIntent = "add-inventory-item" | "add-known-spell" | "adjust-current-resource";
 
@@ -21,11 +22,50 @@ type Props = {
   onPatch: (characterId: string, patch: Partial<CharacterData>, intent: DmIntent) => void;
 };
 
+function equipmentDescription(item: EquipmentDefinition) {
+  return [
+    item.description,
+    item.damage ? `Damage: ${item.damage}${item.damageType ? ` ${item.damageType}` : ""}` : "",
+    item.properties?.length ? `Properties: ${item.properties.join(", ")}` : "",
+    item.mastery ? `Mastery: ${item.mastery}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+export function createDmCatalogItem(item: EquipmentDefinition, id: string): InventoryItem {
+  return { id, contentId: item.id, name: item.name, category: item.category, quantity: 1, equipped: false, notes: "", weight: item.weight, cost: item.cost, equipmentSlot: "none" };
+}
+
+export function createDmCustomItem(name: string, id: string): InventoryItem {
+  return { id, name: name.trim(), category: "Custom", quantity: 1, equipped: false, notes: "", equipmentSlot: "none" };
+}
+
+export function patchDmInventoryItem(inventory: InventoryItem[], itemId: string, patch: Partial<InventoryItem>) {
+  return inventory.map((item) => {
+    if (item.id !== itemId) return item;
+    const next = { ...item, ...patch };
+    next.quantity = Math.max(0, Number(next.quantity) || 0);
+    if (next.ammunition !== undefined) next.ammunition = Math.max(0, Number(next.ammunition) || 0);
+    if (next.maximumCharges !== undefined) next.maximumCharges = Math.max(0, Number(next.maximumCharges) || 0);
+    if (next.charges !== undefined) next.charges = Math.max(0, Math.min(next.maximumCharges ?? next.charges, Number(next.charges) || 0));
+    return next;
+  });
+}
+
 export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ownerByCharacterId, selectedCharacterId, fullEditCharacterId, equipment, spells, onSelectCharacter, onToggleFullEdit, onOpenSheet, onPatch }: Props) {
   const selected = characters.find((entry) => entry.id === selectedCharacterId) ?? characters[0];
   const [itemId, setItemId] = useState("");
   const [spellId, setSpellId] = useState("");
+  const [customItemName, setCustomItemName] = useState("");
   const memberById = useMemo(() => new Map(members.map((member) => [member.userId, member])), [members]);
+  const availableSpells = useMemo(() => selected ? spells
+    .filter((spell) => !selected.spells.some((known) => known.id === spell.id))
+    .sort((left, right) => left.level - right.level || left.name.localeCompare(right.name, undefined, { sensitivity: "base" })) : [], [selected, spells]);
+
+  useEffect(() => {
+    setItemId("");
+    setSpellId("");
+    setCustomItemName("");
+  }, [selected?.id]);
 
   function ownerName(character: CharacterData) {
     const owner = ownerByCharacterId.get(character.id);
@@ -73,12 +113,23 @@ export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ow
     }) }, "adjust-current-resource");
   }
 
+  function updateInventoryItem(itemId: string, patch: Partial<InventoryItem>) {
+    if (!selected) return;
+    onPatch(selected.id, { inventory: patchDmInventoryItem(selected.inventory, itemId, patch) }, "adjust-current-resource");
+  }
+
   function addItem() {
     if (!selected) return;
     const item = equipment.find((entry) => entry.id === itemId);
     if (!item) return;
-    onPatch(selected.id, { inventory: [...selected.inventory, { id: crypto.randomUUID(), contentId: item.id, name: item.name, category: item.category, quantity: 1, equipped: false, notes: "", weight: item.weight, cost: item.cost, equipmentSlot: "none" }] }, "add-inventory-item");
+    onPatch(selected.id, { inventory: [...selected.inventory, createDmCatalogItem(item, crypto.randomUUID())] }, "add-inventory-item");
     setItemId("");
+  }
+
+  function addCustomItem() {
+    if (!selected || !customItemName.trim()) return;
+    onPatch(selected.id, { inventory: [...selected.inventory, createDmCustomItem(customItemName, crypto.randomUUID())] }, "add-inventory-item");
+    setCustomItemName("");
   }
 
   function addSpell() {
@@ -111,12 +162,14 @@ export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ow
           {Object.entries(selected.spellSlots).filter(([, slot]) => slot.maximum > 0).map(([level, slot]) => <div className="dm-resource-row" key={level}><span><Sparkles size={14} />Level {level} slots</span><button onClick={() => adjustSlot(level, 1)} disabled={slot.used >= slot.maximum}><Minus size={13} /></button><strong>{slot.maximum - slot.used} / {slot.maximum}</strong><button onClick={() => adjustSlot(level, -1)} disabled={slot.used <= 0}><Plus size={13} /></button><button onClick={() => onPatch(selected.id, { spellSlots: { ...selected.spellSlots, [level]: { ...slot, used: 0 } } }, "adjust-current-resource")}>Restore</button></div>)}
           {selected.resources.map((resource) => <div className="dm-resource-row" key={resource.id}><span><Activity size={14} />{resource.name}</span><button onClick={() => adjustResource(resource.id, -1)} disabled={resource.current <= 0}><Minus size={13} /></button><strong>{resource.current} / {resource.maximum}</strong><button onClick={() => adjustResource(resource.id, 1)} disabled={resource.current >= resource.maximum}><Plus size={13} /></button><button onClick={() => onPatch(selected.id, { resources: selected.resources.map((entry) => entry.id === resource.id ? { ...entry, current: entry.maximum } : entry) }, "adjust-current-resource")}>Restore</button></div>)}
           {(selected.hitDiceByClass.length ? selected.hitDiceByClass : [{ className: undefined, total: selected.hitDiceTotal, used: selected.hitDiceUsed }]).map((pool) => <div className="dm-resource-row" key={pool.className ?? "hit-dice"}><span><Activity size={14} />{pool.className ? `${pool.className} Hit Dice` : "Hit Dice"}</span><button onClick={() => adjustHitDice(pool.className, 1)} disabled={pool.used >= pool.total}><Minus size={13} /></button><strong>{pool.total - pool.used} / {pool.total}</strong><button onClick={() => adjustHitDice(pool.className, -1)} disabled={pool.used <= 0}><Plus size={13} /></button><button onClick={() => adjustHitDice(pool.className, -pool.used)} disabled={pool.used <= 0}>Restore</button></div>)}
-          {selected.inventory.flatMap((item) => [
-            ...(item.maximumCharges !== undefined ? [{ itemId: item.id, field: "charges" as const, label: `${item.name} charges`, current: item.charges ?? 0, maximum: item.maximumCharges }] : []),
-            ...(item.ammunition !== undefined ? [{ itemId: item.id, field: "ammunition" as const, label: `${item.name} ammunition`, current: item.ammunition, maximum: undefined }] : []),
-          ]).map((resource) => <div className="dm-resource-row" key={`${resource.itemId}-${resource.field}`}><span><Backpack size={14} />{resource.label}</span><button onClick={() => adjustInventoryResource(resource.itemId, resource.field, -1)} disabled={resource.current <= 0}><Minus size={13} /></button><strong>{resource.maximum === undefined ? resource.current : `${resource.current} / ${resource.maximum}`}</strong><button onClick={() => adjustInventoryResource(resource.itemId, resource.field, 1)} disabled={resource.maximum !== undefined && resource.current >= resource.maximum}><Plus size={13} /></button>{resource.maximum === undefined ? <span className="dm-resource-no-maximum">No maximum set</span> : <button onClick={() => adjustInventoryResource(resource.itemId, resource.field, resource.maximum - resource.current)} disabled={resource.current >= resource.maximum}>Restore</button>}</div>)}
-          <div className="dm-add-row"><Backpack size={15} /><select value={itemId} onChange={(event) => setItemId(event.target.value)}><option value="">Add equipment…</option>{equipment.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button className="button button-outline" disabled={!itemId} onClick={addItem}>Add</button></div>
-          <div className="dm-add-row"><BookOpen size={15} /><select value={spellId} onChange={(event) => setSpellId(event.target.value)}><option value="">Add known spell…</option>{spells.filter((spell) => !selected.spells.some((known) => known.id === spell.id)).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)).map((spell) => <option key={spell.id} value={spell.id}>{spell.level ? `Level ${spell.level}` : "Cantrip"} · {spell.name}</option>)}</select><button className="button button-outline" disabled={!spellId} onClick={addSpell}>Add</button></div>
+          {selected.inventory.filter((item) => item.maximumCharges !== undefined).map((item) => <div className="dm-resource-row" key={`${item.id}-charges`}><span><Backpack size={14} />{item.name} charges</span><button onClick={() => adjustInventoryResource(item.id, "charges", -1)} disabled={(item.charges ?? 0) <= 0}><Minus size={13} /></button><strong>{item.charges ?? 0} / {item.maximumCharges}</strong><button onClick={() => adjustInventoryResource(item.id, "charges", 1)} disabled={(item.charges ?? 0) >= (item.maximumCharges ?? 0)}><Plus size={13} /></button><button onClick={() => updateInventoryItem(item.id, { charges: item.maximumCharges })} disabled={(item.charges ?? 0) >= (item.maximumCharges ?? 0)}>Restore</button></div>)}
+          <div className="dm-control-section"><div className="dm-control-section-heading"><Backpack size={15} /><div><strong>Equipment</strong><small>Quantity and ammunition controls are always available</small></div></div>
+            <div className="dm-add-row"><DescriptionPicker ariaLabel="Available equipment" value={itemId} placeholder="Choose imported equipment" onChange={setItemId} options={equipment.map((item) => ({ value: item.id, label: item.name, meta: [item.category, item.cost, item.weight].filter(Boolean).join(" · "), description: equipmentDescription(item) }))} /><button className="button button-outline" disabled={!itemId} onClick={addItem}>Add</button></div>
+            <div className="dm-custom-item-row"><input aria-label="Custom item name" value={customItemName} onChange={(event) => setCustomItemName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addCustomItem(); }} placeholder="Add a custom item" /><button className="button button-outline" disabled={!customItemName.trim()} onClick={addCustomItem}><Plus size={14} />Add</button></div>
+            <div className="dm-inventory-list">{selected.inventory.map((item) => <div className="dm-inventory-row" key={item.id}><div><strong>{item.name}</strong><small>{[item.category, item.weight, item.cost].filter(Boolean).join(" · ") || "Custom equipment"}</small></div><label><span>Qty</span><input aria-label={`${item.name} quantity`} type="number" min="0" value={item.quantity} onChange={(event) => updateInventoryItem(item.id, { quantity: Number(event.target.value) })} /></label><label><span>Ammo</span><input aria-label={`${item.name} ammunition`} type="number" min="0" value={item.ammunition ?? ""} onChange={(event) => updateInventoryItem(item.id, { ammunition: event.target.value === "" ? undefined : Number(event.target.value) })} placeholder="—" /></label></div>)}</div>
+            {!selected.inventory.length && <div className="empty-state compact">No equipment carried.</div>}
+          </div>
+          <div className="dm-control-section"><div className="dm-control-section-heading"><BookOpen size={15} /><div><strong>Spells</strong><small>Search the library and preview complete spell rules</small></div></div><div className="dm-add-row"><DescriptionPicker ariaLabel="Available spells" value={spellId} placeholder="Choose a known spell" onChange={setSpellId} options={availableSpells.map((spell) => ({ value: spell.id, label: spell.name, meta: `${spell.level ? `Level ${spell.level}` : "Cantrip"} · ${spell.school} · ${spell.classes.join(", ")}`, description: [`Casting time: ${spell.castingTime}`, `Range: ${spell.range}`, `Components: ${spell.components}`, `Duration: ${spell.duration}`, spell.description].join("\n") }))} /><button className="button button-outline" disabled={!spellId} onClick={addSpell}>Add</button></div></div>
           <button className="button button-primary dm-open-sheet" onClick={() => onOpenSheet(selected.id)}>Open live character sheet</button>
         </>}
       </section>
