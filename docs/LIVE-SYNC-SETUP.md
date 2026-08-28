@@ -27,6 +27,8 @@ If the original migration was installed before `v2.0.0-beta.3`, run `supabase/mi
 
 If the original migration was installed before `v2.0.0-beta.6`, also run `supabase/migrations/202608280001_clear_campaign_rolls.sql` once. This adds the DM-only roll clearing function and broadcasts removed roll entries without changing campaigns, characters, or accounts.
 
+For builds after `v2.0.0-beta.6`, run `supabase/migrations/202608280002_shared_party_rolls.sql` once. This lets players receive visible party rolls while keeping hidden DM rolls protected by row-level security and a separate private Realtime channel. Existing roll history remains visible to the DM and visible rolls become available to campaign players.
+
 ## 3. Configure GitHub release builds
 
 In the GitHub repository, open **Settings → Secrets and variables → Actions** and create these repository secrets:
@@ -48,7 +50,9 @@ Use a prerelease tag and at least three Windows installations or profiles: one D
 6. Confirm the DM can add items/spells and increase or reduce current resources without full editing.
 7. Confirm identity, class, maximum-value, removal, and advancement changes remain blocked until full editing is enabled.
 8. Switch characters and return to Party; confirm the full-edit toggle resets.
-9. Verify a player cannot read another player's character or the campaign roll table using the Supabase API explorer.
-10. Revoke a test player and confirm subsequent reads and writes fail.
+9. Roll from each player's Encounter workspace and confirm both players and the DM see the visible results in real time.
+10. Make a hidden DM roll and confirm it appears only in the DM feed, including after every app restarts.
+11. Verify a player cannot read another player's character or any hidden roll using the Supabase API explorer.
+12. Revoke a test player and confirm subsequent reads and writes fail.
 
 Do not promote the build from beta until the migration and these multi-client checks pass against the actual hosted project.

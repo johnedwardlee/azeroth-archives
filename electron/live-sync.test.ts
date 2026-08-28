@@ -91,13 +91,13 @@ describe("desktop live sync boundary", () => {
       await liveSync.initialize();
       await liveSync.ensureAnonymousPlayer();
       await liveSync.subscribe("campaign", { role: "player", displayName: "Player" }, "character");
-      expect(channels.map((channel) => channel.topic)).toEqual(["campaign:campaign", "character:character"]);
+      expect(channels.map((channel) => channel.topic)).toEqual(["campaign:campaign", "party-rolls:campaign", "character:character"]);
 
       channels[1].emit("CHANNEL_ERROR", { message: "connection dropped" });
       expect(events).toContainEqual(expect.objectContaining({ type: "status", status: expect.objectContaining({ connection: "offline" }) }));
 
       await vi.advanceTimersByTimeAsync(4_000);
-      expect(channels.map((channel) => channel.topic)).toEqual(["campaign:campaign", "character:character", "campaign:campaign", "character:character"]);
+      expect(channels.map((channel) => channel.topic)).toEqual(["campaign:campaign", "party-rolls:campaign", "character:character", "campaign:campaign", "party-rolls:campaign", "character:character"]);
       expect(events).toContainEqual({ type: "resync", campaignId: "campaign" });
       expect(events).toContainEqual(expect.objectContaining({ type: "status", status: expect.objectContaining({ connection: "live" }) }));
     } finally {

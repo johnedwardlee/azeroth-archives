@@ -442,6 +442,8 @@ export type CharacterMutation = {
   baseRevision: number;
   category: MutationCategory;
   patch: Partial<CharacterData>;
+  debounceKey?: string;
+  deferredUntil?: string;
   createdAt: string;
 };
 
@@ -459,6 +461,7 @@ export type SharedRollEvent = {
   total: number;
   mode: "normal" | "advantage" | "disadvantage";
   detail: string;
+  hidden: boolean;
   createdAt: string;
 };
 

@@ -41,30 +41,13 @@ import {
   spellHealingProfile,
   spellListsGrantedByFeats,
   spellMatchesLists,
+  STANDARD_CONDITIONS,
   startingSpellRequirementsFor,
   syncEffectConditions,
 } from "../lib/character-rules";
 import type { LocalRollEvent } from "../lib/live-sync";
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
-
-const CONDITIONS = [
-  "Blinded",
-  "Charmed",
-  "Deafened",
-  "Exhaustion",
-  "Frightened",
-  "Grappled",
-  "Incapacitated",
-  "Invisible",
-  "Paralyzed",
-  "Petrified",
-  "Poisoned",
-  "Prone",
-  "Restrained",
-  "Stunned",
-  "Unconscious",
-];
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, Number.isFinite(value) ? value : minimum));
@@ -303,7 +286,7 @@ export function SessionTracker({ character, patchCharacter, hitDicePools, onRoll
         <div className="session-block">
           <span className="field-label">Inspiration & conditions</span>
           <button className={`inspiration-toggle ${character.inspiration ? "active" : ""}`} onClick={() => patchCharacter({ inspiration: !character.inspiration })}><Sparkles size={15} />{character.inspiration ? "Inspired" : "Mark inspiration"}</button>
-          <div className="condition-add"><select value={condition} onChange={(event) => setCondition(event.target.value)}><option value="">Add condition</option>{CONDITIONS.filter((item) => !character.conditions.includes(item) && !character.conditionImmunities.some((immune) => immune.toLowerCase() === item.toLowerCase())).map((item) => <option key={item}>{item}</option>)}</select><button onClick={addCondition}><Plus size={14} /></button></div>
+          <div className="condition-add"><select value={condition} onChange={(event) => setCondition(event.target.value)}><option value="">Add condition</option>{STANDARD_CONDITIONS.filter((item) => !character.conditions.includes(item) && !character.conditionImmunities.some((immune) => immune.toLowerCase() === item.toLowerCase())).map((item) => <option key={item}>{item}</option>)}</select><button onClick={addCondition}><Plus size={14} /></button></div>
           {character.conditionImmunities.length > 0 && <small className="immunity-note">Immune: {character.conditionImmunities.join(", ")}</small>}
           <div className="condition-list">{character.conditions.map((item) => item === "Exhaustion"
             ? <span className="exhaustion-chip" key={item}><button aria-label="Reduce exhaustion" onClick={() => adjustExhaustion(-1)}>−</button><b>Exhaustion {character.exhaustionLevel}</b><button aria-label="Increase exhaustion" onClick={() => adjustExhaustion(1)}>+</button><button aria-label="Remove Exhaustion" onClick={() => removeCondition(item)}>×</button></span>
@@ -324,7 +307,7 @@ export function SessionTracker({ character, patchCharacter, hitDicePools, onRoll
       </CollapsiblePanel>
       <CollapsiblePanel contained className="active-effect-panel" storageKey={`azeroth-panel-${character.id}-session-effects`} eyebrow="Turn tracking" title="Active effects" summary={<span>{character.activeEffects.length} tracked</span>}>
         <div className="class-resource-heading class-resource-actions"><span /><div className="effect-advance"><button onClick={() => advanceEffects(1)}>Next round</button><button onClick={() => advanceEffects(10, 1)}>+1 minute</button></div></div>
-        <div className="effect-add-row"><input aria-label="Effect name" value={effectName} onChange={(event) => setEffectName(event.target.value)} placeholder="Effect name" /><select aria-label="Effect condition" value={effectCondition} onChange={(event) => setEffectCondition(event.target.value)}><option value="">No condition</option>{CONDITIONS.filter((item) => !character.conditionImmunities.some((immune) => immune.toLowerCase() === item.toLowerCase())).map((item) => <option key={item}>{item}</option>)}</select><select aria-label="Effect duration" value={effectDuration} onChange={(event) => setEffectDuration(event.target.value as ActiveEffect["duration"])}><option value="rounds">Rounds</option><option value="minutes">Minutes</option><option value="until-rest">Until rest</option><option value="manual">Manual</option></select>{(effectDuration === "rounds" || effectDuration === "minutes") && <input aria-label="Effect duration amount" type="number" min="1" value={effectRemaining} onChange={(event) => setEffectRemaining(Math.max(1, Number(event.target.value) || 1))} />}<button onClick={addEffect}><Plus size={14} />Add effect</button></div>
+        <div className="effect-add-row"><input aria-label="Effect name" value={effectName} onChange={(event) => setEffectName(event.target.value)} placeholder="Effect name" /><select aria-label="Effect condition" value={effectCondition} onChange={(event) => setEffectCondition(event.target.value)}><option value="">No condition</option>{STANDARD_CONDITIONS.filter((item) => !character.conditionImmunities.some((immune) => immune.toLowerCase() === item.toLowerCase())).map((item) => <option key={item}>{item}</option>)}</select><select aria-label="Effect duration" value={effectDuration} onChange={(event) => setEffectDuration(event.target.value as ActiveEffect["duration"])}><option value="rounds">Rounds</option><option value="minutes">Minutes</option><option value="until-rest">Until rest</option><option value="manual">Manual</option></select>{(effectDuration === "rounds" || effectDuration === "minutes") && <input aria-label="Effect duration amount" type="number" min="1" value={effectRemaining} onChange={(event) => setEffectRemaining(Math.max(1, Number(event.target.value) || 1))} />}<button onClick={addEffect}><Plus size={14} />Add effect</button></div>
         <div className="active-effect-list">{character.activeEffects.map((effect) => <article className={effect.concentration ? "concentration" : ""} key={effect.id}><Sparkles size={15} /><div><strong>{effect.name}</strong><span>{effect.source}{effect.condition ? ` · ${effect.condition}` : ""}</span></div><b>{effect.duration === "rounds" ? `${effect.remaining} rd` : effect.duration === "minutes" ? `${effect.remaining} min` : effect.duration === "until-rest" ? "Until rest" : "Manual"}</b>{effect.concentration && <small>Concentration</small>}<button aria-label={`End ${effect.name}`} onClick={() => endEffect(effect.id)}>×</button></article>)}</div>
         {!character.activeEffects.length && <p className="class-resource-empty">Cast a duration spell or add an effect to track its expiration here.</p>}
       </CollapsiblePanel>

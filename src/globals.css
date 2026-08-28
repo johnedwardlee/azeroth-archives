@@ -392,8 +392,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .party-quick-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 12px 0 9px; }
 .party-quick-stats span { min-width: 0; display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 5px; color: var(--muted); background: white; font-size: 8px; }
 .party-quick-stats b { color: var(--forest-800); font-size: 10px; }
-.party-card-detail { display: flex; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 8px; }
+.party-card-detail { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 8px; }
 .party-card-detail span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.party-condition-view { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.party-concentration { display: inline-flex; align-items: center; gap: 3px; color: #76551f; font-weight: 900; }
 .dm-party-columns { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr); align-items: start; gap: 16px; }
 .dm-character-controls, .roll-feed { min-width: 0; }
 .dm-edit-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #d4bea0; border-radius: 6px; color: #745122; background: #fbf2e3; font-size: 9px; font-weight: 800; }
@@ -409,6 +411,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dm-control-section-heading > div { display: flex; flex-direction: column; gap: 1px; }
 .dm-control-section-heading strong { color: var(--forest-800); font-family: var(--font-serif), serif; font-size: 13px; }
 .dm-control-section-heading small { color: var(--muted); font-size: 8px; }
+.dm-condition-controls { margin: 12px 0 4px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: #f8f6ef; }
+.dm-condition-controls .condition-add button:disabled { opacity: .35; cursor: default; }
+.dm-condition-controls .condition-list small { color: var(--muted); font-size: 9px; }
+.dm-concentration-status { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); color: #76551f; font-size: 9px; }
+.dm-collapsible-title { display: inline-flex; align-items: center; gap: 6px; }
 .dm-add-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; margin-top: 9px; }
 .dm-add-row .button, .dm-custom-item-row .button { min-height: 39px; }
 .dm-custom-item-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; margin-top: 7px; }
@@ -427,6 +434,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .roll-feed-list article > div:first-child { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; }
 .roll-feed-list strong { color: var(--forest-800); font-size: 10px; }
 .roll-feed-list span { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.roll-feed-list span em { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 2px 5px; border-radius: 999px; color: #76551f; background: #eee0bf; font-size: 7px; font-style: normal; font-weight: 900; text-transform: uppercase; }
+.roll-feed-list article.hidden-roll { border-left-color: #796443; background: #eeeae0; }
 .roll-feed-list time { color: #969990; font-size: 8px; }
 .roll-feed-result { min-width: 54px; display: flex; flex-direction: column; align-items: flex-end; }
 .roll-feed-result b { color: var(--forest-900); font-family: var(--font-serif), serif; font-size: 21px; }
@@ -434,6 +443,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .roll-feed-heading-actions { display: flex; align-items: center; gap: 6px; }
 .roll-feed-heading-actions > button { min-height: 27px; display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--red); background: white; cursor: pointer; font-size: 8px; font-weight: 900; }
 .roll-feed-heading-actions > button:disabled { opacity: .35; cursor: default; }
+.roll-feed-toolbar { justify-content: flex-end; margin: -3px 0 8px; }
 .dm-dice-roller { margin-bottom: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #f7f3e9; }
 .dm-dice-fields { display: grid; grid-template-columns: minmax(90px, 1fr) 90px 70px auto; align-items: end; gap: 6px; }
 .dm-dice-fields > input, .dm-dice-fields label input { width: 100%; min-width: 0; height: 33px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: white; font-size: 9px; }
@@ -445,6 +455,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dm-dice-options > div:first-child button.active { border-color: var(--gold); color: #6c4a1f; background: var(--gold-soft); }
 .dm-dice-result { display: grid; grid-template-columns: 16px minmax(0, 1fr) 24px; align-items: center; gap: 6px; margin-top: 8px; padding: 7px 8px; border-radius: 6px; color: var(--forest-800); background: white; font-size: 10px; font-weight: 800; }
 .dm-dice-result > button { border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.hidden-roll-toggle { width: fit-content; display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; color: #76551f; cursor: pointer; font-size: 9px; font-weight: 800; }
+.hidden-roll-toggle input { accent-color: var(--gold); }
+.roll-sharing-note { display: block; margin-top: 8px; color: var(--muted); font-size: 8px; }
+.action-dashboard > .party-roll-workspace { width: 100%; }
 .dm-live-readonly-banner { max-width: 1160px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 10px; margin: 0 auto 14px; padding: 10px 12px; border: 1px solid #d5bd8c; border-radius: 8px; color: #6f5121; background: #faf0db; }
 .dm-live-readonly-banner span { font-size: 10px; line-height: 1.45; }
 .dm-live-readonly .panel input, .dm-live-readonly .panel textarea, .dm-live-readonly .panel select, .dm-live-readonly .panel button:not(.inventory-expand), .dm-live-readonly .panel .description-picker-trigger { pointer-events: none; opacity: .7; }

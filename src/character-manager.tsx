@@ -702,6 +702,8 @@ export function CharacterManager() {
   const syncOutboxRef = useRef(syncOutbox);
   const liveSyncStatusRef = useRef(liveSyncStatus);
   const syncFlushActive = useRef(false);
+  const syncEntriesInFlight = useRef(new Set<string>());
+  const deferredSyncTimer = useRef<number | undefined>(undefined);
   const deletedCharacterIds = useRef(new Set<string>());
   characterRef.current = character;
   charactersRef.current = characters;
@@ -960,7 +962,7 @@ export function CharacterManager() {
     return { ...current, ...patch, ...hpPatch, updatedAt: new Date().toISOString() };
   }
 
-  function patchCharacter(patch: Partial<CharacterData>, options: { dmIntent?: DmMutationIntent } = {}) {
+  function patchCharacter(patch: Partial<CharacterData>, options: { dmIntent?: DmMutationIntent; liveSyncDebounce?: { key: string; delayMs: number; flush?: boolean } } = {}) {
     const current = characterRef.current;
     if (current.readOnlyReview) {
       setStatus("DM review copies are read-only");
@@ -975,7 +977,13 @@ export function CharacterManager() {
     const next = buildPatchedCharacter(current, patch);
     setCharacter(next);
     setStatus("Unsaved changes");
-    if (link) enqueueLiveSync(createCharacterMutation(link.campaignId, current.id, link.revision, { ...patch, updatedAt: next.updatedAt }));
+    if (link) {
+      const debounce = options.liveSyncDebounce;
+      enqueueLiveSync(createCharacterMutation(link.campaignId, current.id, link.revision, { ...patch, updatedAt: next.updatedAt }, debounce ? {
+        debounceKey: debounce.key,
+        deferredUntil: new Date(Date.now() + (debounce.flush ? 0 : debounce.delayMs)).toISOString(),
+      } : {}));
+    }
   }
 
   function patchLiveCharacter(characterId: string, patch: Partial<CharacterData>, dmIntent: DmMutationIntent) {
@@ -1018,9 +1026,29 @@ export function CharacterManager() {
   }
 
   function enqueueLiveSync(entry: SyncOutboxEntry) {
-    replaceSyncOutbox(enqueueSyncEntry(syncOutboxRef.current, entry));
+    const hasOnlyInFlightDebounceMatch = entry.kind === "character-mutation" && entry.debounceKey
+      && syncOutboxRef.current.some((queued) => queued.kind === "character-mutation" && queued.campaignId === entry.campaignId && queued.characterId === entry.characterId && queued.debounceKey === entry.debounceKey && syncEntriesInFlight.current.has(queued.id))
+      && !syncOutboxRef.current.some((queued) => queued.kind === "character-mutation" && queued.campaignId === entry.campaignId && queued.characterId === entry.characterId && queued.debounceKey === entry.debounceKey && !syncEntriesInFlight.current.has(queued.id));
+    replaceSyncOutbox(hasOnlyInFlightDebounceMatch ? [...syncOutboxRef.current, entry].sort((left, right) => left.createdAt.localeCompare(right.createdAt)) : enqueueSyncEntry(syncOutboxRef.current, entry));
     if (liveSyncStatusRef.current.connection === "live") window.setTimeout(() => flushSyncOutbox(), 0);
     else setStatus("Saved locally; live-sync changes are queued");
+  }
+
+  function scheduleDeferredSyncFlush() {
+    if (deferredSyncTimer.current !== undefined) window.clearTimeout(deferredSyncTimer.current);
+    deferredSyncTimer.current = undefined;
+    if (liveSyncStatusRef.current.connection !== "live") return;
+    const nextDue = syncOutboxRef.current.reduce((earliest, entry) => {
+      if (entry.kind !== "character-mutation" || !entry.deferredUntil) return earliest;
+      const due = Date.parse(entry.deferredUntil);
+      return Number.isFinite(due) ? Math.min(earliest, due) : earliest;
+    }, Number.POSITIVE_INFINITY);
+    if (!Number.isFinite(nextDue)) return;
+    deferredSyncTimer.current = window.setTimeout(() => flushSyncOutbox(), Math.max(0, nextDue - Date.now()) + 10);
+  }
+
+  function queuedCharacterPatch(characterId: string, excludingEntryId: string) {
+    return syncOutboxRef.current.reduce<Partial<CharacterData>>((patch, queued) => queued.kind === "character-mutation" && queued.characterId === characterId && queued.id !== excludingEntryId ? { ...patch, ...queued.patch } : patch, {});
   }
 
   async function flushSyncOutbox() {
@@ -1028,23 +1056,31 @@ export function CharacterManager() {
     syncFlushActive.current = true;
     try {
       while (syncOutboxRef.current.length) {
-        const entry = syncOutboxRef.current[0];
-        if (entry.kind === "character-mutation") {
-          const result = await window.azerothDesktop.applyCharacterMutation(entry);
-          updateSyncRevision(entry.characterId, result.revision);
-          if (result.characterState) applyRemoteCharacterPatch(entry.characterId, result.characterState);
-          if (result.wasConflict) setStatus("Live changes merged with a newer remote revision");
-        } else {
-          await window.azerothDesktop.publishRollEvent(entry);
+        const now = Date.now();
+        const entry = syncOutboxRef.current.find((queued) => queued.kind !== "character-mutation" || !queued.deferredUntil || Date.parse(queued.deferredUntil) <= now);
+        if (!entry) break;
+        syncEntriesInFlight.current.add(entry.id);
+        try {
+          if (entry.kind === "character-mutation") {
+            const result = await window.azerothDesktop.applyCharacterMutation(entry);
+            updateSyncRevision(entry.characterId, result.revision);
+            if (result.characterState) applyRemoteCharacterPatch(entry.characterId, { ...result.characterState, ...queuedCharacterPatch(entry.characterId, entry.id) });
+            if (result.wasConflict) setStatus("Live changes merged with a newer remote revision");
+          } else {
+            await window.azerothDesktop.publishRollEvent(entry);
+          }
+          acknowledgeOutbox(entry.id);
+        } finally {
+          syncEntriesInFlight.current.delete(entry.id);
         }
-        acknowledgeOutbox(entry.id);
       }
-      if (liveSyncStatusRef.current.connection === "live") setStatus("All live changes synchronized");
+      if (liveSyncStatusRef.current.connection === "live" && !syncOutboxRef.current.length) setStatus("All live changes synchronized");
     } catch (error) {
       setLiveSyncStatus((current) => ({ ...current, connection: "offline", message: "Connection lost; local changes will retry when live sync reconnects." }));
       setStatus(error instanceof Error ? error.message : "Live changes remain queued");
     } finally {
       syncFlushActive.current = false;
+      scheduleDeferredSyncFlush();
     }
   }
 
@@ -1078,6 +1114,7 @@ export function CharacterManager() {
       total: record.total,
       mode: ["normal", "advantage", "disadvantage"].includes(String(record.mode)) ? record.mode as SharedRollEvent["mode"] : "normal",
       detail: typeof record.detail === "string" ? record.detail : "",
+      hidden: Boolean(record.hidden),
       createdAt: typeof record.created_at === "string" ? record.created_at : new Date().toISOString(),
     });
   }
@@ -1110,7 +1147,7 @@ export function CharacterManager() {
     const [snapshots, members, rolls] = await Promise.all([
       window.azerothDesktop.listSyncedCharacters(campaignId),
       window.azerothDesktop.listCampaignMembers(campaignId),
-      appRole === "dm" ? window.azerothDesktop.listCampaignRolls(campaignId) : Promise.resolve([]),
+      window.azerothDesktop.listCampaignRolls(campaignId),
     ]);
     const campaign = knownCampaigns.find((entry) => entry.id === campaignId);
     const normalized = snapshots.flatMap((snapshot) => {
@@ -2466,7 +2503,7 @@ export function CharacterManager() {
           </div>
         )}
 
-        {tab === "encounter" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} hitDicePools={hitDicePools} encumbranceRule={characterCampaignProfile?.encumbranceRule} onRoll={publishCharacterRoll} />}
+        {tab === "encounter" && <ActionDashboard character={character} patchCharacter={patchCharacter} catalog={equipment} hitDicePools={hitDicePools} encumbranceRule={characterCampaignProfile?.encumbranceRule} onRoll={publishCharacterRoll} partyRolls={appRole === "player" ? liveRolls : undefined} partyRollsConnected={Boolean(activeLiveCampaignId && syncLinks.some((link) => link.characterId === character.id && link.campaignId === activeLiveCampaignId && link.role === "player"))} />}
 
         {tab === "character" && <CombatManager catalog={equipment} character={character} patchCharacter={patchCharacter} onRoll={publishCharacterRoll} />}
 
@@ -2476,7 +2513,7 @@ export function CharacterManager() {
 
         {tab === "companions" && <CompanionManager catalog={creatures} character={character} patchCharacter={patchCharacter} />}
 
-        {tab === "journal" && <JournalManager character={character} patchCharacter={patchCharacter} />}
+        {tab === "journal" && <JournalManager character={character} patchCharacter={(patch, options) => patchCharacter(patch, { liveSyncDebounce: { key: `journal:${character.id}`, delayMs: 10_000, flush: options?.flushLiveSync } })} />}
 
         {tab !== "party" && character.finalizedAt && <div className="completed-setup-toggle completed-setup-toggle-bottom"><div><strong>Character setup complete</strong><span>Session-zero and creation choices are hidden during regular play.</span></div><button type="button" className="button button-outline" aria-expanded={showCompletedSetup} onClick={() => setShowCompletedSetup((current) => !current)}>{showCompletedSetup ? <EyeOff size={15} /> : <Eye size={15} />}{showCompletedSetup ? "Hide setup" : "Show setup"}</button></div>}
       </section>

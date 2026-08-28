@@ -2,10 +2,11 @@ import { useMemo, useState } from "react";
 import { Dices, RotateCcw, Search, Sparkles, Star, Swords } from "lucide-react";
 import { favoriteActionsFirst, recordRecentAction, toggleFavoriteAction } from "../lib/action-history";
 import { activeEffectFromSpell, conditionRollEffects, extractDiceFormula, generatedCharacterActions, hasUnproficientArmor, isEquipmentProficient, isIncapacitated, resolvedRollMode, rollD20, rollDiceFormula, spellcastingAbilityForClass, spellDamageProfile, spellHealingProfile, spellSaveAbility, syncEffectConditions, type GeneratedAction, type RollMode, type SpellDamageProfile } from "../lib/character-rules";
-import { ABILITY_LABELS, abilityModifier, type AbilityKey, type ActionTiming, type CharacterData, type EncumbranceRule, type EquipmentDefinition, type HitDicePool } from "../lib/types";
+import { ABILITY_LABELS, abilityModifier, type AbilityKey, type ActionTiming, type CharacterData, type EncumbranceRule, type EquipmentDefinition, type HitDicePool, type SharedRollEvent } from "../lib/types";
 import { CombatStatusStrip } from "./combat-status-strip";
 import { CollapsiblePanel } from "./collapsible-panel";
 import { SessionTracker } from "./living-sheet";
+import { PartyRollWorkspace } from "./party-roll-workspace";
 import type { LocalRollEvent } from "../lib/live-sync";
 
 type PatchCharacter = (patch: Partial<CharacterData>) => void;
@@ -33,7 +34,7 @@ function signed(value: number) {
   return `${value >= 0 ? "+" : "−"}${Math.abs(value)}`;
 }
 
-export function ActionDashboard({ character, patchCharacter, catalog, hitDicePools, encumbranceRule = "standard", onRoll }: { character: CharacterData; patchCharacter: PatchCharacter; catalog: EquipmentDefinition[]; hitDicePools: HitDicePool[]; encumbranceRule?: EncumbranceRule; onRoll?: (event: LocalRollEvent) => void }) {
+export function ActionDashboard({ character, patchCharacter, catalog, hitDicePools, encumbranceRule = "standard", onRoll, partyRolls, partyRollsConnected = false }: { character: CharacterData; patchCharacter: PatchCharacter; catalog: EquipmentDefinition[]; hitDicePools: HitDicePool[]; encumbranceRule?: EncumbranceRule; onRoll?: (event: LocalRollEvent) => void; partyRolls?: SharedRollEvent[]; partyRollsConnected?: boolean }) {
   const [query, setQuery] = useState("");
   const [timingFilter, setTimingFilter] = useState<TimingFilter>("all");
   const [purposeFilter, setPurposeFilter] = useState<PurposeFilter>("all");
@@ -303,6 +304,7 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
       </div>
     </CollapsiblePanel>
     <SessionTracker character={character} patchCharacter={patchCharacter} hitDicePools={hitDicePools} onRoll={onRoll} />
+    {partyRolls && onRoll && <PartyRollWorkspace rolls={partyRolls} roller="player" storageKey={`azeroth-panel-${character.id}-encounter-party-rolls`} sharingAvailable={partyRollsConnected} onRoll={onRoll} />}
     {character.recentActions.length > 0 && <CollapsiblePanel className="recent-action-panel" storageKey={`azeroth-panel-${character.id}-encounter-recent`} eyebrow="History" title="Recently used" summary={<span>{character.recentActions.length} entries</span>}><div className="recent-action-list">{character.recentActions.map((entry) => { const action = byId.get(entry.actionId); return <button key={`${entry.actionId}-${entry.usedAt}`} disabled={!action || Boolean(action && unavailableReason(action))} onClick={() => { if (action) useAction(action); }}><span>{entry.name}</span><small>{entry.result}</small></button>; })}</div></CollapsiblePanel>}
     {timingFilter === "all" && references.length > 0 && <CollapsiblePanel className="action-reference-panel" storageKey={`azeroth-panel-${character.id}-encounter-references`} eyebrow="Always available" title="Passive features" summary={<span>{references.length} references</span>} defaultExpanded={false}><div className="encounter-action-grid">{references.map((action) => actionCard(action))}</div></CollapsiblePanel>}
   </div>;

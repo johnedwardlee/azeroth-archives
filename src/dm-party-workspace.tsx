@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Backpack, BookOpen, Dices, Heart, Minus, Plus, Radio, Shield, Sparkles, Trash2, Users } from "lucide-react";
-import { calculateEncumbrance, rollD20, rollDiceFormula, type RollMode } from "../lib/character-rules";
+import { Activity, Backpack, BookOpen, Heart, Minus, Plus, Radio, Shield, Sparkles, Users } from "lucide-react";
+import { calculateEncumbrance, STANDARD_CONDITIONS, syncEffectConditions } from "../lib/character-rules";
 import type { LocalRollEvent } from "../lib/live-sync";
 import type { CharacterData, EquipmentDefinition, InventoryItem, LiveCampaignMember, SharedRollEvent, SpellDefinition } from "../lib/types";
 import { DescriptionPicker } from "./description-picker";
+import { PartyRollWorkspace } from "./party-roll-workspace";
+import { CollapsiblePanel } from "./collapsible-panel";
 
-type DmIntent = "add-inventory-item" | "add-known-spell" | "adjust-current-resource";
+type DmIntent = "add-inventory-item" | "add-known-spell" | "adjust-current-resource" | "adjust-condition";
 
 type Props = {
   characters: CharacterData[];
@@ -54,25 +56,46 @@ export function patchDmInventoryItem(inventory: InventoryItem[], itemId: string,
   });
 }
 
+export function concentratingOn(character: CharacterData) {
+  return character.spells.find((spell) => spell.id === character.concentratingSpellId)?.name
+    ?? character.activeEffects.find((effect) => effect.concentration)?.name;
+}
+
+export function addDmConditionPatch(character: CharacterData, condition: string): Partial<CharacterData> {
+  if (!STANDARD_CONDITIONS.includes(condition) || character.conditions.includes(condition) || character.conditionImmunities.some((immune) => immune.toLowerCase() === condition.toLowerCase())) return {};
+  const endsConcentration = ["Incapacitated", "Paralyzed", "Petrified", "Stunned", "Unconscious"].includes(condition);
+  const activeEffects = endsConcentration ? character.activeEffects.filter((effect) => !effect.concentration) : character.activeEffects;
+  return {
+    conditions: syncEffectConditions([...character.conditions, condition], character.activeEffects, activeEffects),
+    exhaustionLevel: condition === "Exhaustion" ? Math.max(1, character.exhaustionLevel) : character.exhaustionLevel,
+    ...(endsConcentration ? { concentratingSpellId: undefined, activeEffects } : {}),
+  };
+}
+
+export function removeDmConditionPatch(character: CharacterData, condition: string): Partial<CharacterData> {
+  return {
+    conditions: syncEffectConditions(character.conditions.filter((entry) => entry !== condition), character.activeEffects, character.activeEffects),
+    ...(condition === "Exhaustion" ? { exhaustionLevel: 0 } : {}),
+  };
+}
+
 export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ownerByCharacterId, selectedCharacterId, fullEditCharacterId, equipment, spells, onSelectCharacter, onToggleFullEdit, onOpenSheet, onPatch, onRoll, onClearRolls }: Props) {
   const selected = characters.find((entry) => entry.id === selectedCharacterId) ?? characters[0];
   const [itemId, setItemId] = useState("");
   const [spellId, setSpellId] = useState("");
   const [customItemName, setCustomItemName] = useState("");
-  const [diceFormula, setDiceFormula] = useState("1d20");
-  const [diceModifier, setDiceModifier] = useState(0);
-  const [diceLabel, setDiceLabel] = useState("DM roll");
-  const [diceMode, setDiceMode] = useState<RollMode>("normal");
-  const [diceResult, setDiceResult] = useState("");
+  const [condition, setCondition] = useState("");
   const memberById = useMemo(() => new Map(members.map((member) => [member.userId, member])), [members]);
   const availableSpells = useMemo(() => selected ? spells
     .filter((spell) => !selected.spells.some((known) => known.id === spell.id))
     .sort((left, right) => left.level - right.level || left.name.localeCompare(right.name, undefined, { sensitivity: "base" })) : [], [selected, spells]);
+  const availableConditions = useMemo(() => selected ? STANDARD_CONDITIONS.filter((entry) => !selected.conditions.includes(entry) && !selected.conditionImmunities.some((immune) => immune.toLowerCase() === entry.toLowerCase())) : [], [selected]);
 
   useEffect(() => {
     setItemId("");
     setSpellId("");
     setCustomItemName("");
+    setCondition("");
   }, [selected?.id]);
 
   function ownerName(character: CharacterData) {
@@ -149,26 +172,16 @@ export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ow
     setSpellId("");
   }
 
-  function rollDmDice() {
-    if (!selected) return;
-    const formula = diceFormula.trim();
-    if (/^(?:1)?d20$/i.test(formula)) {
-      const { dice, kept } = rollD20(diceMode);
-      const total = kept + diceModifier;
-      setDiceResult(`${dice.join(" / ")}${diceModifier ? ` ${diceModifier >= 0 ? "+" : "−"}${Math.abs(diceModifier)}` : ""} = ${total}`);
-      onRoll(selected.id, { category: "other", label: diceLabel.trim() || "DM roll", formula: diceMode === "normal" ? "d20" : `2d20 ${diceMode === "advantage" ? "keep highest" : "keep lowest"}`, dice, modifier: diceModifier, total, mode: diceMode, detail: `Rolled by the DM for ${selected.name}` });
-      return;
-    }
-    const result = rollDiceFormula(formula, false, diceModifier);
-    if (!result) { setDiceResult("Use dice notation such as 2d6+3."); return; }
-    setDiceResult(`${result.rolls.join(" + ")}${result.modifier ? ` ${result.modifier >= 0 ? "+" : "−"}${Math.abs(result.modifier)}` : ""} = ${result.total}`);
-    onRoll(selected.id, { category: "other", label: diceLabel.trim() || "DM roll", formula, dice: result.rolls, modifier: result.modifier, total: result.total, mode: "normal", detail: `Rolled by the DM for ${selected.name}` });
+  function addCondition() {
+    if (!selected || !condition) return;
+    const patch = addDmConditionPatch(selected, condition);
+    if (Object.keys(patch).length) onPatch(selected.id, patch, "adjust-condition");
+    setCondition("");
   }
 
-  async function clearRollFeed() {
-    if (!rolls.length || !window.confirm("Clear every roll in this campaign's shared roll history? This cannot be undone.")) return;
-    await onClearRolls();
-    setDiceResult("");
+  function removeCondition(conditionName: string) {
+    if (!selected) return;
+    onPatch(selected.id, removeDmConditionPatch(selected, conditionName), "adjust-condition");
   }
 
   return <div className="dm-party-workspace">
@@ -176,10 +189,11 @@ export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ow
       <div className="party-card-grid">{characters.map((character) => {
         const encumbrance = calculateEncumbrance(character.inventory, character.abilities.strength);
         const online = isOnline(character);
+        const concentration = concentratingOn(character);
         return <button key={character.id} className={`party-card ${selected?.id === character.id ? "selected" : ""}`} onClick={() => onSelectCharacter(character.id)}>
           <div className="party-card-heading"><span className="party-card-avatar">{character.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><div><strong>{character.name}</strong><small>{ownerName(character) || "Player not set"} · Level {character.level} {character.className}</small></div><span className={`presence-pill ${online ? "online" : "offline"}`}><Radio size={10} />{online ? "Live" : "Offline"}</span></div>
           <div className="party-quick-stats"><span><Heart size={13} /><b>{character.currentHp}{character.temporaryHp ? `+${character.temporaryHp}` : ""}/{character.maxHp}</b> HP</span><span><Shield size={13} /><b>{character.armorClass}</b> AC</span><span><Activity size={13} /><b>{character.speed}</b> ft.</span></div>
-          <div className="party-card-detail"><span>{character.conditions.length ? character.conditions.join(", ") : "No conditions"}</span><span>{encumbrance.level === "over-capacity" ? "Over capacity" : `${encumbrance.totalWeight.toFixed(1)} / ${encumbrance.carryingCapacity} lb.`}</span></div>
+          <div className="party-card-detail"><div className="party-condition-view"><span>{character.conditions.length ? character.conditions.join(", ") : "No conditions"}</span>{concentration && <span className="party-concentration"><Sparkles size={10} />Concentrating: {concentration}</span>}</div><span>{encumbrance.level === "over-capacity" ? "Over capacity" : `${encumbrance.totalWeight.toFixed(1)} / ${encumbrance.carryingCapacity} lb.`}</span></div>
         </button>;
       })}</div>
       {!characters.length && <div className="empty-state"><Users size={26} /><p>No player characters are linked to this live campaign yet.</p></div>}
@@ -189,26 +203,23 @@ export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ow
       <section className="panel dm-character-controls"><div className="section-heading"><div><span className="eyebrow">DM controls</span><h2>{selected?.name ?? "Select a character"}</h2></div>{selected && <label className="dm-edit-toggle"><input type="checkbox" checked={fullEditCharacterId === selected.id} onChange={(event) => onToggleFullEdit(selected.id, event.target.checked)} /><span>Enable full editing</span></label>}</div>
         {selected && <>
           <div className="dm-resource-row"><span><Heart size={14} />Hit points</span><button onClick={() => adjustHp(-1)}><Minus size={13} /></button><strong>{selected.currentHp} / {selected.maxHp}</strong><button onClick={() => adjustHp(1)}><Plus size={13} /></button><button onClick={() => onPatch(selected.id, { currentHp: selected.maxHp }, "adjust-current-resource")}>Restore</button></div>
+          <div className="dm-condition-controls"><div className="dm-control-section-heading"><Activity size={15} /><div><strong>Conditions</strong><small>Add or remove standard conditions without enabling full editing</small></div></div><div className="condition-add"><select aria-label="Condition to add" value={condition} onChange={(event) => setCondition(event.target.value)}><option value="">Add condition</option>{availableConditions.map((entry) => <option key={entry}>{entry}</option>)}</select><button aria-label="Add selected condition" disabled={!condition} onClick={addCondition}><Plus size={14} /></button></div><div className="condition-list">{selected.conditions.map((entry) => <button type="button" key={entry} onClick={() => removeCondition(entry)}>{entry === "Exhaustion" ? `${entry} ${selected.exhaustionLevel}` : entry} ×</button>)}{!selected.conditions.length && <small>No active conditions</small>}</div>{concentratingOn(selected) && <div className="dm-concentration-status"><Sparkles size={13} /><span>Concentrating on <strong>{concentratingOn(selected)}</strong></span></div>}</div>
           {Object.entries(selected.spellSlots).filter(([, slot]) => slot.maximum > 0).map(([level, slot]) => <div className="dm-resource-row" key={level}><span><Sparkles size={14} />Level {level} slots</span><button onClick={() => adjustSlot(level, 1)} disabled={slot.used >= slot.maximum}><Minus size={13} /></button><strong>{slot.maximum - slot.used} / {slot.maximum}</strong><button onClick={() => adjustSlot(level, -1)} disabled={slot.used <= 0}><Plus size={13} /></button><button onClick={() => onPatch(selected.id, { spellSlots: { ...selected.spellSlots, [level]: { ...slot, used: 0 } } }, "adjust-current-resource")}>Restore</button></div>)}
           {selected.resources.map((resource) => <div className="dm-resource-row" key={resource.id}><span><Activity size={14} />{resource.name}</span><button onClick={() => adjustResource(resource.id, -1)} disabled={resource.current <= 0}><Minus size={13} /></button><strong>{resource.current} / {resource.maximum}</strong><button onClick={() => adjustResource(resource.id, 1)} disabled={resource.current >= resource.maximum}><Plus size={13} /></button><button onClick={() => onPatch(selected.id, { resources: selected.resources.map((entry) => entry.id === resource.id ? { ...entry, current: entry.maximum } : entry) }, "adjust-current-resource")}>Restore</button></div>)}
           {(selected.hitDiceByClass.length ? selected.hitDiceByClass : [{ className: undefined, total: selected.hitDiceTotal, used: selected.hitDiceUsed }]).map((pool) => <div className="dm-resource-row" key={pool.className ?? "hit-dice"}><span><Activity size={14} />{pool.className ? `${pool.className} Hit Dice` : "Hit Dice"}</span><button onClick={() => adjustHitDice(pool.className, 1)} disabled={pool.used >= pool.total}><Minus size={13} /></button><strong>{pool.total - pool.used} / {pool.total}</strong><button onClick={() => adjustHitDice(pool.className, -1)} disabled={pool.used <= 0}><Plus size={13} /></button><button onClick={() => adjustHitDice(pool.className, -pool.used)} disabled={pool.used <= 0}>Restore</button></div>)}
           {selected.inventory.filter((item) => item.maximumCharges !== undefined).map((item) => <div className="dm-resource-row" key={`${item.id}-charges`}><span><Backpack size={14} />{item.name} charges</span><button onClick={() => adjustInventoryResource(item.id, "charges", -1)} disabled={(item.charges ?? 0) <= 0}><Minus size={13} /></button><strong>{item.charges ?? 0} / {item.maximumCharges}</strong><button onClick={() => adjustInventoryResource(item.id, "charges", 1)} disabled={(item.charges ?? 0) >= (item.maximumCharges ?? 0)}><Plus size={13} /></button><button onClick={() => updateInventoryItem(item.id, { charges: item.maximumCharges })} disabled={(item.charges ?? 0) >= (item.maximumCharges ?? 0)}>Restore</button></div>)}
-          <div className="dm-control-section"><div className="dm-control-section-heading"><Backpack size={15} /><div><strong>Equipment</strong><small>Quantity and ammunition controls are always available</small></div></div>
+          <CollapsiblePanel contained className="dm-control-section" storageKey={`azeroth-panel-dm-${selected.id}-equipment`} eyebrow="Inventory controls" title={<span className="dm-collapsible-title"><Backpack size={15} />Equipment</span>} summary={<span>{selected.inventory.length} carried</span>}>
             <div className="dm-add-row"><DescriptionPicker ariaLabel="Available equipment" value={itemId} placeholder="Choose imported equipment" onChange={setItemId} options={equipment.map((item) => ({ value: item.id, label: item.name, meta: [item.category, item.cost, item.weight].filter(Boolean).join(" · "), description: equipmentDescription(item) }))} /><button className="button button-outline" disabled={!itemId} onClick={addItem}>Add</button></div>
             <div className="dm-custom-item-row"><input aria-label="Custom item name" value={customItemName} onChange={(event) => setCustomItemName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addCustomItem(); }} placeholder="Add a custom item" /><button className="button button-outline" disabled={!customItemName.trim()} onClick={addCustomItem}><Plus size={14} />Add</button></div>
             <div className="dm-inventory-list">{selected.inventory.map((item) => <div className="dm-inventory-row" key={item.id}><div><strong>{item.name}</strong><small>{[item.category, item.weight, item.cost].filter(Boolean).join(" · ") || "Custom equipment"}</small></div><label><span>Qty</span><input aria-label={`${item.name} quantity`} type="number" min="0" value={item.quantity} onChange={(event) => updateInventoryItem(item.id, { quantity: Number(event.target.value) })} /></label><label><span>Ammo</span><input aria-label={`${item.name} ammunition`} type="number" min="0" value={item.ammunition ?? ""} onChange={(event) => updateInventoryItem(item.id, { ammunition: event.target.value === "" ? undefined : Number(event.target.value) })} placeholder="—" /></label></div>)}</div>
             {!selected.inventory.length && <div className="empty-state compact">No equipment carried.</div>}
-          </div>
-          <div className="dm-control-section"><div className="dm-control-section-heading"><BookOpen size={15} /><div><strong>Spells</strong><small>Search the library and preview complete spell rules</small></div></div><div className="dm-add-row"><DescriptionPicker ariaLabel="Available spells" value={spellId} placeholder="Choose a known spell" onChange={setSpellId} options={availableSpells.map((spell) => ({ value: spell.id, label: spell.name, meta: `${spell.level ? `Level ${spell.level}` : "Cantrip"} · ${spell.school} · ${spell.classes.join(", ")}`, description: [`Casting time: ${spell.castingTime}`, `Range: ${spell.range}`, `Components: ${spell.components}`, `Duration: ${spell.duration}`, spell.description].join("\n") }))} /><button className="button button-outline" disabled={!spellId} onClick={addSpell}>Add</button></div></div>
+          </CollapsiblePanel>
+          <CollapsiblePanel contained className="dm-control-section" storageKey={`azeroth-panel-dm-${selected.id}-spells`} eyebrow="Spell controls" title={<span className="dm-collapsible-title"><BookOpen size={15} />Spells</span>} summary={<span>{selected.spells.length} known</span>}><div className="dm-add-row"><DescriptionPicker ariaLabel="Available spells" value={spellId} placeholder="Choose a known spell" onChange={setSpellId} options={availableSpells.map((spell) => ({ value: spell.id, label: spell.name, meta: `${spell.level ? `Level ${spell.level}` : "Cantrip"} · ${spell.school} · ${spell.classes.join(", ")}`, description: [`Casting time: ${spell.castingTime}`, `Range: ${spell.range}`, `Components: ${spell.components}`, `Duration: ${spell.duration}`, spell.description].join("\n") }))} /><button className="button button-outline" disabled={!spellId} onClick={addSpell}>Add</button></div></CollapsiblePanel>
           <button className="button button-primary dm-open-sheet" onClick={() => onOpenSheet(selected.id)}>Open live character sheet</button>
         </>}
       </section>
 
-      <section className="panel roll-feed"><div className="section-heading"><div><span className="eyebrow">Last 30 days</span><h2>Party rolls</h2></div><div className="roll-feed-heading-actions"><span className="count-chip">{rolls.length}</span><button type="button" disabled={!rolls.length} onClick={clearRollFeed}><Trash2 size={12} />Clear</button></div></div>
-        <div className="dm-dice-roller"><div className="dm-dice-fields"><input aria-label="DM roll label" value={diceLabel} onChange={(event) => setDiceLabel(event.target.value)} placeholder="Roll label" /><input aria-label="DM dice formula" value={diceFormula} onChange={(event) => setDiceFormula(event.target.value)} placeholder="2d6+3" /><label><span>Modifier</span><input aria-label="DM roll modifier" type="number" value={diceModifier} onChange={(event) => setDiceModifier(Number(event.target.value))} /></label><button type="button" disabled={!selected} onClick={rollDmDice}><Dices size={13} />Roll</button></div><div className="dm-dice-options"><div>{[4, 6, 8, 10, 12, 20].map((sides) => <button type="button" className={diceFormula.toLowerCase() === `1d${sides}` ? "active" : ""} onClick={() => setDiceFormula(`1d${sides}`)} key={sides}>d{sides}</button>)}</div>{/^(?:1)?d20$/i.test(diceFormula.trim()) && <div className="roll-mode" aria-label="DM d20 roll mode">{(["normal", "advantage", "disadvantage"] as RollMode[]).map((mode) => <button type="button" key={mode} className={diceMode === mode ? "active" : ""} onClick={() => setDiceMode(mode)}>{mode === "normal" ? "Normal" : mode === "advantage" ? "Adv" : "Dis"}</button>)}</div>}</div>{diceResult && <div className="dm-dice-result" role="status"><Dices size={15} /><span>{diceResult}</span><button aria-label="Clear DM dice result" onClick={() => setDiceResult("")}>×</button></div>}</div>
-        <div className="roll-feed-list">{rolls.map((roll) => <article key={roll.id}><div><strong>{roll.actorName}</strong><span>{roll.label}</span><time>{new Date(roll.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time></div><div className="roll-feed-result"><b>{roll.total}</b><small>{roll.dice.join(" / ")}{roll.modifier ? ` ${roll.modifier >= 0 ? "+" : "−"}${Math.abs(roll.modifier)}` : ""}{roll.mode !== "normal" ? ` · ${roll.mode}` : ""}</small></div></article>)}</div>
-        {!rolls.length && <div className="empty-state"><Activity size={24} /><p>Player rolls will appear here as they happen.</p></div>}
-      </section>
+      <PartyRollWorkspace rolls={rolls} roller="dm" storageKey="azeroth-panel-dm-party-rolls" disabled={!selected} allowHidden onRoll={(roll) => { if (selected) onRoll(selected.id, { ...roll, detail: `${roll.detail} for ${selected.name}` }); }} onClearRolls={onClearRolls} />
     </div>
   </div>;
 }

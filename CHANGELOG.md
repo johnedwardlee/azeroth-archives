@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.0.0-beta.7
+
+- Add a collapsible player dice workspace and live party roll feed to Encounter, including common dice, custom formulas and modifiers, and d20 advantage or disadvantage.
+- Share visible rolls with every campaign member while allowing the DM to hide individual rolls behind database-enforced permissions and a party-safe Realtime channel.
+- Show concentration in the DM party overview, add always-available standard-condition controls, and make DM Equipment and Spells controls collapsible per character.
+- Debounce journal typing into one durable live-sync mutation after 10 idle seconds, flush on blur or discrete journal actions, and preserve queued text across restarts without blocking other updates.
+
 ## 2.0.0-beta.6
 
 - Add a DM dice roller with common dice shortcuts, custom formulas and modifiers, d20 advantage/disadvantage, and live publication to the party roll feed.

@@ -110,9 +110,9 @@ describe("desktop storage", () => {
     const hero = validCharacter("sync-hero", "Sync Hero");
     await storage.saveCharacter(hero);
     const link = { characterId: hero.id, campaignId: "campaign", campaignName: "Campaign", role: "player", revision: 1, linkedAt: new Date().toISOString(), lastSyncedAt: new Date().toISOString() };
-    const mutation = { kind: "character-mutation", id: "mutation", campaignId: "campaign", characterId: hero.id, baseRevision: 1, category: "vitals", patch: { currentHp: 5 }, createdAt: new Date().toISOString() };
+    const mutation = { kind: "character-mutation", id: "mutation", campaignId: "campaign", characterId: hero.id, baseRevision: 1, category: "journal", patch: { notes: "Pending notes" }, debounceKey: `journal:${hero.id}`, deferredUntil: new Date(Date.now() + 10_000).toISOString(), createdAt: new Date().toISOString() };
     await storage.saveSyncState({ syncLinks: [link], syncOutbox: [mutation] });
-    expect(await storage.load()).toMatchObject({ syncLinks: [{ characterId: hero.id, revision: 1 }], syncOutbox: [{ id: "mutation" }] });
+    expect(await storage.load()).toMatchObject({ syncLinks: [{ characterId: hero.id, revision: 1 }], syncOutbox: [{ id: "mutation", debounceKey: `journal:${hero.id}`, patch: { notes: "Pending notes" } }] });
     await expect(storage.saveSyncState({ syncLinks: [{ ...link, characterId: "missing" }], syncOutbox: [] })).rejects.toThrow(/sync link/i);
   });
 

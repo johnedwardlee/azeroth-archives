@@ -12,13 +12,14 @@ export type DmMutationIntent =
   | "add-inventory-item"
   | "add-known-spell"
   | "adjust-current-resource"
+  | "adjust-condition"
   | "full-character-edit"
   | "remove-inventory-item"
   | "remove-known-spell"
   | "unlink-character";
 
 export type DmMutationGuard = "always" | "edit-toggle" | "confirmation";
-export type LocalRollEvent = Omit<SharedRollEvent, "kind" | "id" | "campaignId" | "characterId" | "actorName" | "createdAt">;
+export type LocalRollEvent = Omit<SharedRollEvent, "kind" | "id" | "campaignId" | "characterId" | "actorName" | "createdAt" | "hidden"> & { hidden?: boolean };
 
 const mutationDomains: Partial<Record<keyof CharacterData, MutationCategory>> = {
   currentHp: "vitals",
@@ -112,7 +113,7 @@ export function createCharacterMutation(
   characterId: string,
   baseRevision: number,
   patch: Partial<CharacterData>,
-  options: { id?: string; createdAt?: string } = {},
+  options: { id?: string; createdAt?: string; debounceKey?: string; deferredUntil?: string } = {},
 ): CharacterMutation {
   const sanitized = sanitizeCharacterPatch(patch);
   return {
@@ -123,6 +124,8 @@ export function createCharacterMutation(
     baseRevision,
     category: mutationCategoryForPatch(sanitized),
     patch: sanitized,
+    ...(options.debounceKey ? { debounceKey: options.debounceKey } : {}),
+    ...(options.deferredUntil ? { deferredUntil: options.deferredUntil } : {}),
     createdAt: options.createdAt ?? new Date().toISOString(),
   };
 }
@@ -139,6 +142,7 @@ export function createSharedRollEvent(input: {
   total: number;
   mode?: SharedRollEvent["mode"];
   detail?: string;
+  hidden?: boolean;
   id?: string;
   createdAt?: string;
 }): SharedRollEvent {
@@ -156,11 +160,30 @@ export function createSharedRollEvent(input: {
     total: Math.trunc(input.total),
     mode: input.mode ?? "normal",
     detail: input.detail?.trim() ?? "",
+    hidden: Boolean(input.hidden),
     createdAt: input.createdAt ?? new Date().toISOString(),
   };
 }
 
 export function enqueueSyncEntry(outbox: SyncOutboxEntry[], entry: SyncOutboxEntry) {
+  if (entry.kind === "character-mutation" && entry.debounceKey) {
+    let existingIndex = -1;
+    for (let index = outbox.length - 1; index >= 0; index -= 1) {
+      const queued = outbox[index];
+      if (queued.kind === "character-mutation" && queued.campaignId === entry.campaignId && queued.characterId === entry.characterId && queued.debounceKey === entry.debounceKey) { existingIndex = index; break; }
+    }
+    if (existingIndex >= 0) {
+      const existing = outbox[existingIndex] as CharacterMutation;
+      const merged: CharacterMutation = {
+        ...existing,
+        baseRevision: entry.baseRevision,
+        category: mutationCategoryForPatch({ ...existing.patch, ...entry.patch }),
+        patch: { ...existing.patch, ...entry.patch },
+        deferredUntil: entry.deferredUntil,
+      };
+      return outbox.map((queued, index) => index === existingIndex ? merged : queued).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    }
+  }
   return outbox.some((queued) => queued.id === entry.id) ? outbox : [...outbox, entry].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 

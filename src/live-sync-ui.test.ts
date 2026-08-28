@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 describe("live-sync user interface contract", () => {
   const manager = readFileSync(new URL("./character-manager.tsx", import.meta.url), "utf8");
   const party = readFileSync(new URL("./dm-party-workspace.tsx", import.meta.url), "utf8");
+  const roller = readFileSync(new URL("./party-roll-workspace.tsx", import.meta.url), "utf8");
+  const encounter = readFileSync(new URL("./action-dashboard.tsx", import.meta.url), "utf8");
   const preload = readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8");
   const main = readFileSync(new URL("../electron/main.cjs", import.meta.url), "utf8");
 
@@ -23,8 +25,13 @@ describe("live-sync user interface contract", () => {
     expect(party).toContain('<DescriptionPicker ariaLabel="Available spells"');
     expect(party).toContain('aria-label="Custom item name"');
     expect(party).toContain("patchDmInventoryItem");
-    expect(party).toContain("rollDmDice");
-    expect(party).toContain("clearRollFeed");
+    expect(party).toContain('"adjust-condition"');
+    expect(party).toContain("availableConditions");
+    expect(party).toContain("Concentrating:");
+    expect(party).toContain("<CollapsiblePanel contained className=\"dm-control-section\"");
+    expect(party).toContain('<PartyRollWorkspace rolls={rolls} roller="dm"');
+    expect(roller).toContain("function rollDice()");
+    expect(roller).toContain("clearRollFeed");
     expect(manager).toContain("current.name || current.playerName");
     expect(manager).toContain("clearCampaignRolls(activeLiveCampaignId)");
     expect(preload).toContain('ipcRenderer.invoke("live-sync:clear-rolls"');
@@ -36,5 +43,14 @@ describe("live-sync user interface contract", () => {
     expect(manager).toContain('onRoll={publishCharacterRoll}');
     expect(manager).toContain('<CombatManager catalog={equipment}');
     expect(manager).toContain('<SpellbookManager catalog={spells}');
+    expect(manager).toContain('partyRolls={appRole === "player" ? liveRolls : undefined}');
+    expect(encounter).toContain('roller="player"');
+  });
+
+  it("lets the DM hide rolls while keeping the player feed party-safe", () => {
+    expect(roller).toContain("Hide this roll from players");
+    expect(roller).toContain("allowHidden && hideRoll");
+    expect(party).toContain("allowHidden");
+    expect(manager).toContain("window.azerothDesktop.listCampaignRolls(campaignId)");
   });
 });

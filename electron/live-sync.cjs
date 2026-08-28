@@ -307,6 +307,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       p_total: event.total,
       p_mode: event.mode,
       p_detail: event.detail,
+      p_hidden: Boolean(event.hidden),
     });
     if (result.error) throw normalizeServiceError(result.error, "The roll could not be published.");
     return result.data;
@@ -316,7 +317,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     const sync = requireClient();
     requireSession();
     const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const result = await sync.from("roll_events").select("id, campaign_id, character_id, actor_name, category, label, formula, dice, modifier, total, mode, detail, created_at").eq("campaign_id", campaignId).gte("created_at", cutoff).order("created_at", { ascending: false }).limit(500);
+    const result = await sync.from("roll_events").select("id, campaign_id, character_id, actor_name, category, label, formula, dice, modifier, total, mode, detail, hidden, created_at").eq("campaign_id", campaignId).gte("created_at", cutoff).order("created_at", { ascending: false }).limit(500);
     if (result.error) throw normalizeServiceError(result.error, "Campaign rolls could not be loaded.");
     return (result.data ?? []).map((event) => ({
       kind: "roll-event",
@@ -332,6 +333,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       total: event.total,
       mode: event.mode,
       detail: event.detail,
+      hidden: Boolean(event.hidden),
       createdAt: event.created_at,
     }));
   }
@@ -354,7 +356,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     if (presence?.role === "player" && !characterId) throw new Error("A linked character is required for player live sync.");
     publishStatus({ connection: "connecting", message: "Connecting to the live campaign…" });
     await sync.realtime.setAuth(session.access_token);
-    const expectedChannelCount = presence?.role === "player" ? 2 : 1;
+    const expectedChannelCount = presence?.role === "player" ? 3 : 1;
     const subscribedChannels = new Set();
     const campaignChannel = sync.channel(`campaign:${campaignId}`, {
       config: { private: true, presence: { key: session.user.id } },
@@ -405,6 +407,11 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     try {
       await connectChannel(campaignChannel, true);
       if (presence?.role === "player") {
+        const partyRollChannel = sync.channel(`party-rolls:${campaignId}`, { config: { private: true } });
+        for (const event of ["INSERT", "DELETE"]) {
+          partyRollChannel.on("broadcast", { event }, (payload) => onEvent({ type: "remote-change", campaignId, event, payload }));
+        }
+        await connectChannel(partyRollChannel);
         const characterChannel = sync.channel(`character:${characterId}`, { config: { private: true } });
         for (const event of ["INSERT", "UPDATE", "DELETE"]) {
           characterChannel.on("broadcast", { event }, (payload) => onEvent({ type: "remote-change", campaignId, event, payload }));

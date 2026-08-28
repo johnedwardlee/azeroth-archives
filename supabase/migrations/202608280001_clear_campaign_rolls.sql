@@ -24,6 +24,6 @@ grant execute on function public.clear_campaign_roll_events(uuid) to authenticat
 drop trigger if exists broadcast_roll_events on public.roll_events;
 create trigger broadcast_roll_events
 after insert or delete on public.roll_events
-for each row execute function public.broadcast_campaign_change();
+for each row execute function public.broadcast_roll_event();
 
 commit;

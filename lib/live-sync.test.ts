@@ -33,6 +33,7 @@ describe("live sync protocol", () => {
     expect(dmMutationGuard("add-inventory-item")).toBe("always");
     expect(dmMutationGuard("add-known-spell")).toBe("always");
     expect(dmMutationGuard("adjust-current-resource")).toBe("always");
+    expect(dmMutationGuard("adjust-condition")).toBe("always");
     expect(dmMutationGuard("full-character-edit")).toBe("edit-toggle");
     expect(dmMutationGuard("remove-inventory-item")).toBe("edit-toggle");
     expect(dmMutationGuard("unlink-character")).toBe("confirmation");
@@ -61,7 +62,8 @@ describe("live sync protocol", () => {
       patch: { currentHp: 7 },
       createdAt: "2026-08-24T01:00:00.000Z",
     });
-    expect(createSharedRollEvent({ campaignId: "campaign", characterId: "hero-id", actorName: " Player ", category: "attack", label: " Sword ", dice: [17], modifier: 6, total: 23, id: "roll", createdAt: "2026-08-24T01:01:00.000Z" })).toMatchObject({ id: "roll", actorName: "Player", label: "Sword", total: 23 });
+    expect(createSharedRollEvent({ campaignId: "campaign", characterId: "hero-id", actorName: " Player ", category: "attack", label: " Sword ", dice: [17], modifier: 6, total: 23, id: "roll", createdAt: "2026-08-24T01:01:00.000Z" })).toMatchObject({ id: "roll", actorName: "Player", label: "Sword", total: 23, hidden: false });
+    expect(createSharedRollEvent({ campaignId: "campaign", characterId: "hero-id", actorName: "DM", category: "other", label: "Secret", dice: [4], total: 4, hidden: true })).toMatchObject({ actorName: "DM", hidden: true });
   });
 
   it("keeps the outbox ordered and idempotent", () => {
@@ -70,6 +72,14 @@ describe("live sync protocol", () => {
     const queued = enqueueSyncEntry(enqueueSyncEntry(enqueueSyncEntry([], later), earlier), earlier);
     expect(queued.map((entry) => entry.id)).toEqual(["earlier", "later"]);
     expect(acknowledgeSyncEntry(queued, "earlier").map((entry) => entry.id)).toEqual(["later"]);
+  });
+
+  it("coalesces debounced journal edits into one durable outbox mutation", () => {
+    const first = createCharacterMutation("campaign", "hero-id", 1, { notes: "F" }, { id: "first", createdAt: "2026-08-24T01:00:00.000Z", debounceKey: "journal:hero-id", deferredUntil: "2026-08-24T01:00:10.000Z" });
+    const second = createCharacterMutation("campaign", "hero-id", 2, { notes: "For the Horde" }, { id: "second", createdAt: "2026-08-24T01:00:01.000Z", debounceKey: "journal:hero-id", deferredUntil: "2026-08-24T01:00:11.000Z" });
+    const queued = enqueueSyncEntry(enqueueSyncEntry([], first), second);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({ id: "first", baseRevision: 2, debounceKey: "journal:hero-id", deferredUntil: "2026-08-24T01:00:11.000Z", patch: { notes: "For the Horde" } });
   });
 
   it("preserves the local portrait while applying a remote snapshot", () => {
