@@ -34,6 +34,10 @@ function signed(value: number) {
   return `${value >= 0 ? "+" : "−"}${Math.abs(value)}`;
 }
 
+function resourceUnits(name: string, count: number) {
+  return count === 1 && name.endsWith("s") ? name.slice(0, -1) : name;
+}
+
 export function ActionDashboard({ character, patchCharacter, catalog, hitDicePools, encumbranceRule = "standard", onRoll, partyRolls, partyRollsConnected = false }: { character: CharacterData; patchCharacter: PatchCharacter; catalog: EquipmentDefinition[]; hitDicePools: HitDicePool[]; encumbranceRule?: EncumbranceRule; onRoll?: (event: LocalRollEvent) => void; partyRolls?: SharedRollEvent[]; partyRollsConnected?: boolean }) {
   const [query, setQuery] = useState("");
   const [timingFilter, setTimingFilter] = useState<TimingFilter>("all");
@@ -154,7 +158,8 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
     if (action.resourceId) {
       const resource = character.resources.find((entry) => entry.id === action.resourceId)!;
       const cost = action.resourceCost ?? 1;
-      finishAction(action, `${action.name}: spent ${cost} ${resource.name}.`, { resources: character.resources.map((entry) => entry.id === resource.id ? { ...entry, current: entry.current - cost } : entry) }, `Restore ${cost} ${resource.name}`);
+      const units = resourceUnits(resource.name, cost);
+      finishAction(action, `${action.name}: spent ${cost} ${units}.`, { resources: character.resources.map((entry) => entry.id === resource.id ? { ...entry, current: entry.current - cost } : entry) }, `Restore ${cost} ${units}`);
       return;
     }
     if (action.attackId) {
@@ -258,6 +263,11 @@ export function ActionDashboard({ character, patchCharacter, catalog, hitDicePoo
       return "Use · no roll";
     }
     if (action.inventoryId) return extractDiceFormula(action.description) ?? "Use";
+    if (action.resourceId) {
+      const resource = character.resources.find((entry) => entry.id === action.resourceId);
+      const cost = action.resourceCost ?? 1;
+      if (resource) return `Spend ${cost} ${resourceUnits(resource.name, cost)}`;
+    }
     return "Use";
   }
 

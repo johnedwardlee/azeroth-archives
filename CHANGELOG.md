@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Expand Monk’s Focus into distinct Encounter choices for Flurry of Blows, both Patient Defense options, and both Step of the Wind options; connect every Focus-spending class and subclass feature to the Focus Points tracker with its correct cost and action timing.
+
 ## 2.0.2
 
 - Show every known spell in the DM Spell controls, ordered by spell level and name, with prepared state, source, casting metadata, and expandable descriptions.

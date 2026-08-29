@@ -113,6 +113,41 @@ describe("living sheet rules", () => {
     ]));
   });
 
+  it("creates distinct Monk Focus choices and tracks every paid option", () => {
+    const focusResource = { id: "focus", name: "Focus Points", current: 10, maximum: 10, recovery: "short" as const, automatic: true, source: "Monk" };
+    const character = {
+      ...newCharacter(),
+      className: "Monk",
+      classLevels: [{ className: "Monk", level: 10 }],
+      resources: [focusResource],
+      features: [
+        { id: "monk-2-monks-focus", name: "Monk’s Focus", description: "Flurry of Blows, Patient Defense, and Step of the Wind use Focus Points." },
+        { id: "monk-10-heightened-focus", name: "Heightened Focus", description: "Flurry of Blows makes three Unarmed Strikes." },
+        { id: "monk-3-deflect-attacks", name: "Deflect Attacks", description: "When hit, take a Reaction. If damage is reduced to 0, you can expend 1 Focus Point to redirect the force." },
+        { id: "monk-5-stunning-strike", name: "Stunning Strike", description: "When you hit, you can expend 1 Focus Point to force a Stamina saving throw or Stun the target." },
+        { id: "monk-18-superior-defense", name: "Superior Defense", description: "At the start of your turn, expend 3 Focus Points to gain Resistance." },
+        { id: "monk-2-uncanny-metabolism", name: "Uncanny Metabolism", description: "When you roll Initiative, regain all expended Focus Points." },
+      ],
+    };
+    const actions = generatedCharacterActions(character, []);
+    expect(actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "Flurry of Blows", timing: "bonus", resourceId: "focus", resourceCost: 1, description: expect.stringContaining("three Unarmed Strikes") }),
+      expect.objectContaining({ name: "Patient Defense — Disengage", timing: "bonus" }),
+      expect.objectContaining({ name: "Patient Defense — Disengage + Dodge", resourceId: "focus", resourceCost: 1 }),
+      expect.objectContaining({ name: "Step of the Wind — Dash" }),
+      expect.objectContaining({ name: "Step of the Wind — Disengage + Dash", resourceId: "focus", resourceCost: 1 }),
+      expect.objectContaining({ name: "Deflect Attacks", timing: "reaction", resourceId: "focus", resourceCost: 1 }),
+      expect.objectContaining({ name: "Stunning Strike", timing: "other", resourceId: "focus", resourceCost: 1 }),
+      expect.objectContaining({ name: "Superior Defense", timing: "other", resourceId: "focus", resourceCost: 3 }),
+      expect.objectContaining({ name: "Uncanny Metabolism", timing: "passive" }),
+    ]));
+    expect(actions.find((action) => action.name === "Patient Defense — Disengage")).not.toHaveProperty("resourceId");
+    expect(actions.find((action) => action.name === "Step of the Wind — Dash")).not.toHaveProperty("resourceId");
+    expect(actions.find((action) => action.name === "Uncanny Metabolism")?.resourceId).toBeUndefined();
+    expect(actions.filter((action) => action.source === "Monk’s Focus")).toHaveLength(5);
+    expect(actions.some((action) => action.name === "Monk’s Focus")).toBe(false);
+  });
+
   it("resolves normal, advantage, and disadvantage d20 rolls", () => {
     const random = vi.spyOn(Math, "random");
     random.mockReturnValueOnce(0.45).mockReturnValueOnce(0.1).mockReturnValueOnce(0.9).mockReturnValueOnce(0.2).mockReturnValueOnce(0.8);

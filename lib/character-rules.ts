@@ -520,18 +520,46 @@ function actionTiming(text: string): GeneratedAction["timing"] {
 }
 
 export function generatedCharacterActions(character: CharacterData, catalog: EquipmentDefinition[]): GeneratedAction[] {
-  const featureActions = [...character.features, ...character.feats].map((feature, index) => {
-    const resource = character.resources.find((entry) => feature.description.toLowerCase().includes(entry.name.toLowerCase()) || feature.name.toLowerCase() === entry.name.toLowerCase());
+  const features = [...character.features, ...character.feats];
+  const focusFeature = features.find((feature) => feature.id === "monk-2-monks-focus" || feature.name === "Monk’s Focus" || feature.name === "Monk's Focus");
+  const heightenedFocus = features.some((feature) => feature.id === "monk-10-heightened-focus" || feature.name === "Heightened Focus");
+  const focusResource = character.resources.find((resource) => resource.name.toLowerCase() === "focus points");
+  const focusCost = (name: string, purpose: GeneratedAction["purpose"], description: string): GeneratedAction => ({
+    id: `feature-monk-focus-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    name,
+    timing: "bonus",
+    purpose,
+    source: "Monk’s Focus",
+    description,
+    resourceId: focusResource?.id,
+    resourceCost: 1,
+  });
+  const monkFocusActions: GeneratedAction[] = focusFeature ? [
+    focusCost("Flurry of Blows", "attack", `Spend 1 Focus Point to make ${heightenedFocus ? "three" : "two"} Unarmed Strikes as a Bonus Action.`),
+    { id: "feature-monk-focus-patient-defense-disengage", name: "Patient Defense — Disengage", timing: "bonus", purpose: "defense", source: "Monk’s Focus", description: "Take the Disengage action as a Bonus Action without spending a Focus Point." },
+    focusCost("Patient Defense — Disengage + Dodge", "defense", "Spend 1 Focus Point to take both the Disengage and Dodge actions as the same Bonus Action."),
+    { id: "feature-monk-focus-step-of-the-wind-dash", name: "Step of the Wind — Dash", timing: "bonus", purpose: "utility", source: "Monk’s Focus", description: "Take the Dash action as a Bonus Action without spending a Focus Point." },
+    focusCost("Step of the Wind — Disengage + Dash", "utility", "Spend 1 Focus Point to take both the Disengage and Dash actions as the same Bonus Action; your jump distance is doubled for the turn."),
+  ] : [];
+  const featureActions = features.filter((feature) => feature !== focusFeature).map((feature, index) => {
+    const description = feature.description.toLowerCase();
+    const resource = character.resources.find((entry) => {
+      const name = entry.name.toLowerCase();
+      const singular = name.endsWith("s") ? name.slice(0, -1) : name;
+      return description.includes(name) || description.includes(singular) || feature.name.toLowerCase() === name;
+    });
     const costMatch = feature.description.match(/(?:expend|spend)\s+(?:one|a|an|(\d+))\s+(?:use of (?:your )?)?([A-Za-z ]+?)(?:\.|,| to| point)/i);
+    const spendsResource = Boolean(resource && costMatch && feature.id !== "monk-10-heightened-focus");
+    const timing = actionTiming(feature.description);
     return {
       id: `feature-${feature.id ?? `${feature.name}-${index}`}`,
       name: feature.name,
-      timing: actionTiming(feature.description),
+      timing: timing === "passive" && spendsResource ? "other" : timing,
       purpose: actionPurpose(feature.name, feature.description),
       source: "Feature",
       description: feature.description,
-      resourceId: resource?.id,
-      resourceCost: resource ? Math.max(1, Number(costMatch?.[1]) || 1) : undefined,
+      resourceId: spendsResource ? resource?.id : undefined,
+      resourceCost: spendsResource ? Math.max(1, Number(costMatch?.[1]) || 1) : undefined,
     } satisfies GeneratedAction;
   });
   const spellActions = character.spells.filter((spell) => spell.level === 0 || spell.prepared).map((spell) => ({
@@ -574,7 +602,7 @@ export function generatedCharacterActions(character: CharacterData, catalog: Equ
     { id: "standard-move", name: "Move", timing: "movement", purpose: "utility", source: "Movement", description: "Move up to your current Speed, splitting the movement around other actions if needed." },
     { id: "standard-interact", name: "Interact", timing: "other", purpose: "utility", source: "Free / Other", description: "Perform a brief object interaction or other simple activity allowed during your turn." },
   ];
-  return [...attackActions, ...spellActions, ...featureActions, ...itemActions, ...companionActions, ...standardActions];
+  return [...attackActions, ...spellActions, ...monkFocusActions, ...featureActions, ...itemActions, ...companionActions, ...standardActions];
 }
 
 export function activeEffectFromSpell(spell: SpellDefinition): ActiveEffect | null {

@@ -53,6 +53,10 @@ describe("live-sync user interface contract", () => {
     expect(encounter).toContain('roller="player"');
   });
 
+  it("labels resource-backed Encounter buttons with their exact spend", () => {
+    expect(encounter).toContain("Spend ${cost} ${resourceUnits(resource.name, cost)}");
+  });
+
   it("lets the DM hide rolls while keeping the player feed party-safe", () => {
     expect(roller).toContain("Hide this roll from players");
     expect(roller).toContain("allowHidden && hideRoll");
