@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Audit every bundled class's level-2 advancement: prompt for Expertise, Metamagic, Fighting Styles, Blessed Warrior/Nature Warrior cantrips, and newly learned or prepared spells; automatically restore missing level-2 features and limited-use resources on existing characters.
-- Restore Paladin's Divine Smite as an always-prepared spell with its once-per-Long-Rest free casting, apply Monk Unarmored Movement and Bard Jack of all Trades mechanically, and align Hunter Deft Explorer language guidance with the campaign player guide.
+- Restore Paladin's Divine Smite as an always-prepared spell with its once-per-Long-Rest free casting, apply Monk Unarmored Movement and Bard Jack of all Trades mechanically, and remove the standard bonus-language grant from Hunter's Deft Explorer.
 - Expand Monk’s Focus into distinct Encounter choices for Flurry of Blows, both Patient Defense options, and both Step of the Wind options; connect every Focus-spending class and subclass feature to the Focus Points tracker with its correct cost and action timing.
 
 ## 2.0.2
