@@ -430,6 +430,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dm-custom-item-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; margin-top: 7px; }
 .dm-custom-item-row input { min-width: 0; height: 39px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #f8f7f2; font-size: 11px; }
 .dm-inventory-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.dm-known-spell-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px; margin-top: 10px; overflow-y: auto; padding-right: 2px; }
+.dm-known-spell-list details { border: 1px solid var(--line); border-left: 3px solid #b8bbb3; border-radius: 7px; background: #fff; }
+.dm-known-spell-list details.prepared { border-left-color: var(--gold); background: #fbf8f0; }
+.dm-known-spell-list summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; cursor: pointer; list-style-position: inside; }
+.dm-known-spell-list summary > div { display: inline-flex; flex-direction: column; gap: 2px; margin-right: auto; }
+.dm-known-spell-list summary strong { color: var(--forest-800); font-family: var(--font-serif), serif; font-size: 13px; }
+.dm-known-spell-list summary small { color: var(--muted); font-size: 9px; }
+.dm-known-spell-list summary > span { flex: 0 0 auto; color: var(--gold); font-size: 9px; font-weight: 800; text-transform: uppercase; }
+.dm-known-spell-details { padding: 0 11px 11px; }
+.dm-known-spell-details p { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; white-space: pre-wrap; }
 .dm-inventory-row { display: grid; grid-template-columns: minmax(0, 1fr) 66px 66px; align-items: end; gap: 8px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 7px; background: #f8f6ef; }
 .dm-inventory-row > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .dm-inventory-row > div strong, .dm-inventory-row > div small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

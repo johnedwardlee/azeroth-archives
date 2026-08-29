@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EquipmentDefinition, InventoryItem } from "../lib/types";
 import { newCharacter } from "./character-manager";
-import { addDmConditionPatch, concentratingOn, createDmCatalogItem, createDmCustomItem, patchDmInventoryItem, removeDmConditionPatch } from "./dm-party-workspace";
+import { addDmConditionPatch, concentratingOn, createDmCatalogItem, createDmCustomItem, patchDmInventoryItem, removeDmConditionPatch, sortDmKnownSpells } from "./dm-party-workspace";
 
 const catalogItem: EquipmentDefinition = {
   id: "longbow",
@@ -52,5 +52,17 @@ describe("DM party condition controls", () => {
     const character = { ...newCharacter(), conditions: ["Prone", "Exhaustion"], exhaustionLevel: 2 };
     expect(removeDmConditionPatch(character, "Prone")).toMatchObject({ conditions: ["Exhaustion"] });
     expect(removeDmConditionPatch(character, "Exhaustion")).toMatchObject({ conditions: ["Prone"], exhaustionLevel: 0 });
+  });
+});
+
+describe("DM party spell controls", () => {
+  it("orders known spells by level and then name without changing the character list", () => {
+    const spells = [
+      { id: "ward", name: "Ward", level: 1, school: "Abjuration", classes: ["Mage"], castingTime: "Action", range: "Self", components: "V", duration: "1 round", description: "Ward.", prepared: true },
+      { id: "spark", name: "Spark", level: 0, school: "Evocation", classes: ["Mage"], castingTime: "Action", range: "60 feet", components: "V", duration: "Instantaneous", description: "Spark.", prepared: true },
+      { id: "aegis", name: "Aegis", level: 1, school: "Abjuration", classes: ["Mage"], castingTime: "Reaction", range: "Self", components: "V", duration: "1 round", description: "Aegis.", prepared: false },
+    ];
+    expect(sortDmKnownSpells(spells).map((spell) => spell.name)).toEqual(["Spark", "Aegis", "Ward"]);
+    expect(spells.map((spell) => spell.name)).toEqual(["Ward", "Spark", "Aegis"]);
   });
 });

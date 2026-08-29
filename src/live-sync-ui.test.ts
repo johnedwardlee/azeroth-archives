@@ -24,6 +24,9 @@ describe("live-sync user interface contract", () => {
     expect(party).toContain('"add-known-spell"');
     expect(party).toContain('<DescriptionPicker ariaLabel="Available equipment"');
     expect(party).toContain('<DescriptionPicker ariaLabel="Available spells"');
+    expect(party).toContain('className="dm-known-spell-list"');
+    expect(party).toContain("sortDmKnownSpells(selected.spells)");
+    expect(party).toContain('spell.prepared ? "Prepared" : "Not prepared"');
     expect(party).toContain('aria-label="Custom item name"');
     expect(party).toContain("patchDmInventoryItem");
     expect(party).toContain('"adjust-condition"');

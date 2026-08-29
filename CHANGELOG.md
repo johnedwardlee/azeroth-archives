@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Show every known spell in the DM Spell controls, ordered by spell level and name, with prepared state, source, casting metadata, and expandable descriptions.
 - Fix DM Party quick-view Armor Class by using the same equipped armor and shield calculation as the live character sheet.
 
 ## 2.0.1
