@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   activeEffectFromSpell,
   attackFromEquipment,
+  calculateArmorClass,
   calculateEncumbrance,
   classTrainingFor,
   concentrationSave,
@@ -149,6 +150,18 @@ describe("living sheet rules", () => {
     const character = { ...newCharacter(), inventory: [{ id: "potion", contentId: "potion-of-healing", name: "Potion of Healing", quantity: 1, equipped: false, notes: "" }] };
     const equipment = [{ id: "potion-of-healing", name: "Potion of Healing", category: "Gear", description: "As a Bonus Action, you can drink or administer this potion. The creature regains 2d4 + 2 Hit Points." }];
     expect(generatedCharacterActions(character, equipment)).toContainEqual(expect.objectContaining({ id: "item-potion", timing: "bonus", purpose: "healing", description: expect.stringContaining("2d4 + 2") }));
+  });
+
+  it("calculates equipped armor and shield AC for shared quick views", () => {
+    const catalog = [
+      { id: "chain-mail", name: "Chain Mail", category: "Heavy Armor", description: "Armor Class (Ac): 16; Strength: Str 13; Stealth: Disadvantage." },
+      { id: "shield", name: "Shield", category: "Shield", description: "Armor Class (Ac): +2." },
+    ];
+    const character = { ...newCharacter(), armorClass: 10, inventory: [
+      { id: "worn-mail", contentId: "chain-mail", name: "Chain Mail", quantity: 1, equipped: true, notes: "" },
+      { id: "worn-shield", contentId: "shield", name: "Shield", quantity: 1, equipped: true, notes: "" },
+    ] };
+    expect(calculateArmorClass(character, catalog)).toEqual({ value: 18, automatic: true, source: "Chain Mail + Shield" });
   });
 
   it("keeps shared effect conditions until the last source ends", () => {

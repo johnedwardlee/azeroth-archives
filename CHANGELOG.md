@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix DM Party quick-view Armor Class by using the same equipped armor and shield calculation as the live character sheet.
+
 ## 2.0.1
 
 - Automatically track Lucky feat Luck Points, scale their maximum with Proficiency Bonus, preserve spent points when that maximum increases, and restore them on a Long Rest.

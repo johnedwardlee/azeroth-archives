@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, Backpack, BookOpen, Heart, Minus, Plus, Radio, Shield, Sparkles, UserMinus, Users } from "lucide-react";
-import { calculateEncumbrance, STANDARD_CONDITIONS, syncEffectConditions } from "../lib/character-rules";
+import { calculateArmorClass, calculateEncumbrance, STANDARD_CONDITIONS, syncEffectConditions } from "../lib/character-rules";
 import type { LocalRollEvent } from "../lib/live-sync";
 import type { CharacterData, EquipmentDefinition, InventoryItem, LiveCampaignMember, SharedRollEvent, SpellDefinition } from "../lib/types";
 import { DescriptionPicker } from "./description-picker";
@@ -194,11 +194,12 @@ export function DmPartyWorkspace({ characters, members, rolls, onlineUserIds, ow
     <section className="party-overview-panel panel"><div className="section-heading"><div><span className="eyebrow">Live campaign</span><h2>Party overview</h2></div><span className="count-chip">{characters.length} linked</span></div>
       <div className="party-card-grid">{characters.map((character) => {
         const encumbrance = calculateEncumbrance(character.inventory, character.abilities.strength);
+        const armor = calculateArmorClass(character, equipment);
         const online = isOnline(character);
         const concentration = concentratingOn(character);
         return <button key={character.id} className={`party-card ${selected?.id === character.id ? "selected" : ""}`} onClick={() => onSelectCharacter(character.id)}>
           <div className="party-card-heading"><span className="party-card-avatar">{character.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span><div><strong>{character.name}</strong><small>{ownerName(character) || "Player not set"} · Level {character.level} {character.className}</small></div><span className={`presence-pill ${online ? "online" : "offline"}`}><Radio size={10} />{online ? "Live" : "Offline"}</span></div>
-          <div className="party-quick-stats"><span><Heart size={13} /><b>{character.currentHp}{character.temporaryHp ? `+${character.temporaryHp}` : ""}/{character.maxHp}</b> HP</span><span><Shield size={13} /><b>{character.armorClass}</b> AC</span><span><Activity size={13} /><b>{character.speed}</b> ft.</span></div>
+          <div className="party-quick-stats"><span><Heart size={13} /><b>{character.currentHp}{character.temporaryHp ? `+${character.temporaryHp}` : ""}/{character.maxHp}</b> HP</span><span title={armor.source}><Shield size={13} /><b>{armor.value}</b> AC</span><span><Activity size={13} /><b>{character.speed}</b> ft.</span></div>
           <div className="party-card-detail"><div className="party-condition-view"><span>{character.conditions.length ? character.conditions.join(", ") : "No conditions"}</span>{concentration && <span className="party-concentration"><Sparkles size={10} />Concentrating: {concentration}</span>}</div><span>{encumbrance.level === "over-capacity" ? "Over capacity" : `${encumbrance.totalWeight.toFixed(1)} / ${encumbrance.carryingCapacity} lb.`}</span></div>
         </button>;
       })}</div>

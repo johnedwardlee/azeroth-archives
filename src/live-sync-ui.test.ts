@@ -28,6 +28,8 @@ describe("live-sync user interface contract", () => {
     expect(party).toContain("patchDmInventoryItem");
     expect(party).toContain('"adjust-condition"');
     expect(party).toContain("availableConditions");
+    expect(party).toContain("calculateArmorClass(character, equipment)");
+    expect(party).toContain("<b>{armor.value}</b> AC");
     expect(party).toContain("Concentrating:");
     expect(party).toContain("<CollapsiblePanel contained className=\"dm-control-section\"");
     expect(party).toContain('<PartyRollWorkspace rolls={rolls} roller="dm"');
