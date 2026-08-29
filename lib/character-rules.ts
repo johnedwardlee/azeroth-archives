@@ -8,6 +8,7 @@ import {
   type CharacterClassLevel,
   type CharacterData,
   type CharacterResource,
+  type ClassDefinition,
   type EncumbranceRule,
   type EquipmentDefinition,
   type FeatDefinition,
@@ -123,6 +124,14 @@ export type AdvancementPrompt = {
   kind: AdvancementChoiceKind;
   count: number;
   label: string;
+  className?: string;
+  classLevel?: number;
+  cantripAlternative?: {
+    value: string;
+    label: string;
+    spellList: string;
+    count: number;
+  };
 };
 
 export type GeneratedAction = {
@@ -333,10 +342,22 @@ export function equippedArmorEffects(character: CharacterData, catalog: Equipmen
 export function calculateEffectiveSpeed(character: CharacterData, encumbrance = calculateEncumbrance(character.inventory, character.abilities.strength), catalog: EquipmentDefinition[] = []) {
   const exhaustionPenalty = Math.max(0, Math.min(6, character.exhaustionLevel || 0)) * 5;
   const armorEffects = equippedArmorEffects(character, catalog);
+  const catalogById = new Map(catalog.map((item) => [item.id, item]));
+  const wearingArmorOrShield = character.inventory.some((item) => {
+    if (!item.equipped) return false;
+    const definition = item.contentId ? catalogById.get(item.contentId) : undefined;
+    return item.equipmentSlot === "armor" || /armor|shield/i.test(`${definition?.category ?? ""} ${definition?.name ?? item.name}`);
+  });
+  const monkLevel = character.classLevels.find((entry) => entry.className.toLowerCase() === "monk")?.level ?? 0;
+  const hasUnarmoredMovement = character.features.some((feature) => feature.name.toLowerCase() === "unarmored movement");
+  const unarmoredMovementBonus = hasUnarmoredMovement && !wearingArmorOrShield
+    ? monkLevel >= 18 ? 30 : monkLevel >= 14 ? 25 : monkLevel >= 10 ? 20 : monkLevel >= 6 ? 15 : monkLevel >= 2 ? 10 : 0
+    : 0;
   const stoppedBy = character.conditions.find((condition) => zeroSpeedConditions.has(condition));
   const overCapacity = encumbrance.level === "over-capacity";
-  const value = stoppedBy || overCapacity ? 0 : Math.max(0, character.speed - encumbrance.speedPenalty - exhaustionPenalty - armorEffects.speedPenalty);
+  const value = stoppedBy || overCapacity ? 0 : Math.max(0, character.speed + unarmoredMovementBonus - encumbrance.speedPenalty - exhaustionPenalty - armorEffects.speedPenalty);
   const effects = [
+    unarmoredMovementBonus ? `Unarmored Movement +${unarmoredMovementBonus} ft.` : "",
     encumbrance.speedPenalty ? `Encumbrance −${encumbrance.speedPenalty} ft.` : "",
     exhaustionPenalty ? `Exhaustion −${exhaustionPenalty} ft.` : "",
     armorEffects.speedPenalty ? `${armorEffects.strengthArmorName} requires Strength ${armorEffects.strengthRequirement}: −10 ft.` : "",
@@ -441,9 +462,27 @@ export function advancementPromptsForFeatures(features: RulesFeature[], classNam
     const name = feature.name.toLowerCase();
     const description = feature.description;
     const base = { featureId: feature.id, featureName: feature.name };
-    if (name.includes("fighting style")) return [{ ...base, id: `${feature.id ?? feature.name}-fighting-style`, kind: "fighting-style" as const, count: 1, label: "Fighting Style feat" }];
+    if (name.includes("fighting style")) {
+      const alternative = description.match(/Instead of choosing one of those feats, you can choose the option below\.\s*([^.:]+)\.\s*You learn\s+(one|two|three|four|five|six|\d+)\s+([A-Za-z]+) cantrips/i);
+      return [{
+        ...base,
+        id: `${feature.id ?? feature.name}-fighting-style`,
+        kind: "fighting-style" as const,
+        count: 1,
+        label: "Fighting Style",
+        ...(alternative ? { cantripAlternative: {
+          value: `cantrip-style:${alternative[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+          label: alternative[1].trim(),
+          spellList: alternative[3].trim(),
+          count: writtenCount(alternative[2]),
+        } } : {}),
+      }];
+    }
     if (name === "weapon mastery") return [{ ...base, id: `${feature.id ?? feature.name}-weapon-mastery`, kind: "weapon-mastery" as const, count: Math.max(1, training.masteryChoices), label: "Mastered weapon" }];
-    if (name === "expertise") return [{ ...base, id: `${feature.id ?? feature.name}-expertise`, kind: "expertise" as const, count: /\bone\b/i.test(description) ? 1 : 2, label: "Expertise skill" }];
+    if (name === "expertise" || /(?:gain|have) Expertise/i.test(description) && /(?:choose|choice)/i.test(description)) {
+      const count = /\btwo\b[^.]{0,40}(?:skill proficiencies|skills)/i.test(description) ? 2 : 1;
+      return [{ ...base, id: `${feature.id ?? feature.name}-expertise`, kind: "expertise" as const, count, label: "Expertise skill" }];
+    }
     if (name === "metamagic") return [{ ...base, id: `${feature.id ?? feature.name}-metamagic`, kind: "metamagic" as const, count: 2, label: "Metamagic option" }];
     const learned = description.match(/\blearn\s+(one|two|three|four|five|six|\d+)\s+(?:\w+\s+)?(cantrips|spells)\b/i);
     if (learned) return [{ ...base, id: `${feature.id ?? feature.name}-spells`, kind: "spell" as const, count: writtenCount(learned[1]), label: learned[2].toLowerCase() === "cantrips" ? "Cantrip" : "Spell" }];
@@ -452,6 +491,134 @@ export function advancementPromptsForFeatures(features: RulesFeature[], classNam
       return [{ ...base, id: `${feature.id ?? feature.name}-skill`, kind: "skill" as const, count, label: "Skill proficiency" }];
     }
     return [];
+  });
+}
+
+export function spellChoicesGainedAtLevel(className: string, classLevel: number) {
+  if (classLevel <= 1) return 0;
+  const previous = startingSpellRequirementsFor(className, classLevel - 1);
+  const current = startingSpellRequirementsFor(className, classLevel);
+  return previous && current ? Math.max(0, current.learned - previous.learned) : 0;
+}
+
+export function spellAdvancementPrompt(className: string, classLevel: number, count = spellChoicesGainedAtLevel(className, classLevel)): AdvancementPrompt | null {
+  if (count <= 0) return null;
+  const normalized = className.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return {
+    id: `${normalized}-${classLevel}-spell-progression`,
+    featureId: `${normalized}-${classLevel}-spell-progression`,
+    featureName: `${className} Spellcasting`,
+    kind: "spell",
+    count,
+    label: "Spell",
+    className,
+    classLevel,
+  };
+}
+
+export type LevelTwoFeatureGrant = {
+  className: string;
+  classLevel: 2;
+  feature: RulesFeature;
+};
+
+export function levelTwoFeatureGrants(character: Pick<CharacterData, "classLevels">, classes: ClassDefinition[]): LevelTwoFeatureGrant[] {
+  return character.classLevels.flatMap((entry) => {
+    if (entry.level < 2) return [];
+    const definition = classes.find((candidate) => candidate.name.toLowerCase() === entry.className.toLowerCase());
+    if (!definition) return [];
+    const subclass = definition.subclasses?.find((candidate) => candidate.name === entry.subclassName);
+    return [...(definition.levelFeatures["2"] ?? []), ...(subclass?.levelFeatures["2"] ?? [])]
+      .map((feature) => ({ className: definition.name, classLevel: 2 as const, feature }));
+  });
+}
+
+function featureMatches(left: RulesFeature, right: RulesFeature) {
+  return Boolean(left.id && right.id && left.id === right.id) || left.name.trim().toLowerCase() === right.name.trim().toLowerCase();
+}
+
+export function missingLevelTwoFeatures(character: Pick<CharacterData, "classLevels" | "features">, classes: ClassDefinition[]) {
+  return levelTwoFeatureGrants(character, classes).filter((grant) => !character.features.some((feature) => featureMatches(feature, grant.feature)));
+}
+
+export function levelTwoReconciliationPatch(character: CharacterData, classes: ClassDefinition[], spells: SpellDefinition[]): Partial<CharacterData> {
+  const patch: Partial<CharacterData> = {};
+  const grants = levelTwoFeatureGrants(character, classes);
+  const missingFeatures = grants.filter((grant) => !character.features.some((feature) => featureMatches(feature, grant.feature)));
+  const refreshedFeatures = character.features.map((feature) => grants.find((grant) => featureMatches(feature, grant.feature))?.feature ?? feature);
+  const featuresChanged = missingFeatures.length > 0 || refreshedFeatures.some((feature, index) => {
+    const previous = character.features[index];
+    return feature.id !== previous.id || feature.name !== previous.name || feature.description !== previous.description || feature.source !== previous.source;
+  });
+  if (featuresChanged) patch.features = [...refreshedFeatures, ...missingFeatures.map((grant) => grant.feature)];
+  const resources = syncMulticlassResources(character.resources, character.classLevels, character.abilities);
+  if (resources !== character.resources) patch.resources = resources;
+
+  const paladinAtTwo = character.classLevels.some((entry) => entry.className.toLowerCase() === "paladin" && entry.level >= 2);
+  const smiteFeature = classes.find((entry) => entry.name.toLowerCase() === "paladin")?.levelFeatures["2"]?.find((feature) => feature.name === "Paladin's Smite");
+  const divineSmite = spells.find((spell) => spell.id === "divine-smite" || spell.name === "Divine Smite");
+  if (paladinAtTwo && smiteFeature?.id && divineSmite) {
+    const currentSmite = character.spells.find((spell) => spell.id === divineSmite.id);
+    if (!currentSmite || !currentSmite.alwaysPrepared || currentSmite.sourceFeatId !== smiteFeature.id) {
+      patch.spells = [...character.spells.filter((spell) => spell.id !== divineSmite.id), {
+        ...divineSmite,
+        prepared: true,
+        alwaysPrepared: true,
+        sourceFeatId: smiteFeature.id,
+        castingAbility: "spirit",
+      }];
+    }
+    if (!character.featSpellcastingChoices.some((choice) => choice.featId === smiteFeature.id)) {
+      patch.featSpellcastingChoices = [...character.featSpellcastingChoices, {
+        featId: smiteFeature.id,
+        sourceName: "Paladin's Smite",
+        spellList: "Paladin",
+        ability: "spirit",
+        cantripIds: [],
+        levelOneSpellId: divineSmite.id,
+        freeCastUsed: false,
+        freeCastUsedSpellIds: [],
+      }];
+    }
+  }
+  return patch;
+}
+
+function recordedPromptComplete(character: Pick<CharacterData, "advancementChoices">, prompt: AdvancementPrompt) {
+  const choice = character.advancementChoices.find((entry) => entry.featureId === prompt.featureId && entry.kind === prompt.kind);
+  return Boolean(choice && choice.selections.length === prompt.count && choice.selections.every(Boolean) && new Set(choice.selections).size === choice.selections.length);
+}
+
+export function outstandingLevelTwoPrompts(character: Pick<CharacterData, "classLevels" | "features" | "advancementChoices" | "skillExpertise" | "feats" | "spells">, classes: ClassDefinition[]) {
+  const featurePrompts = levelTwoFeatureGrants(character, classes).flatMap((grant) => advancementPromptsForFeatures([grant.feature], grant.className)
+    .map((prompt) => ({ ...prompt, className: grant.className, classLevel: 2 }))
+    .filter((prompt) => {
+      if (recordedPromptComplete(character, prompt)) return false;
+      if (prompt.kind === "expertise" && character.skillExpertise.length >= prompt.count) return false;
+      if (prompt.kind === "fighting-style" && character.feats.some((feat) => feat.category.toLowerCase() === "fighting style")) return false;
+      return true;
+    }));
+  const spellPrompts = character.classLevels.flatMap((entry) => {
+    if (entry.level < 2) return [];
+    const requirement = startingSpellRequirementsFor(entry.className, 2);
+    if (!requirement) return [];
+    const learned = character.spells.filter((spell) => spell.className?.toLowerCase() === entry.className.toLowerCase() && spell.level > 0 && !spell.alwaysPrepared).length;
+    const prompt = spellAdvancementPrompt(entry.className, 2, Math.max(0, requirement.learned - learned));
+    return prompt ? [prompt] : [];
+  });
+  return [...featurePrompts, ...spellPrompts];
+}
+
+export function levelTwoSpellPreparationGaps(character: Pick<CharacterData, "classLevels" | "spells">) {
+  return character.classLevels.flatMap((entry) => {
+    if (entry.level < 2) return [];
+    const requirement = startingSpellRequirementsFor(entry.className, 2);
+    if (!requirement) return [];
+    const classSpells = character.spells.filter((spell) => spell.className?.toLowerCase() === entry.className.toLowerCase() && spell.level > 0 && !spell.alwaysPrepared);
+    const learned = classSpells.length;
+    const prepared = classSpells.filter((spell) => spell.prepared).length;
+    if (learned < requirement.learned || prepared >= requirement.prepared) return [];
+    return [{ className: entry.className, prepared, required: requirement.prepared }];
   });
 }
 
@@ -543,13 +710,15 @@ export function generatedCharacterActions(character: CharacterData, catalog: Equ
   ] : [];
   const featureActions = features.filter((feature) => feature !== focusFeature).map((feature, index) => {
     const description = feature.description.toLowerCase();
-    const resource = character.resources.find((entry) => {
+    const namedResource = character.resources.find((entry) => feature.name.toLowerCase() === entry.name.toLowerCase());
+    const mentionedResource = character.resources.find((entry) => {
       const name = entry.name.toLowerCase();
       const singular = name.endsWith("s") ? name.slice(0, -1) : name;
-      return description.includes(name) || description.includes(singular) || feature.name.toLowerCase() === name;
+      return description.includes(name) || description.includes(singular);
     });
+    const resource = namedResource ?? mentionedResource;
     const costMatch = feature.description.match(/(?:expend|spend)\s+(?:one|a|an|(\d+))\s+(?:use of (?:your )?)?([A-Za-z ]+?)(?:\.|,| to| point)/i);
-    const spendsResource = Boolean(resource && costMatch && feature.id !== "monk-10-heightened-focus");
+    const spendsResource = Boolean(resource && (costMatch || namedResource) && feature.id !== "monk-10-heightened-focus");
     const timing = actionTiming(feature.description);
     return {
       id: `feature-${feature.id ?? `${feature.name}-${index}`}`,
@@ -631,8 +800,14 @@ function automaticResourcesFor(className: string, level: number, abilities: Char
   if (normalizedClass === "barbarian") add("Rage", level >= 17 ? 6 : level >= 12 ? 5 : level >= 6 ? 4 : level >= 3 ? 3 : 2, "short-one");
   if (normalizedClass === "bard") add("Bardic Inspiration", Math.max(1, abilityModifier(abilities.charisma)), level >= 5 ? "short" : "long");
   if (normalizedClass === "priest" && level >= 2) add("Channel Faith", level >= 18 ? 4 : level >= 6 ? 3 : 2, "short-one");
-  if (normalizedClass === "warrior") add("Second Wind", level >= 10 ? 4 : level >= 4 ? 3 : 2, "short-one");
-  if (normalizedClass === "monk" && level >= 2) add("Focus Points", level, "short");
+  if (normalizedClass === "warrior") {
+    add("Second Wind", level >= 10 ? 4 : level >= 4 ? 3 : 2, "short-one");
+    if (level >= 2) add("Action Surge", level >= 17 ? 2 : 1, "short");
+  }
+  if (normalizedClass === "monk" && level >= 2) {
+    add("Focus Points", level, "short");
+    add("Uncanny Metabolism", 1, "long");
+  }
   if (normalizedClass === "paladin") {
     add("Lay on Hands", level * 5, "long");
     if (level >= 3) add("Channel Faith", 2, "short-one");

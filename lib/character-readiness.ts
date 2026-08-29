@@ -159,8 +159,8 @@ export function evaluateCharacterReadiness(character: CharacterData, context: Ch
     const classSpells = character.spells.filter((spell) => spell.className === classLevel.className);
     if (castingAbility && requirements) {
       const cantrips = classSpells.filter((spell) => spell.level === 0).length;
-      const learned = classSpells.filter((spell) => spell.level > 0).length;
-      const prepared = classSpells.filter((spell) => spell.level > 0 && spell.prepared).length;
+      const learned = classSpells.filter((spell) => spell.level > 0 && !spell.alwaysPrepared).length;
+      const prepared = classSpells.filter((spell) => spell.level > 0 && spell.prepared && !spell.alwaysPrepared).length;
       if (cantrips < requirements.cantrips) push(issues, "error", `spells-cantrips-${classLevel.className}`, `Choose ${classLevel.className} cantrips`, `${cantrips} of ${requirements.cantrips} required cantrips are recorded.`);
       if (learned < requirements.learned) push(issues, "error", `spells-learned-${classLevel.className}`, `Choose ${classLevel.className} spells`, `${learned} of ${requirements.learned} required level-1+ spells are recorded.`);
       if (prepared < requirements.prepared) push(issues, "error", `spells-prepared-low-${classLevel.className}`, `Prepare ${classLevel.className} spells`, `${prepared} of ${requirements.prepared} required spells are prepared.`);
@@ -171,7 +171,7 @@ export function evaluateCharacterReadiness(character: CharacterData, context: Ch
     }
     const preparedLimit = preparedSpellLimitFor(classLevel.className, classLevel.subclassName ?? "", classLevel.level);
     if (preparedLimit !== null) {
-      const prepared = character.spells.filter((spell) => spell.className === classLevel.className && spell.level > 0 && spell.prepared).length;
+      const prepared = character.spells.filter((spell) => spell.className === classLevel.className && spell.level > 0 && spell.prepared && !spell.alwaysPrepared).length;
       if (prepared > preparedLimit) push(issues, "error", `spells-prepared-${classLevel.className}`, `Too many ${classLevel.className} spells prepared`, `${prepared} prepared; the current limit is ${preparedLimit}.`);
     }
   }

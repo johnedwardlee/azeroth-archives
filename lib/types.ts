@@ -177,6 +177,7 @@ export type RuleDefinition = {
 
 export type TrackedSpell = SpellDefinition & {
   prepared: boolean;
+  alwaysPrepared?: boolean;
   className?: string;
   sourceFeatId?: string;
   castingAbility?: AbilityKey;
@@ -286,6 +287,7 @@ export type RecentActionUse = {
 export type FeatSpellcastingChoice = {
   featId: string;
   spellList: string;
+  sourceName?: string;
   ability?: AbilityKey;
   cantripIds: string[];
   levelOneSpellId?: string;

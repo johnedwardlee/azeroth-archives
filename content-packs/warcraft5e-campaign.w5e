@@ -3,9 +3,9 @@
   "pack": {
     "id": "warcraft5e-campaign",
     "name": "Warcraft 5E Campaign",
-    "version": "2026.08.11.1",
+    "version": "2026.08.29.1",
     "description": "Approved Grand Coalition campaign options with Warcraft presentation, complete offline rules descriptions, and the campaign's ancestry, class, background, feat, spell, and equipment restrictions.",
-    "source": "Warcraft5E Vault player guides and dnd2024-wikidot baseline 2026.08.11.1"
+    "source": "Warcraft5E Vault player guides and dnd2024-wikidot baseline 2026.08.29.1"
   },
   "ancestries": [
     {
@@ -2193,7 +2193,7 @@
           {
             "id": "ranger-2-deft-explorer",
             "name": "Deft Explorer",
-            "description": "Thanks to your travels, you gain the following benefits. Expertise.: Choose one of your skill proficiencies with which you lack Expertise. You gain Expertise in that skill. Languages.: you know two languages of your choice from the language tables in the rules glossary.",
+            "description": "Thanks to your travels, choose one of your skill proficiencies with which you lack Expertise. You gain Expertise in that skill. This campaign does not grant the standard feature's freely selected bonus languages; languages require an approved ancestry, upbringing, occupation, or backstory basis.",
             "source": "http://dnd2024.wikidot.com/ranger:main"
           },
           {

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import packJson from "../content-packs/warcraft5e-campaign.w5e?raw";
 import {
   activeEffectFromSpell,
   attackFromEquipment,
   calculateArmorClass,
   calculateEncumbrance,
+  calculateEffectiveSpeed,
   classTrainingFor,
   concentrationSave,
   featAbilityIncrease,
@@ -11,6 +13,9 @@ import {
   generatedCharacterActions,
   isIncapacitated,
   multiclassSpellSlots,
+  levelTwoReconciliationPatch,
+  missingLevelTwoFeatures,
+  outstandingLevelTwoPrompts,
   preparedSpellLimitForClasses,
   progressionSpellSlots,
   resolveIncomingDamage,
@@ -28,7 +33,9 @@ import {
   syncMulticlassResources,
 } from "./character-rules";
 import { newCharacter } from "../src/character-manager";
-import type { SpellDefinition } from "./types";
+import type { ContentPack, SpellDefinition, TrackedSpell } from "./types";
+
+const campaignPack = JSON.parse(packJson) as ContentPack;
 
 describe("living sheet rules", () => {
   it("includes the current Stamina modifier in level-one hit points", () => {
@@ -70,6 +77,100 @@ describe("living sheet rules", () => {
     expect(startingSpellRequirementsFor("Sorcerer", 1)).toEqual({ cantrips: 4, learned: 2, prepared: 2 });
     expect(startingSpellRequirementsFor("Mage", 1)).toEqual({ cantrips: 3, learned: 6, prepared: 4 });
     expect(startingSpellRequirementsFor("Warrior", 1)).toBeNull();
+  });
+
+  it("audits every bundled class level 2 grant and fresh choice", () => {
+    const classes = campaignPack.classes ?? [];
+    expect(classes.map((definition) => definition.name)).toEqual(["Barbarian", "Bard", "Priest", "Warrior", "Monk", "Paladin", "Hunter", "Rogue", "Sorcerer", "Mage"]);
+    for (const definition of classes) {
+      const legacy = { ...newCharacter(), className: definition.name, level: 2, classLevels: [{ className: definition.name, level: 2 }], features: [] };
+      expect(missingLevelTwoFeatures(legacy, classes).map((grant) => grant.feature.name))
+        .toEqual((definition.levelFeatures["2"] ?? []).map((feature) => feature.name));
+      const reconciled = levelTwoReconciliationPatch(legacy, classes, campaignPack.spells ?? []);
+      expect(reconciled.features?.map((feature) => feature.name)).toEqual((definition.levelFeatures["2"] ?? []).map((feature) => feature.name));
+    }
+  });
+
+  it("retroactively prompts for every unresolved level 2 class choice", () => {
+    const classes = campaignPack.classes ?? [];
+    const spells = campaignPack.spells ?? [];
+    const expected: Record<string, Array<[string, string, number]>> = {
+      Barbarian: [],
+      Bard: [["Expertise", "expertise", 2], ["Bard Spellcasting", "spell", 1]],
+      Priest: [["Priest Spellcasting", "spell", 1]],
+      Warrior: [],
+      Monk: [],
+      Paladin: [["Fighting Style", "fighting-style", 1], ["Paladin Spellcasting", "spell", 1]],
+      Hunter: [["Deft Explorer", "expertise", 1], ["Fighting Style", "fighting-style", 1], ["Hunter Spellcasting", "spell", 1]],
+      Rogue: [],
+      Sorcerer: [["Metamagic", "metamagic", 2], ["Sorcerer Spellcasting", "spell", 2]],
+      Mage: [["Arcane Scholar", "expertise", 1], ["Mage Spellcasting", "spell", 2]],
+    };
+    for (const definition of classes) {
+      const levelOneRequirement = startingSpellRequirementsFor(definition.name, 1);
+      const baselineSpells: TrackedSpell[] = levelOneRequirement
+        ? spells.filter((spell) => spell.level === 1 && spell.classes.includes(definition.name)).slice(0, levelOneRequirement.learned).map((spell) => ({ ...spell, prepared: true, className: definition.name }))
+        : [];
+      const legacy = { ...newCharacter(), className: definition.name, level: 2, classLevels: [{ className: definition.name, level: 2 }], features: [], spells: baselineSpells };
+      const prompts = outstandingLevelTwoPrompts(legacy, classes);
+      expect(prompts.map((prompt) => [prompt.featureName, prompt.kind, prompt.count]), definition.name).toEqual(expected[definition.name]);
+    }
+  });
+
+  it("supports both level 2 Fighting Style cantrip alternatives", () => {
+    const classes = campaignPack.classes ?? [];
+    const paladin = classes.find((definition) => definition.name === "Paladin")!;
+    const hunter = classes.find((definition) => definition.name === "Hunter")!;
+    expect(outstandingLevelTwoPrompts({ ...newCharacter(), classLevels: [{ className: "Paladin", level: 2 }] }, classes).find((prompt) => prompt.kind === "fighting-style")?.cantripAlternative)
+      .toMatchObject({ label: "Blessed Warrior", spellList: "Priest", count: 2 });
+    expect(outstandingLevelTwoPrompts({ ...newCharacter(), classLevels: [{ className: "Hunter", level: 2 }] }, classes).find((prompt) => prompt.kind === "fighting-style")?.cantripAlternative)
+      .toMatchObject({ label: "Nature Warrior", spellList: "Nature", count: 2 });
+    expect(paladin.levelFeatures["2"]).toBeTruthy();
+    expect(hunter.levelFeatures["2"]).toBeTruthy();
+  });
+
+  it("restores Paladin's always-prepared Divine Smite and tracks its free cast", () => {
+    const character = { ...newCharacter(), className: "Paladin", level: 2, classLevels: [{ className: "Paladin", level: 2 }] };
+    const patch = levelTwoReconciliationPatch(character, campaignPack.classes ?? [], campaignPack.spells ?? []);
+    expect(patch.spells).toContainEqual(expect.objectContaining({ id: "divine-smite", prepared: true, alwaysPrepared: true, sourceFeatId: "paladin-2-paladin-s-smite", castingAbility: "spirit" }));
+    expect(patch.featSpellcastingChoices).toContainEqual(expect.objectContaining({ featId: "paladin-2-paladin-s-smite", sourceName: "Paladin's Smite", levelOneSpellId: "divine-smite", freeCastUsed: false }));
+  });
+
+  it("refreshes stale pre-audit level 2 feature text from the bundled pack", () => {
+    const stale = {
+      ...newCharacter(),
+      className: "Warrior",
+      level: 2,
+      classLevels: [{ className: "Warrior", level: 2 }],
+      features: [{ id: "fighter-2-action-surge", name: "Action Surge", description: "Old placeholder text." }],
+    };
+    const patch = levelTwoReconciliationPatch(stale, campaignPack.classes ?? [], campaignPack.spells ?? []);
+    expect(patch.features?.find((feature) => feature.id === "fighter-2-action-surge")?.description).toContain("additional action");
+    expect(patch.features).toContainEqual(expect.objectContaining({ id: "fighter-2-tactical-mind" }));
+  });
+
+  it("tracks level 2 limited-use features and applies Monk Unarmored Movement", () => {
+    const warriorResources = syncMulticlassResources([], [{ className: "Warrior", level: 2 }], newCharacter().abilities);
+    expect(warriorResources).toContainEqual(expect.objectContaining({ name: "Action Surge", current: 1, maximum: 1, recovery: "short" }));
+    const actionSurge = { id: "fighter-2-action-surge", name: "Action Surge", description: "Take one additional action. Once you use this feature, you can't do so again until a Short or Long Rest." };
+    const warrior = { ...newCharacter(), className: "Warrior", classLevels: [{ className: "Warrior", level: 2 }], features: [actionSurge], resources: warriorResources };
+    expect(generatedCharacterActions(warrior, [])).toContainEqual(expect.objectContaining({ name: "Action Surge", resourceId: warriorResources.find((resource) => resource.name === "Action Surge")?.id, resourceCost: 1 }));
+    const monkResources = syncMulticlassResources([], [{ className: "Monk", level: 2 }], newCharacter().abilities);
+    expect(monkResources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "Focus Points", maximum: 2 }),
+      expect.objectContaining({ name: "Uncanny Metabolism", maximum: 1, recovery: "long" }),
+    ]));
+    const monk = {
+      ...newCharacter(),
+      className: "Monk",
+      classLevels: [{ className: "Monk", level: 2 }],
+      speed: 30,
+      features: [{ id: "monk-2-unarmored-movement", name: "Unarmored Movement", description: "Your speed increases while unarmored." }],
+    };
+    expect(calculateEffectiveSpeed(monk, calculateEncumbrance([], monk.abilities.strength), []).value).toBe(40);
+    const uncanny = { id: "monk-2-uncanny-metabolism", name: "Uncanny Metabolism", description: "Regain all expended Focus Points and Hit Points. Once used, it returns after a Long Rest." };
+    const uncannyAction = generatedCharacterActions({ ...monk, features: [...monk.features, uncanny], resources: monkResources }, []).find((action) => action.name === "Uncanny Metabolism");
+    expect(uncannyAction).toMatchObject({ resourceId: monkResources.find((resource) => resource.name === "Uncanny Metabolism")?.id, resourceCost: 1 });
   });
 
   it("exposes only prepared leveled spells as actions and identifies incapacitation", () => {

@@ -387,7 +387,7 @@ export function SpellbookManager({ catalog, equipmentCatalog, character, patchCh
     const requirement = startingSpellRequirementsFor(entry.className, entry.level);
     if (!requirement) return [];
     const owned = character.spells.filter((spell) => spell.className === entry.className);
-    return [{ className: entry.className, requirement, cantrips: owned.filter((spell) => spell.level === 0).length, learned: owned.filter((spell) => spell.level > 0).length, prepared: owned.filter((spell) => spell.level > 0 && spell.prepared).length }];
+    return [{ className: entry.className, requirement, cantrips: owned.filter((spell) => spell.level === 0).length, learned: owned.filter((spell) => spell.level > 0 && !spell.alwaysPrepared).length, prepared: owned.filter((spell) => spell.level > 0 && spell.prepared && !spell.alwaysPrepared).length }];
   });
   const magicInitiateCatalog = magicInitiateChoice?.spellList ? catalog.filter((spell) => spellMatchesLists(spell, [magicInitiateChoice.spellList])) : [];
   const magicInitiateCantrips = magicInitiateCatalog.filter((spell) => spell.level === 0);

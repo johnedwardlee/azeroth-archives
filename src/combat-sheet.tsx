@@ -146,8 +146,11 @@ export function CombatManager({
   }
 
   function skillModifier(name: string, ability: AbilityKey) {
-    const multiplier = character.skillExpertise.includes(name) ? 2 : character.skillProficiencies.includes(name) ? 1 : 0;
-    return abilityModifier(character.abilities[ability]) + character.proficiencyBonus * multiplier;
+    const expertise = character.skillExpertise.includes(name);
+    const proficient = character.skillProficiencies.includes(name);
+    const jackOfAllTrades = !proficient && !expertise && character.features.some((feature) => feature.name.toLowerCase() === "jack of all trades");
+    const proficiencyBonus = expertise ? character.proficiencyBonus * 2 : proficient ? character.proficiencyBonus : jackOfAllTrades ? Math.floor(character.proficiencyBonus / 2) : 0;
+    return abilityModifier(character.abilities[ability]) + proficiencyBonus;
   }
 
   function addWeapon() {

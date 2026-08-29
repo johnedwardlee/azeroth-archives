@@ -57,6 +57,8 @@ import {
   calculateEncumbrance,
   advancementPromptsForFeatures,
   classTrainingFor,
+  levelTwoSpellPreparationGaps,
+  levelTwoReconciliationPatch,
   METAMAGIC_OPTIONS,
   isEquipmentProficient,
   conditionEffectText,
@@ -70,7 +72,11 @@ import {
   syncFeatResources,
   syncProgressionSpellSlots,
   spellcastingAbilityForClass,
+  spellAdvancementPrompt,
   startingHitPoints,
+  startingSpellRequirementsFor,
+  outstandingLevelTwoPrompts,
+  type AdvancementPrompt,
 } from "../lib/character-rules";
 import {
   ABILITY_LABELS,
@@ -382,6 +388,7 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
         description: textValue(spell.description),
         source: typeof spell.source === "string" ? spell.source : undefined,
         prepared: level === 0 || Boolean(spell.prepared),
+        alwaysPrepared: Boolean(spell.alwaysPrepared),
         ...(className ? { className } : {}),
         sourceFeatId,
         castingAbility: abilityKeys.includes(spell.castingAbility as AbilityKey) ? spell.castingAbility as AbilityKey : undefined,
@@ -390,6 +397,7 @@ export function normalizeCharacter(value: Partial<CharacterData>): CharacterData
     featSpellcastingChoices: Array.isArray(value.featSpellcastingChoices) ? value.featSpellcastingChoices.filter((choice) => choice && typeof choice.featId === "string").map((choice) => ({
       featId: choice.featId,
       spellList: textValue(choice.spellList),
+      sourceName: typeof choice.sourceName === "string" ? choice.sourceName : undefined,
       ability: abilityKeys.includes(choice.ability as AbilityKey) ? choice.ability as AbilityKey : undefined,
       cantripIds: stringList(choice.cantripIds).slice(0, 2),
       levelOneSpellId: typeof choice.levelOneSpellId === "string" ? choice.levelOneSpellId : undefined,
@@ -598,6 +606,18 @@ function featureIdentity(feature: RulesFeature) {
   return feature.id ? `id:${feature.id}` : `name:${feature.name}`;
 }
 
+function cantripSelectionKey(prompt: AdvancementPrompt) {
+  return `${prompt.id}-cantrips`;
+}
+
+function advancementPromptComplete(prompt: AdvancementPrompt, selections: Record<string, string[]>) {
+  const selected = selections[prompt.id] ?? [];
+  const baseComplete = selected.length === prompt.count && selected.every(Boolean) && new Set(selected).size === selected.length;
+  if (!baseComplete || !prompt.cantripAlternative || selected[0] !== prompt.cantripAlternative.value) return baseComplete;
+  const cantrips = selections[cantripSelectionKey(prompt)] ?? [];
+  return cantrips.length === prompt.cantripAlternative.count && cantrips.every(Boolean) && new Set(cantrips).size === cantrips.length;
+}
+
 function ancestryDescription(ancestry: AncestryDefinition) {
   return ancestry.traits.map((trait) => `${trait.name}\n${trait.description}`).join("\n\n");
 }
@@ -679,6 +699,7 @@ export function CharacterManager() {
   const [levelUpFeatId, setLevelUpFeatId] = useState("");
   const [levelUpFeatAbility, setLevelUpFeatAbility] = useState<AbilityKey | "">("");
   const [levelUpSelections, setLevelUpSelections] = useState<Record<string, string[]>>({});
+  const [levelTwoAuditSelections, setLevelTwoAuditSelections] = useState<Record<string, string[]>>({});
   const [levelUpClassName, setLevelUpClassName] = useState("");
   const [levelUpSubclassName, setLevelUpSubclassName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<CharacterData | null>(null);
@@ -776,15 +797,22 @@ export function CharacterManager() {
   const plannedClassFeatures = selectedLevelUpClass?.levelFeatures[String(plannedClassLevel)] ?? [];
   const plannedSubclassFeatures = selectedLevelUpSubclass?.levelFeatures[String(plannedClassLevel)] ?? [];
   const plannedFeatures = [...plannedClassFeatures, ...plannedSubclassFeatures];
-  const advancementPrompts = useMemo(() => advancementPromptsForFeatures(plannedFeatures, selectedLevelUpClass?.name ?? character.className), [plannedFeatures, selectedLevelUpClass?.name, character.className]);
+  const advancementPrompts = useMemo(() => {
+    const className = selectedLevelUpClass?.name ?? character.className;
+    const featurePrompts = advancementPromptsForFeatures(plannedFeatures, className).map((prompt) => ({ ...prompt, className, classLevel: plannedClassLevel }));
+    const spellRequirement = startingSpellRequirementsFor(className, plannedClassLevel);
+    const learned = character.spells.filter((spell) => spell.className === className && spell.level > 0 && !spell.alwaysPrepared).length;
+    const spellPrompt = spellAdvancementPrompt(className, plannedClassLevel, Math.max(0, (spellRequirement?.learned ?? 0) - learned));
+    return [...featurePrompts, ...(spellPrompt ? [spellPrompt] : [])];
+  }, [plannedFeatures, selectedLevelUpClass?.name, character.className, character.spells, plannedClassLevel]);
+  const levelTwoAuditPrompts = useMemo(() => outstandingLevelTwoPrompts(character, classes), [character.classLevels, character.features, character.advancementChoices, character.skillExpertise, character.feats, character.spells, classes]);
+  const levelTwoPreparationGaps = useMemo(() => levelTwoSpellPreparationGaps(character), [character.classLevels, character.spells]);
   const hasAdvancementChoice = plannedFeatures.some((feature) => /Ability Score Improvement/i.test(feature.name));
   const selectedLevelUpFeat = hasAdvancementChoice && levelUpChoice === "feat" ? feats.find((feat) => feat.id === levelUpFeatId) : undefined;
   const levelUpFeatIncrease = featAbilityIncrease(selectedLevelUpFeat);
   const needsSubclass = !selectedLevelUpSubclass && Boolean(selectedLevelUpClass?.subclasses?.some((item) => (item.levelFeatures[String(plannedClassLevel)] ?? []).length));
-  const advancementChoicesComplete = advancementPrompts.every((prompt) => {
-    const selections = levelUpSelections[prompt.id] ?? [];
-    return selections.length === prompt.count && selections.every(Boolean) && new Set(selections).size === selections.length;
-  });
+  const advancementChoicesComplete = advancementPrompts.every((prompt) => advancementPromptComplete(prompt, levelUpSelections));
+  const levelTwoAuditComplete = levelTwoAuditPrompts.every((prompt) => advancementPromptComplete(prompt, levelTwoAuditSelections));
   const hitDicePools = useMemo(() => character.classLevels.map((entry, index) => {
     const stored = character.hitDiceByClass.find((pool) => pool.className === entry.className);
     return { className: entry.className, die: stored?.die || classes.find((definition) => definition.name === entry.className)?.hitDie || 8, total: stored?.total ?? entry.level, used: stored?.used ?? (index === 0 ? character.hitDiceUsed : 0) };
@@ -798,7 +826,7 @@ export function CharacterManager() {
   }), ...character.featSpellcastingChoices.flatMap((choice): SpellcastingProfile[] => {
     if (!choice.ability || !choice.spellList) return [];
     const sourceFeat = character.feats.find((feat) => feat.id === choice.featId);
-    return [{ className: sourceFeat?.id === "magic-initiate" ? `Magic Initiate (${choice.spellList})` : `${character.ancestry} Magic`, ability: choice.ability, preparedLimit: null, sourceFeatId: choice.featId, spellList: choice.spellList }];
+    return [{ className: choice.sourceName ?? (sourceFeat?.id === "magic-initiate" ? `Magic Initiate (${choice.spellList})` : `${character.ancestry} Magic`), ability: choice.ability, preparedLimit: null, sourceFeatId: choice.featId, spellList: choice.spellList }];
   })], [character.classLevels, character.featSpellcastingChoices, character.feats, character.ancestry, classes]);
   const currentSyncLink = syncLinks.find((link) => link.characterId === character.id);
   const currentDmLiveLocked = currentSyncLink?.role === "dm" && dmFullEditCharacterId !== character.id;
@@ -838,6 +866,14 @@ export function CharacterManager() {
     }
     if (Object.keys(patch).length) patchCharacter(patch);
   }, [storeLoaded, character.id, character.level, character.finalizedAt, character.readOnlyReview, character.maxHp, character.currentHp, character.abilities.stamina, character.damageResistances, character.feats, character.resources, character.proficiencyBonus, selectedAncestry, selectedClass]);
+  useEffect(() => {
+    setLevelTwoAuditSelections({});
+  }, [character.id]);
+  useEffect(() => {
+    if (!storeLoaded || character.id === "draft" || character.readOnlyReview || currentDmLiveLocked) return;
+    const patch = levelTwoReconciliationPatch(character, classes, spells);
+    if (Object.keys(patch).length) patchCharacter(patch);
+  }, [storeLoaded, character.id, character.readOnlyReview, character.classLevels, character.features, character.resources, character.abilities, character.spells, character.featSpellcastingChoices, currentDmLiveLocked, classes, spells]);
   useEffect(() => {
     const load = window.azerothDesktop?.load() ?? Promise.resolve(readBrowserStore());
     load.then((store) => {
@@ -1860,7 +1896,13 @@ export function CharacterManager() {
     const nextClassLevel = (entry?.level ?? 0) + 1;
     const specialization = selectedClass.subclasses?.find((item) => item.name === entry?.subclassName);
     const features = [...(selectedClass.levelFeatures[String(nextClassLevel)] ?? []), ...(specialization?.levelFeatures[String(nextClassLevel)] ?? [])];
-    const prompts = advancementPromptsForFeatures(features, selectedClass.name);
+    const spellRequirement = startingSpellRequirementsFor(selectedClass.name, nextClassLevel);
+    const learned = character.spells.filter((spell) => spell.className === selectedClass.name && spell.level > 0 && !spell.alwaysPrepared).length;
+    const spellPrompt = spellAdvancementPrompt(selectedClass.name, nextClassLevel, Math.max(0, (spellRequirement?.learned ?? 0) - learned));
+    const prompts = [
+      ...advancementPromptsForFeatures(features, selectedClass.name).map((prompt) => ({ ...prompt, className: selectedClass.name, classLevel: nextClassLevel })),
+      ...(spellPrompt ? [spellPrompt] : []),
+    ];
     const staminaBonus = abilityModifier(character.abilities.stamina);
     setLevelUpHpGain(Math.max(1, Math.floor(selectedClass.hitDie / 2) + 1 + staminaBonus) + ancestryHitPointBonus(selectedAncestry, 1) + toughFeatHitPointBonus(character.feats, 1));
     setLevelUpChoice("abilities");
@@ -1895,15 +1937,23 @@ export function CharacterManager() {
 
   function advancementOptions(prompt: (typeof advancementPrompts)[number]) {
     if (prompt.kind === "skill") return SKILLS.map((skill) => ({ value: skill.name, label: skill.name }));
-    if (prompt.kind === "expertise") return character.skillProficiencies.filter((skill) => !character.skillExpertise.includes(skill)).map((skill) => ({ value: skill, label: skill }));
+    if (prompt.kind === "expertise") {
+      const arcaneScholarSkills = new Set(["Arcana", "History", "Investigation", "Medicine", "Nature", "Religion"]);
+      return character.skillProficiencies.filter((skill) => !character.skillExpertise.includes(skill) && (prompt.featureName !== "Arcane Scholar" || arcaneScholarSkills.has(skill))).map((skill) => ({ value: skill, label: skill }));
+    }
     if (prompt.kind === "weapon-mastery") return equipment.filter((item) => Boolean(item.damage) && isEquipmentProficient(character, item)).map((item) => ({ value: item.name, label: `${item.name}${item.mastery ? ` — ${item.mastery}` : ""}` }));
-    if (prompt.kind === "fighting-style") return feats.filter((feat) => feat.category.toLowerCase() === "fighting style" && !character.feats.some((known) => known.id === feat.id)).map((feat) => ({ value: feat.id, label: feat.name }));
+    if (prompt.kind === "fighting-style") return [
+      ...feats.filter((feat) => feat.category.toLowerCase() === "fighting style" && !character.feats.some((known) => known.id === feat.id)).map((feat) => ({ value: feat.id, label: feat.name })),
+      ...(prompt.cantripAlternative ? [{ value: prompt.cantripAlternative.value, label: `${prompt.cantripAlternative.label} — ${prompt.cantripAlternative.count} ${prompt.cantripAlternative.spellList} cantrips` }] : []),
+    ];
     if (prompt.kind === "metamagic") return METAMAGIC_OPTIONS.map((option) => ({ value: option, label: option }));
     if (prompt.kind === "spell") {
       const feature = plannedFeatures.find((item) => item.id === prompt.featureId || item.name === prompt.featureName);
       const allLists = /can come from|spell list or any combination/i.test(feature?.description ?? "");
-      const targetClassName = selectedLevelUpClass?.name ?? character.className;
-      const maxSpellLevel = Math.max(0, ...Object.entries(progressionSpellSlots(targetClassName, selectedLevelUpSubclass?.name ?? "", plannedClassLevel) ?? {}).filter(([, maximum]) => maximum > 0).map(([level]) => Number(level)));
+      const targetClassName = prompt.className ?? selectedLevelUpClass?.name ?? character.className;
+      const targetClassLevel = prompt.classLevel ?? plannedClassLevel;
+      const targetSubclass = character.classLevels.find((entry) => entry.className === targetClassName)?.subclassName ?? selectedLevelUpSubclass?.name ?? "";
+      const maxSpellLevel = Math.max(0, ...Object.entries(progressionSpellSlots(targetClassName, targetSubclass, targetClassLevel) ?? {}).filter(([, maximum]) => maximum > 0).map(([level]) => Number(level)));
       return spells.filter((spell) => (allLists || spell.classes.some((className) => className.toLowerCase() === targetClassName.toLowerCase())) && (prompt.label === "Cantrip" ? spell.level === 0 : spell.level <= maxSpellLevel) && !character.spells.some((known) => known.id === spell.id)).map((spell) => ({ value: spell.id, label: `${spell.name}${spell.level ? ` (Level ${spell.level})` : " (Cantrip)"}` }));
     }
     return [];
@@ -1915,6 +1965,75 @@ export function CharacterManager() {
       selections[index] = value;
       return { ...current, [promptId]: selections };
     });
+  }
+
+  function setLevelTwoAuditSelection(promptId: string, index: number, value: string) {
+    setLevelTwoAuditSelections((current) => {
+      const selections = [...(current[promptId] ?? [])];
+      selections[index] = value;
+      return { ...current, [promptId]: selections };
+    });
+  }
+
+  function applyLevelTwoAuditChoices() {
+    if (!levelTwoAuditPrompts.length || !levelTwoAuditComplete) return;
+    const baseRecords: AdvancementChoice[] = levelTwoAuditPrompts.map((prompt) => ({
+      id: crypto.randomUUID(),
+      featureId: prompt.featureId,
+      featureName: prompt.featureName,
+      level: 2,
+      kind: prompt.kind,
+      selections: levelTwoAuditSelections[prompt.id] ?? [],
+    }));
+    const cantripStyles = levelTwoAuditPrompts.flatMap((prompt) => {
+      const alternative = prompt.cantripAlternative;
+      if (!alternative || levelTwoAuditSelections[prompt.id]?.[0] !== alternative.value) return [];
+      return [{ prompt, alternative, spellIds: levelTwoAuditSelections[cantripSelectionKey(prompt)] ?? [] }];
+    });
+    const records: AdvancementChoice[] = [...baseRecords, ...cantripStyles.map(({ prompt, alternative, spellIds }) => ({
+      id: crypto.randomUUID(), featureId: prompt.featureId, featureName: alternative.label, level: 2, kind: "spell" as const, selections: spellIds,
+    }))];
+    const expertise = baseRecords.filter((choice) => choice.kind === "expertise").flatMap((choice) => choice.selections);
+    const fightingStyleIds = baseRecords.filter((choice) => choice.kind === "fighting-style").flatMap((choice) => choice.selections);
+    const selectedFeats = feats.filter((feat) => fightingStyleIds.includes(feat.id));
+    const selectedSpells = levelTwoAuditPrompts.flatMap((prompt) => {
+      if (prompt.kind !== "spell") return [];
+      const className = prompt.className ?? character.className;
+      return spells.filter((spell) => (levelTwoAuditSelections[prompt.id] ?? []).includes(spell.id) && !character.spells.some((known) => known.id === spell.id))
+        .map((spell) => ({ ...spell, prepared: true, className }));
+    });
+    const styleSpells = cantripStyles.flatMap(({ prompt, spellIds }) => {
+      const definition = classes.find((entry) => entry.name === prompt.className);
+      const ability = definition ? spellcastingAbilityForClass(definition.name, "", definition.primaryAbility) ?? definition.primaryAbility : "spirit";
+      return spells.filter((spell) => spellIds.includes(spell.id) && !character.spells.some((known) => known.id === spell.id))
+        .map((spell) => ({ ...spell, prepared: true, sourceFeatId: prompt.featureId, castingAbility: ability }));
+    });
+    let featSpellcastingChoices = character.featSpellcastingChoices;
+    for (const { prompt, alternative, spellIds } of cantripStyles) {
+      if (!prompt.featureId) continue;
+      const definition = classes.find((entry) => entry.name === prompt.className);
+      const ability = definition ? spellcastingAbilityForClass(definition.name, "", definition.primaryAbility) ?? definition.primaryAbility : "spirit";
+      featSpellcastingChoices = [...featSpellcastingChoices.filter((choice) => choice.featId !== prompt.featureId), {
+        featId: prompt.featureId,
+        sourceName: alternative.label,
+        spellList: alternative.spellList,
+        ability,
+        cantripIds: spellIds,
+        freeCastUsed: false,
+        freeCastUsedSpellIds: [],
+      }];
+    }
+    patchCharacter({
+      skillExpertise: [...new Set([...character.skillExpertise, ...expertise])],
+      feats: uniqueById([...character.feats, ...selectedFeats]),
+      spells: uniqueById([...character.spells, ...selectedSpells, ...styleSpells]),
+      featSpellcastingChoices,
+      advancementChoices: [
+        ...character.advancementChoices.filter((choice) => !records.some((record) => record.featureId === choice.featureId && record.kind === choice.kind)),
+        ...records,
+      ],
+    });
+    setLevelTwoAuditSelections({});
   }
 
   function confirmLevelUp() {
@@ -1932,7 +2051,7 @@ export function CharacterManager() {
       for (const ability of levelUpAbilities) abilities[ability] = Math.min(20, abilities[ability] + 1);
     }
     if (levelUpFeatIncrease && levelUpFeatAbility) abilities[levelUpFeatAbility] = Math.min(levelUpFeatIncrease.maximum, abilities[levelUpFeatAbility] + 1);
-    const choiceRecords: AdvancementChoice[] = advancementPrompts.map((prompt) => ({
+    const baseChoiceRecords: AdvancementChoice[] = advancementPrompts.map((prompt) => ({
       id: crypto.randomUUID(),
       featureId: prompt.featureId,
       featureName: prompt.featureName,
@@ -1940,6 +2059,19 @@ export function CharacterManager() {
       kind: prompt.kind,
       selections: levelUpSelections[prompt.id] ?? [],
     }));
+    const cantripStyleSelections = advancementPrompts.flatMap((prompt) => {
+      const alternative = prompt.cantripAlternative;
+      if (!alternative || levelUpSelections[prompt.id]?.[0] !== alternative.value) return [];
+      return [{ prompt, alternative, spellIds: levelUpSelections[cantripSelectionKey(prompt)] ?? [] }];
+    });
+    const choiceRecords: AdvancementChoice[] = [...baseChoiceRecords, ...cantripStyleSelections.map(({ prompt, alternative, spellIds }) => ({
+      id: crypto.randomUUID(),
+      featureId: prompt.featureId,
+      featureName: alternative.label,
+      level: nextLevel,
+      kind: "spell" as const,
+      selections: spellIds,
+    }))];
     const chosenSkillProficiencies = choiceRecords.filter((choice) => choice.kind === "skill").flatMap((choice) => choice.selections);
     const chosenExpertise = choiceRecords.filter((choice) => choice.kind === "expertise").flatMap((choice) => choice.selections);
     const chosenMasteries = choiceRecords.filter((choice) => choice.kind === "weapon-mastery").flatMap((choice) => choice.selections);
@@ -1947,10 +2079,16 @@ export function CharacterManager() {
     const chosenSpellIds = choiceRecords.filter((choice) => choice.kind === "spell").flatMap((choice) => choice.selections);
     const chosenFeats = feats.filter((feat) => chosenFeatIds.includes(feat.id) && !character.feats.some((known) => known.id === feat.id));
     const chosenSpells = spells.filter((spell) => chosenSpellIds.includes(spell.id) && !character.spells.some((known) => known.id === spell.id)).map((spell) => ({ ...spell, prepared: true, className: selectedLevelUpClass.name }));
+    const cantripStyleSpells = cantripStyleSelections.flatMap(({ prompt, spellIds }) => spells.filter((spell) => spellIds.includes(spell.id) && !character.spells.some((known) => known.id === spell.id)).map((spell) => ({
+      ...spell,
+      prepared: true,
+      sourceFeatId: prompt.featureId,
+      castingAbility: spellcastingAbilityForClass(selectedLevelUpClass.name, selectedLevelUpSubclass?.name ?? "", selectedLevelUpClass.primaryAbility) ?? selectedLevelUpClass.primaryAbility,
+    })));
     const ancestryGrant = ancestryMagicGrant(selectedAncestry, nextLevel);
     const ancestryMagicChoice = ancestryGrant ? character.featSpellcastingChoices.find((choice) => choice.featId === ancestryGrant.sourceId) : undefined;
     const ancestrySpells = ancestryGrant ? spells.filter((spell) => ancestryGrant.spellIds.includes(spell.id)).map((spell) => ({ ...spell, prepared: true, sourceFeatId: ancestryGrant.sourceId, castingAbility: ancestryMagicChoice?.ability })) : [];
-    const featSpellcastingChoices = ancestryGrant && ancestryMagicChoice ? [
+    let featSpellcastingChoices = ancestryGrant && ancestryMagicChoice ? [
       ...character.featSpellcastingChoices.filter((choice) => choice.featId !== ancestryGrant.sourceId),
       {
         ...ancestryMagicChoice,
@@ -1958,6 +2096,18 @@ export function CharacterManager() {
         levelOneSpellId: ancestrySpells.find((spell) => spell.level === 1)?.id,
       },
     ] : character.featSpellcastingChoices;
+    for (const { prompt, alternative, spellIds } of cantripStyleSelections) {
+      if (!prompt.featureId) continue;
+      featSpellcastingChoices = [...featSpellcastingChoices.filter((choice) => choice.featId !== prompt.featureId), {
+        featId: prompt.featureId,
+        sourceName: alternative.label,
+        spellList: alternative.spellList,
+        ability: spellcastingAbilityForClass(selectedLevelUpClass.name, selectedLevelUpSubclass?.name ?? "", selectedLevelUpClass.primaryAbility) ?? selectedLevelUpClass.primaryAbility,
+        cantripIds: spellIds,
+        freeCastUsed: false,
+        freeCastUsedSpellIds: [],
+      }];
+    }
     const progressionSlots = syncMulticlassSpellSlots(character.spellSlots, classLevels);
     const hitDiceByClass = character.hitDiceByClass.some((pool) => pool.className === selectedLevelUpClass.name)
       ? character.hitDiceByClass.map((pool) => pool.className === selectedLevelUpClass.name ? { ...pool, die: selectedLevelUpClass.hitDie, total: pool.total + 1 } : pool)
@@ -1986,7 +2136,7 @@ export function CharacterManager() {
       featSpellcastingChoices,
       ...(progressionSlots ? { spellSlots: progressionSlots } : {}),
       feats: uniqueById([...character.feats, ...(selectedFeat && !character.feats.some((feat) => feat.id === selectedFeat.id) ? [selectedFeat] : []), ...chosenFeats]),
-      spells: uniqueById([...character.spells, ...chosenSpells, ...ancestrySpells]),
+      spells: uniqueById([...character.spells, ...chosenSpells, ...cantripStyleSpells, ...ancestrySpells]),
       features: [...character.features, ...[...newFeatures, ...newSubclassFeatures].filter((feature) => !character.features.some((existing) => existing.name === feature.name))],
       advancementHistory: [...character.advancementHistory, {
         id: crypto.randomUUID(), createdAt: new Date().toISOString(), totalLevel: nextLevel,
@@ -2535,6 +2685,19 @@ export function CharacterManager() {
               </div>
             </CollapsiblePanel>
             {creationSetupVisible && <CreationGuide key={`creation-guide-${character.id}`} character={character} patchCharacter={patchCharacter} ancestry={selectedAncestry} background={selectedBackground} feats={feats} spells={spells} equipment={equipment} campaignProfile={characterCampaignProfile} locked={creationLocked} />}
+            {!!(levelTwoAuditPrompts.length || levelTwoPreparationGaps.length) && <CollapsiblePanel className="advancement-panel level-two-audit" storageKey={`azeroth-panel-${character.id}-level-two-audit`} eyebrow="Retroactive advancement review" title="Complete level 2 choices" summary={<span>{levelTwoAuditPrompts.length + levelTwoPreparationGaps.length} outstanding</span>}>
+              <p className="level-two-audit-intro">This character reached level 2 before the full advancement audit. Automatic features and resources have been restored; complete the choices below to finish reconciliation.</p>
+              {!!levelTwoAuditPrompts.length && <div className="advancement-prompts">{levelTwoAuditPrompts.map((prompt) => {
+                const options = advancementOptions(prompt);
+                const selections = levelTwoAuditSelections[prompt.id] ?? Array.from({ length: prompt.count }, () => "");
+                const usesCantripAlternative = Boolean(prompt.cantripAlternative && selections[0] === prompt.cantripAlternative.value);
+                const cantripSelections = levelTwoAuditSelections[cantripSelectionKey(prompt)] ?? [];
+                const cantripOptions = prompt.cantripAlternative ? spells.filter((spell) => spell.level === 0 && spell.classes.some((className) => className.toLowerCase() === prompt.cantripAlternative!.spellList.toLowerCase()) && !character.spells.some((known) => known.id === spell.id)) : [];
+                return <div className="advancement-prompt" key={prompt.id}><strong>{prompt.featureName}</strong><small>{prompt.className} level 2 · Choose {prompt.count} {prompt.label.toLowerCase()}{prompt.count === 1 ? "" : "s"}.</small><div>{Array.from({ length: prompt.count }, (_, index) => <label key={index}>{prompt.label} {index + 1}<select disabled={Boolean(character.readOnlyReview || currentDmLiveLocked)} aria-label={`Level 2 audit ${prompt.featureName} ${prompt.label} ${index + 1}`} value={selections[index] ?? ""} onChange={(event) => setLevelTwoAuditSelection(prompt.id, index, event.target.value)}><option value="">Choose…</option>{options.map((option) => <option disabled={selections.some((selection, selectedIndex) => selectedIndex !== index && selection === option.value)} value={option.value} key={option.value}>{option.label}</option>)}</select></label>)}</div>{usesCantripAlternative && prompt.cantripAlternative && <div className="advancement-cantrip-alternative">{Array.from({ length: prompt.cantripAlternative.count }, (_, index) => <label key={index}>{prompt.cantripAlternative!.spellList} cantrip {index + 1}<select disabled={Boolean(character.readOnlyReview || currentDmLiveLocked)} aria-label={`Level 2 audit ${prompt.cantripAlternative!.label} cantrip ${index + 1}`} value={cantripSelections[index] ?? ""} onChange={(event) => setLevelTwoAuditSelection(cantripSelectionKey(prompt), index, event.target.value)}><option value="">Choose…</option>{cantripOptions.map((spell) => <option disabled={cantripSelections.some((selection, selectedIndex) => selectedIndex !== index && selection === spell.id)} value={spell.id} key={spell.id}>{spell.name}</option>)}</select></label>)}</div>}{!options.length && <p>No eligible options are currently available. Review the character's existing proficiencies or imported content.</p>}</div>;
+              })}{!levelTwoAuditComplete && <p className="level-up-warning">Complete each outstanding choice before applying the audit.</p>}</div>}
+              {levelTwoPreparationGaps.map((gap) => <div className="level-two-spell-gap" key={gap.className}><div><strong>Prepare {gap.className} spells</strong><span>{gap.prepared} of {gap.required} level-2 prepared spells are active.</span></div><button className="button button-outline" onClick={() => setTab("spellbook")}>Open Spellbook</button></div>)}
+              {!!levelTwoAuditPrompts.length && <div className="level-two-audit-actions"><button className="button button-primary" disabled={!levelTwoAuditComplete || Boolean(character.readOnlyReview || currentDmLiveLocked)} onClick={applyLevelTwoAuditChoices}><Sparkles size={15} />Apply level 2 choices</button></div>}
+            </CollapsiblePanel>}
             <AdvancementPanel character={character} onRollback={rollbackLatestAdvancement} />
           </div>
         )}
@@ -2603,7 +2766,10 @@ export function CharacterManager() {
           {advancementPrompts.length > 0 && <div className="advancement-prompts"><span className="eyebrow">Feature choices</span>{advancementPrompts.map((prompt) => {
             const options = advancementOptions(prompt);
             const selections = levelUpSelections[prompt.id] ?? Array.from({ length: prompt.count }, () => "");
-            return <div className="advancement-prompt" key={prompt.id}><strong>{prompt.featureName}</strong><small>Choose {prompt.count} {prompt.label.toLowerCase()}{prompt.count === 1 ? "" : "s"}.</small><div>{Array.from({ length: prompt.count }, (_, index) => <label key={index}>{prompt.label} {index + 1}<select aria-label={`${prompt.featureName} ${prompt.label} ${index + 1}`} value={selections[index] ?? ""} onChange={(event) => setAdvancementSelection(prompt.id, index, event.target.value)}><option value="">Choose…</option>{options.map((option) => <option disabled={selections.some((selection, selectedIndex) => selectedIndex !== index && selection === option.value)} value={option.value} key={option.value}>{option.label}</option>)}</select></label>)}</div>{!options.length && <p>No eligible options are currently available. Review existing proficiencies or imported content.</p>}</div>;
+            const usesCantripAlternative = Boolean(prompt.cantripAlternative && selections[0] === prompt.cantripAlternative.value);
+            const cantripSelections = levelUpSelections[cantripSelectionKey(prompt)] ?? [];
+            const cantripOptions = prompt.cantripAlternative ? spells.filter((spell) => spell.level === 0 && spell.classes.some((className) => className.toLowerCase() === prompt.cantripAlternative!.spellList.toLowerCase()) && !character.spells.some((known) => known.id === spell.id)) : [];
+            return <div className="advancement-prompt" key={prompt.id}><strong>{prompt.featureName}</strong><small>Choose {prompt.count} {prompt.label.toLowerCase()}{prompt.count === 1 ? "" : "s"}.</small><div>{Array.from({ length: prompt.count }, (_, index) => <label key={index}>{prompt.label} {index + 1}<select aria-label={`${prompt.featureName} ${prompt.label} ${index + 1}`} value={selections[index] ?? ""} onChange={(event) => setAdvancementSelection(prompt.id, index, event.target.value)}><option value="">Choose…</option>{options.map((option) => <option disabled={selections.some((selection, selectedIndex) => selectedIndex !== index && selection === option.value)} value={option.value} key={option.value}>{option.label}</option>)}</select></label>)}</div>{usesCantripAlternative && prompt.cantripAlternative && <div className="advancement-cantrip-alternative">{Array.from({ length: prompt.cantripAlternative.count }, (_, index) => <label key={index}>{prompt.cantripAlternative!.spellList} cantrip {index + 1}<select aria-label={`${prompt.cantripAlternative!.label} cantrip ${index + 1}`} value={cantripSelections[index] ?? ""} onChange={(event) => setAdvancementSelection(cantripSelectionKey(prompt), index, event.target.value)}><option value="">Choose…</option>{cantripOptions.map((spell) => <option disabled={cantripSelections.some((selection, selectedIndex) => selectedIndex !== index && selection === spell.id)} value={spell.id} key={spell.id}>{spell.name}</option>)}</select></label>)}</div>}{!options.length && <p>No eligible options are currently available. Review existing proficiencies or imported content.</p>}</div>;
           })}{!advancementChoicesComplete && <p className="level-up-warning">Complete each feature choice before advancing.</p>}</div>}
           {syncMulticlassSpellSlots(character.spellSlots, currentLevelUpEntry ? character.classLevels.map((entry) => entry.className === selectedLevelUpClass?.name ? { ...entry, level: plannedClassLevel, subclassName: selectedLevelUpSubclass?.name ?? entry.subclassName } : entry) : [...character.classLevels, { className: selectedLevelUpClass?.name ?? "", subclassName: selectedLevelUpSubclass?.name, level: 1 }]) && <p className="progression-note">Combined multiclass spell slots will update automatically. Spells known and prepared remain tracked by their individual class rules.</p>}
           <div className="level-up-features">
