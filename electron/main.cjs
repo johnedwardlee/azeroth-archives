@@ -47,6 +47,8 @@ ipcMain.handle("live-sync:sign-out", () => liveSync.signOut());
 ipcMain.handle("live-sync:list-campaigns", () => liveSync.listCampaigns());
 ipcMain.handle("live-sync:create-campaign", (_event, name) => liveSync.createCampaign(name));
 ipcMain.handle("live-sync:create-invitation", (_event, campaignId, characterId, validHours) => liveSync.createInvitation(campaignId, characterId, validHours));
+ipcMain.handle("live-sync:preview-recovery", (_event, code) => liveSync.previewRecovery(code));
+ipcMain.handle("live-sync:recover-from-code", (_event, code, characterId, campaignId, playerName) => liveSync.recoverFromCode(code, characterId, campaignId, playerName));
 ipcMain.handle("live-sync:redeem-invitation", (_event, code, character, playerName, recoveryCampaignId) => {
   const { portraitDataUrl: _portraitDataUrl, readOnlyReview: _readOnlyReview, reviewImportedAt: _reviewImportedAt, ...syncCharacter } = character;
   return liveSync.redeemInvitation(code, syncCharacter, playerName, recoveryCampaignId);

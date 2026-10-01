@@ -118,6 +118,13 @@ describe("live sync protocol", () => {
     expect(mergeRemoteCharacter(character, remote)).toMatchObject({ name: "Jaina Proudmoore", portraitDataUrl: character.portraitDataUrl, readOnlyReview: false });
   });
 
+  it("does not merge a same-named imported copy into the original shared ID", () => {
+    const original = { ...character, id: "original-shared-id", currentHp: 7 };
+    expect(() => mergeRemoteCharacter(character, original)).toThrow("different local character ID");
+    expect(character.id).toBe("hero-id");
+    expect(original.currentHp).toBe(7);
+  });
+
   it("removes only the unlinked character's links and queued work", () => {
     const heroMutation = createCharacterMutation("campaign", "hero-id", 1, { currentHp: 4 }, { id: "hero-mutation" });
     const allyMutation = createCharacterMutation("campaign", "ally-id", 1, { currentHp: 8 }, { id: "ally-mutation" });

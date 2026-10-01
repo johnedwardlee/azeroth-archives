@@ -1,4 +1,4 @@
-import type { AppRole, CampaignProfile, CharacterData, CharacterMutation, CharacterSyncLink, ContentPack, LiveCampaign, LiveCampaignMember, LiveSyncStatus, SharedRollEvent, SyncOutboxEntry, SyncedCharacterSnapshot } from "../lib/types";
+import type { AppRole, CampaignProfile, CharacterData, CharacterMutation, CharacterSyncLink, ContentPack, LiveCampaign, LiveCampaignMember, LiveRecoveryTarget, LiveSyncStatus, SharedRollEvent, SyncOutboxEntry, SyncedCharacterSnapshot } from "../lib/types";
 
 type DesktopStore = {
   version: 6;
@@ -58,6 +58,8 @@ declare global {
       listLiveCampaigns: () => Promise<LiveCampaign[]>;
       createLiveCampaign: (name: string) => Promise<string>;
       createCampaignInvitation: (campaignId: string, characterId?: string, validHours?: number) => Promise<{ invitationId: string; invitationCode: string; expiresAt: string }>;
+      previewCampaignRecovery: (code: string) => Promise<LiveRecoveryTarget>;
+      recoverCampaignFromCode: (code: string, characterId: string, campaignId: string, playerName: string) => Promise<{ campaignId: string; characterId: string; characterState: CharacterData; revision: number }>;
       redeemCampaignInvitation: (code: string, character: CharacterData, playerName: string, recoveryCampaignId?: string) => Promise<{ campaignId: string; characterId: string; characterState: CharacterData; revision: number }>;
       listCampaignMembers: (campaignId: string) => Promise<LiveCampaignMember[]>;
       listSyncedCharacters: (campaignId: string) => Promise<SyncedCharacterSnapshot[]>;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Cloud, Copy, Link2, LogOut, Mail, Plus, Radio, RefreshCw, Unlink, X } from "lucide-react";
-import type { AppRole, CharacterData, CharacterSyncLink, LiveCampaign, LiveSyncStatus } from "../lib/types";
+import type { AppRole, CharacterData, CharacterSyncLink, LiveCampaign, LiveRecoveryTarget, LiveSyncStatus } from "../lib/types";
 import { canManageCampaignAsDm } from "../lib/live-sync";
 
 type Props = {
@@ -17,6 +17,8 @@ type Props = {
   onSelectCampaign: (campaignId: string) => Promise<void>;
   onCreateInvitation: (characterId?: string) => Promise<{ invitationCode: string; expiresAt: string } | undefined>;
   onRedeemInvitation: (code: string, characterId: string, playerName: string, recover?: boolean) => Promise<void>;
+  onPreviewRecovery: (code: string) => Promise<LiveRecoveryTarget>;
+  onRecoverSharedCharacter: (code: string, target: LiveRecoveryTarget, playerName: string) => Promise<void>;
   onUnlinkCharacter: (characterId: string, deleteRollHistory: boolean) => Promise<void>;
   onSignOut: () => Promise<void>;
 };
@@ -62,7 +64,21 @@ export function playerConnectionForm({ characters, links, recover, characterId, 
   return { choices, characterId: selected?.id ?? "", playerName: name, requirements };
 }
 
-export function LiveSyncPanel({ status, appRole, characters, links, campaigns, activeCampaignId, onClose, onReconnect, onRequestDmLink, onCreateCampaign, onSelectCampaign, onCreateInvitation, onRedeemInvitation, onUnlinkCharacter, onSignOut }: Props) {
+export function recoveryConfirmation(code: string, preview: { code: string; target: LiveRecoveryTarget } | undefined, playerName: string | undefined, busy: boolean) {
+  const target = preview?.code === code ? preview.target : undefined;
+  const name = playerName ?? (target?.playerName.trim() || target?.characterName.trim() || "");
+  const codeReady = /^[0-9A-F]{6}(?:-[0-9A-F]{6}){3}$/.test(code);
+  const requirements = [
+    ...(!codeReady ? ["Enter the complete 24-character recovery code from the DM."] : []),
+    ...(!target ? ["Check the recovery code to identify the original shared character."] : []),
+    ...(target && !name.trim() ? ["Enter a player name."] : []),
+    ...(name.trim().length > 120 ? ["Player name must be 120 characters or fewer."] : []),
+    ...(busy ? ["A connection operation is in progress. Please wait."] : []),
+  ];
+  return { target, playerName: name, requirements, canCheck: codeReady && !busy };
+}
+
+export function LiveSyncPanel({ status, appRole, characters, links, campaigns, activeCampaignId, onClose, onReconnect, onRequestDmLink, onCreateCampaign, onSelectCampaign, onCreateInvitation, onRedeemInvitation, onPreviewRecovery, onRecoverSharedCharacter, onUnlinkCharacter, onSignOut }: Props) {
   const [email, setEmail] = useState("");
   const [campaignName, setCampaignName] = useState("");
   const [inviteCode, setInviteCode] = useState("");
@@ -71,6 +87,7 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
   const playerLinks = links.filter((link) => link.role === "player");
   const [recoverConnection, setRecoverConnection] = useState(appRole === "player" && playerLinks.length > 0 && status.connection !== "live");
   const [recoveryCharacterId, setRecoveryCharacterId] = useState(playerLinks[0]?.characterId ?? "");
+  const [recoveryPreview, setRecoveryPreview] = useState<{ code: string; target: LiveRecoveryTarget }>();
   const [generatedInvite, setGeneratedInvite] = useState<{ invitationCode: string; expiresAt: string }>();
   const [generatedForCharacterId, setGeneratedForCharacterId] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -78,6 +95,7 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
   const [unlinkTarget, setUnlinkTarget] = useState<CharacterSyncLink>();
   const [deleteRollHistory, setDeleteRollHistory] = useState(false);
   const playerForm = playerConnectionForm({ characters, links, recover: recoverConnection, characterId: recoverConnection ? recoveryCharacterId : characterId, playerName, inviteCode, busy });
+  const recovery = recoveryConfirmation(inviteCode, recoveryPreview, playerName, busy);
   const playerFormRef = useRef<HTMLElement>(null);
   const generatedCodeRef = useRef<HTMLElement>(null);
 
@@ -89,6 +107,7 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
     if (!recoverConnection || forCharacterId !== recoveryCharacterId) {
       setInviteCode("");
       setPlayerName(undefined);
+      setRecoveryPreview(undefined);
     }
     setRecoverConnection(true);
     setRecoveryCharacterId(forCharacterId);
@@ -124,7 +143,7 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
       <div className={`sync-connection sync-${status.connection}`}><span><Radio size={16} /></span><div><strong>{status.connection.replace("-", " ")}</strong><small>{status.message}</small></div></div>
       {feedback && <p className="sync-feedback" role="status">{feedback}</p>}
 
-      {status.configured && <section className="sync-form" aria-label="Reconnect campaign"><div><span className="eyebrow">Connection tools</span><h3>Reconnect to your campaign</h3><p>Retry the saved login and refresh the live connection. Your local sheet, character links, and queued changes are kept. No invitation code is needed if the saved login still works.</p></div><button type="button" className="button button-primary" disabled={busy} onClick={() => run(onReconnect, "Campaign reconnected. Live updates are active.")}><RefreshCw size={15} />{busy ? "Working…" : "Reconnect"}</button>{appRole === "player" && playerLinks.length > 0 && <button type="button" className="button button-outline" disabled={busy} onClick={() => openPlayerRecovery()}>Enter DM recovery code</button>}</section>}
+      {status.configured && <section className="sync-form" aria-label="Reconnect campaign"><div><span className="eyebrow">Connection tools</span><h3>Reconnect to your campaign</h3><p>Retry the saved login and refresh the live connection. Your local sheet, character links, and queued changes are kept. No invitation code is needed if the saved login still works.</p></div><button type="button" className="button button-primary" disabled={busy} onClick={() => run(onReconnect, "Campaign reconnected. Live updates are active.")}><RefreshCw size={15} />{busy ? "Working…" : "Reconnect"}</button>{appRole === "player" && <button type="button" className="button button-outline" disabled={busy} onClick={() => openPlayerRecovery()}>Enter DM recovery code</button>}</section>}
 
       {!status.configured && <div className="sync-setup-note"><Cloud size={20} /><div><strong>This build is not connected to a campaign service.</strong><p>Add the Supabase project URL and publishable key to the release configuration before distributing the v2.0 beta.</p></div></div>}
 
@@ -146,14 +165,22 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
         </section>}
       </>}
 
-      {status.configured && appRole === "player" && <section className="sync-form" ref={playerFormRef}><div><span className="eyebrow">Player link</span><h3>{recoverConnection ? "Recover connection" : "Join the DM’s campaign"}</h3><p>{recoverConnection ? "Ask the DM for a recovery code for this character. This reconnects the existing shared sheet without uploading a replacement. Your portrait and queued offline changes are kept." : "Choose one saved character and enter the single-use invitation from your DM."}</p></div>
-        {playerLinks.length > 0 && <div className="sync-inline-form"><button type="button" className={`button ${recoverConnection ? "button-primary" : "button-outline"}`} disabled={busy} onClick={() => openPlayerRecovery()}>Recover existing character</button><button type="button" className={`button ${recoverConnection ? "button-outline" : "button-primary"}`} disabled={busy} onClick={() => { setRecoverConnection(false); setInviteCode(""); setPlayerName(undefined); }}>Link another character</button></div>}
-        <label><span>{recoverConnection ? "Recovery code" : "Invitation code"}</span><input className="sync-invite-input" type="text" name="invitation-code" autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={27} value={inviteCode} onChange={(event) => setInviteCode(formatInvitationCodeInput(event.currentTarget.value))} placeholder="XXXXXX-XXXXXX-XXXXXX-XXXXXX" /></label>
+      {status.configured && appRole === "player" && <section className="sync-form" ref={playerFormRef}><div><span className="eyebrow">Player link</span><h3>{recoverConnection ? "Recover connection" : "Join the DM’s campaign"}</h3><p>{recoverConnection ? "Check the DM’s character-specific recovery code, then confirm the original shared character. This restores the existing shared sheet without uploading a replacement. Local copies with different IDs are kept separately; only the original character’s queued edits and portrait are retained." : "Choose one saved character and enter the single-use invitation from your DM. For a recovery code, choose Recover existing character instead."}</p></div>
+        <div className="sync-inline-form"><button type="button" className={`button ${recoverConnection ? "button-primary" : "button-outline"}`} disabled={busy} onClick={() => openPlayerRecovery()}>Recover existing character</button><button type="button" className={`button ${recoverConnection ? "button-outline" : "button-primary"}`} disabled={busy} onClick={() => { setRecoverConnection(false); setInviteCode(""); setPlayerName(undefined); setRecoveryPreview(undefined); }}>Link another character</button></div>
+        <label><span>{recoverConnection ? "Recovery code" : "Invitation code"}</span><input className="sync-invite-input" type="text" name="invitation-code" autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={27} value={inviteCode} disabled={busy} onChange={(event) => { setInviteCode(formatInvitationCodeInput(event.currentTarget.value)); setRecoveryPreview(undefined); setFeedback(""); }} placeholder="XXXXXX-XXXXXX-XXXXXX-XXXXXX" /></label>
+        {recoverConnection ? <>
+          <button type="button" className="button button-outline" disabled={!recovery.canCheck} onClick={() => run(async () => { setRecoveryPreview(undefined); const target = await onPreviewRecovery(inviteCode); setRecoveryPreview({ code: inviteCode, target }); }, "Code checked. Confirm the shared character below; the code has not been used yet.")}>Check recovery code</button>
+          {recovery.target && <section className="sync-recovery-confirm" aria-label="Confirm shared character recovery"><h3>{recovery.target.characterName}</h3><p>{recovery.target.campaignName}</p><p>Character ID: <code>{recovery.target.characterId}</code></p><p>Recover this shared sheet on this device? Other local characters are kept. No local copy will overwrite the shared sheet.</p><small>Code expires {new Date(recovery.target.expiresAt).toLocaleString()}</small></section>}
+          <label><span>Player name</span><input value={recovery.playerName} maxLength={120} disabled={busy} onChange={(event) => setPlayerName(event.target.value)} placeholder="Filled after checking the code" /></label>
+          <p>The shared character’s name is used as the connection label if it has no player name. The sheet is not renamed.</p>
+          {recovery.requirements.length > 0 && <div id="player-recovery-requirements" className="sync-recovery-help" aria-live="polite"><strong>Before recovery:</strong><ul>{recovery.requirements.map((requirement) => <li key={requirement}>{requirement}</li>)}</ul></div>}
+          <button type="button" className="button button-primary" disabled={recovery.requirements.length > 0} aria-describedby={recovery.requirements.length > 0 ? "player-recovery-requirements" : undefined} onClick={() => run(async () => { if (!recovery.target) throw new Error("Check the recovery code first."); await onRecoverSharedCharacter(inviteCode, recovery.target, recovery.playerName.trim()); setInviteCode(""); setRecoveryPreview(undefined); }, "Original shared character recovered. Other local copies were kept.")}><Link2 size={15} />Recover this shared character</button>
+        </> : <>
         <label><span>Player name</span><input value={playerForm.playerName} maxLength={120} onChange={(event) => setPlayerName(event.target.value)} placeholder="Your name" /></label>
-        {recoverConnection && <p>If no player name is saved, the character name is used for the connection label. Your character sheet is not renamed.</p>}
         <label><span>{recoverConnection ? "Previously linked character" : "Local character"}</span><select value={playerForm.characterId} onChange={(event) => { if (recoverConnection) setRecoveryCharacterId(event.target.value); else setCharacterId(event.target.value); setPlayerName(undefined); }}>{!playerForm.choices.length && <option value="">No saved character available</option>}{playerForm.choices.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · Level {entry.level} {entry.className}</option>)}</select></label>
         {playerForm.requirements.length > 0 && <div id="player-link-requirements" className="sync-recovery-help" aria-live="polite"><strong>To {recoverConnection ? "recover" : "link"} this character:</strong><ul>{playerForm.requirements.map((requirement) => <li key={requirement}>{requirement}</li>)}</ul></div>}
         <button className="button button-primary" disabled={playerForm.requirements.length > 0} aria-describedby={playerForm.requirements.length > 0 ? "player-link-requirements" : undefined} onClick={() => run(async () => { await onRedeemInvitation(inviteCode, playerForm.characterId, playerForm.playerName.trim(), recoverConnection); setInviteCode(""); }, recoverConnection ? "Connection recovered. Your existing character is live again." : "Character linked. Live changes will now synchronize.")}><Link2 size={15} />{recoverConnection ? "Recover connection" : "Link character"}</button>
+        </>}
       </section>}
 
       {links.length > 0 && <section className="sync-linked-list"><span className="eyebrow">Linked on this device</span>{appRole === "dm" && <p className="sync-recovery-help">Generate a recovery code here and send it to the character’s player. The player enters it on their own installation.</p>}{links.map((link) => {

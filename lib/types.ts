@@ -494,6 +494,15 @@ export type SyncedCharacterSnapshot = {
   updatedAt: string;
 };
 
+export type LiveRecoveryTarget = {
+  campaignId: string;
+  campaignName: string;
+  characterId: string;
+  characterName: string;
+  playerName: string;
+  expiresAt: string;
+};
+
 export type LiveSyncStatus = {
   configured: boolean;
   connection: SyncConnectionState;

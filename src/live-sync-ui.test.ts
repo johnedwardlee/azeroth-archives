@@ -10,6 +10,21 @@ describe("live-sync user interface contract", () => {
   const preload = readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8");
   const main = readFileSync(new URL("../electron/main.cjs", import.meta.url), "utf8");
 
+  it("checks a token's canonical character and adopts it without relabeling an imported local copy", () => {
+    expect(preload).toContain('ipcRenderer.invoke("live-sync:preview-recovery", code)');
+    expect(preload).toContain('ipcRenderer.invoke("live-sync:recover-from-code", code, characterId, campaignId, playerName)');
+    expect(main).toContain('ipcMain.handle("live-sync:preview-recovery"');
+    expect(manager).toContain("onPreviewRecovery={previewLiveRecovery}");
+    expect(manager).toContain("onRecoverSharedCharacter={recoverLiveSharedCharacter}");
+    const recoveryHandler = manager.slice(manager.indexOf("async function recoverLiveSharedCharacter"), manager.indexOf("async function unlinkLiveCharacter"));
+    expect(recoveryHandler).toContain("target.characterId, target.campaignId");
+    expect(recoveryHandler).toContain("entry.id === result.characterId");
+    expect(recoveryHandler).toContain('queuedCharacterPatch(result.characterId, "")');
+    expect(recoveryHandler).not.toContain("redeemCampaignInvitation");
+    expect(syncPanel).toContain("Confirm shared character recovery");
+    expect(syncPanel).toContain("No local copy will overwrite the shared sheet.");
+  });
+
   it("keeps Party controls interactive while locking remote detail views", () => {
     expect(manager).toContain('tab !== "party" && currentDmLiveLocked ? "dm-live-readonly"');
     expect(manager).toContain('if (item === "party" && tab !== "party") setDmFullEditCharacterId(undefined)');

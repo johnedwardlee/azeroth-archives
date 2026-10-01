@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { campaignOptionLabel, formatInvitationCodeInput, LiveSyncPanel, playerConnectionForm } from "./live-sync-panel";
+import { campaignOptionLabel, formatInvitationCodeInput, LiveSyncPanel, playerConnectionForm, recoveryConfirmation } from "./live-sync-panel";
 import type { CharacterData, CharacterSyncLink, LiveCampaign } from "../lib/types";
 
 describe("formatInvitationCodeInput", () => {
@@ -23,6 +23,23 @@ describe("connection recovery controls", () => {
   const link = { characterId: "hero", campaignId: "campaign", campaignName: "Azeroth", role: "player", revision: 3 } as CharacterSyncLink;
   const dmCampaign = { id: "campaign", name: "Azeroth", role: "dm" } as LiveCampaign;
   const completeCode = "A2E44D-5C0FFE-E1BAD2-22CAFE";
+  const serverTarget = { campaignId: "campaign", campaignName: "Azeroth", characterId: "original-server-id", characterName: "Jaina", playerName: "", expiresAt: "2026-10-04T00:00:00Z" };
+
+  it("requires a code check before recovery and needs no local character or link", () => {
+    expect(recoveryConfirmation(completeCode, undefined, undefined, false)).toMatchObject({ canCheck: true, target: undefined });
+    const result = recoveryConfirmation(completeCode, { code: completeCode, target: serverTarget }, undefined, false);
+    expect(result.target?.characterId).toBe("original-server-id");
+    expect(result.playerName).toBe("Jaina");
+    expect(result.requirements).toEqual([]);
+  });
+
+  it("invalidates confirmation when the code changes and blocks incomplete/busy submissions", () => {
+    const preview = { code: completeCode, target: serverTarget };
+    expect(recoveryConfirmation("B2E44D-5C0FFE-E1BAD2-22CAFE", preview, undefined, false).target).toBeUndefined();
+    expect(recoveryConfirmation("A2E44D", preview, undefined, false).canCheck).toBe(false);
+    expect(recoveryConfirmation(completeCode, preview, undefined, true).requirements).toContain("A connection operation is in progress. Please wait.");
+    expect(recoveryConfirmation(completeCode, preview, " ", false).requirements).toContain("Enter a player name.");
+  });
   function recoveryForm(overrides: Partial<Parameters<typeof playerConnectionForm>[0]> = {}) {
     return playerConnectionForm({ characters: [character], links: [link], recover: true, characterId: "hero", inviteCode: completeCode, busy: false, ...overrides });
   }
@@ -79,36 +96,38 @@ describe("connection recovery controls", () => {
       appRole: "player", characters: [character], links: [link], campaigns: [],
       onClose: () => undefined, onReconnect: async () => undefined, onRequestDmLink: async () => undefined, onCreateCampaign: async () => undefined,
       onSelectCampaign: async () => undefined, onCreateInvitation: async () => undefined, onRedeemInvitation: async () => undefined,
+      onPreviewRecovery: async () => ({ campaignId: "campaign", campaignName: "Azeroth", characterId: "original", characterName: "Jaina", playerName: "", expiresAt: "2026-10-04T00:00:00Z" }), onRecoverSharedCharacter: async () => undefined,
       onUnlinkCharacter: async () => undefined, onSignOut: async () => undefined, ...overrides,
     }));
   }
 
-  it("offers recovery while signed out and allows the already-linked character to be selected", () => {
+  it("offers signed-out recovery by checking the code without requiring a matching local ID", () => {
     const html = render();
     expect(html).toContain("Recover connection");
-    expect(html).toContain("Previously linked character");
-    expect(html).toContain('<option value="hero" selected="">Jaina');
+    expect(html).toContain("Check recovery code");
+    expect(html).toContain("Recover this shared character");
+    expect(html).not.toContain("Previously linked character");
     expect(html).toContain("without uploading a replacement");
     expect(html).not.toContain("Sign in by email");
     expect(html).toContain("Reconnect to your campaign");
     expect(html).toContain("Enter DM recovery code");
   });
 
-  it("shows real prefilled values and an explanation instead of an unexplained disabled recovery button", () => {
+  it("explains that confirmation and the display name follow the server code check", () => {
     const html = render({ characters: [{ ...character, playerName: "" }] });
-    expect(html).toContain('placeholder="Your name" value="Jaina"');
-    expect(html).toContain('aria-describedby="player-link-requirements"');
+    expect(html).toContain('placeholder="Filled after checking the code"');
+    expect(html).toContain('aria-describedby="player-recovery-requirements"');
     expect(html).toContain("Enter the complete 24-character recovery code from the DM.");
     expect(html).not.toContain("Enter a player name.");
-    expect(html).toContain("Your character sheet is not renamed.");
+    expect(html).toContain("The sheet is not renamed.");
   });
 
   it.each(["offline", "error", "connecting"] as const)("exposes reconnect and existing-character recovery while %s with a saved identity", (connection) => {
     const html = render({ status: { configured: true, authenticated: true, anonymous: true, connection, message: "Connection unavailable" } });
     expect(html).toContain(">Reconnect</button>");
     expect(html).toContain("Enter DM recovery code");
-    expect(html).toContain("Previously linked character");
-    expect(html).toContain('<option value="hero" selected="">Jaina');
+    expect(html).toContain("Check recovery code");
+    expect(html).not.toContain("Previously linked character");
     expect(html).toContain("Your local sheet, character links, and queued changes are kept.");
   });
 
@@ -124,6 +143,8 @@ describe("connection recovery controls", () => {
     expect(html).toContain("Join the DM");
     expect(html).toContain("Link character");
     expect(html).not.toContain("Previously linked character");
+    expect(html).toContain("Enter DM recovery code");
+    expect(html).toContain("Recover existing character");
   });
 
   it("lets an authenticated DM issue character-specific recovery codes in the active campaign", () => {

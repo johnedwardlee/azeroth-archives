@@ -333,11 +333,45 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       p_character_state: character,
       p_player_name: playerName,
     });
-    if (result.error) throw normalizeServiceError(result.error, "The campaign invitation could not be redeemed.");
+    if (result.error) {
+      const error = normalizeServiceError(result.error, "The campaign invitation could not be redeemed.");
+      if (!recoveryCampaignId && /recovery code belongs to a different character/i.test(error.message)) {
+        throw new Error("This DM recovery code targets the original shared sheet, not this local copy. Choose Enter DM recovery code, then Check recovery code to restore that sheet. Your local copy has been kept.");
+      }
+      throw error;
+    }
     const redeemed = Array.isArray(result.data) ? result.data[0] : result.data;
     if (!redeemed) throw new Error("The service did not return a character. Reconnect to the campaign and try again.");
     if (redeemed.character_id !== character.id || (recoveryCampaignId && redeemed.campaign_id !== recoveryCampaignId)) throw new Error("The code does not match the selected character and campaign.");
     return { campaignId: redeemed.campaign_id, characterId: redeemed.character_id, characterState: redeemed.character_state, revision: Number(redeemed.revision) };
+  }
+
+  function recoveryServiceError(error) {
+    if (["PGRST202", "42883"].includes(error?.code)) return new Error("The campaign service needs the code-based recovery migration (202610010002_code_based_recovery.sql). Ask the DM to apply it before retrying.");
+    return normalizeServiceError(error, "The recovery code could not be checked or redeemed.");
+  }
+
+  async function previewRecovery(code) {
+    const sync = requireClient();
+    await ensureAnonymousPlayer();
+    const result = await sync.rpc("preview_campaign_recovery", { p_invitation_code: code });
+    if (result.error) throw recoveryServiceError(result.error);
+    const target = Array.isArray(result.data) ? result.data[0] : result.data;
+    if (!target?.character_id || !target.campaign_id) throw new Error("The service did not identify the recovery character. Ask the DM for a character-specific recovery code.");
+    return { campaignId: target.campaign_id, campaignName: target.campaign_name, characterId: target.character_id, characterName: target.character_name, playerName: target.player_name ?? "", expiresAt: target.expires_at };
+  }
+
+  async function recoverFromCode(code, characterId, campaignId, playerName) {
+    const sync = requireClient();
+    if (!characterId || !campaignId) throw new Error("Check the recovery code and confirm its character first.");
+    await ensureAnonymousPlayer();
+    const result = await sync.rpc("recover_campaign_character_from_code", {
+      p_invitation_code: code, p_expected_character_id: characterId, p_expected_campaign_id: campaignId, p_player_name: playerName,
+    });
+    if (result.error) throw recoveryServiceError(result.error);
+    const recovered = Array.isArray(result.data) ? result.data[0] : result.data;
+    if (!recovered || recovered.character_id !== characterId || recovered.campaign_id !== campaignId || recovered.character_state?.id !== characterId) throw new Error("The recovery response does not match the confirmed shared character.");
+    return { campaignId: recovered.campaign_id, characterId: recovered.character_id, characterState: recovered.character_state, revision: Number(recovered.revision) };
   }
 
   async function listMembers(campaignId) {
@@ -562,6 +596,8 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     createCampaign,
     createInvitation,
     redeemInvitation,
+    previewRecovery,
+    recoverFromCode,
     listMembers,
     listCharacters,
     applyMutation,

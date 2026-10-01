@@ -96,6 +96,7 @@ import {
   type ContentPack,
   type LiveCampaign,
   type LiveCampaignMember,
+  type LiveRecoveryTarget,
   type LiveSyncStatus,
   type RulesFeature,
   type SpellcastingProfile,
@@ -1329,6 +1330,50 @@ export function CharacterManager() {
       }, ...syncLinksRef.current.filter((link) => link.characterId !== remote.id)]);
       await persistCharacter(remote);
       await selectLiveCampaign(result.campaignId, campaigns);
+    } finally {
+      liveLinkOperationActive.current = false;
+    }
+  }
+
+  async function previewLiveRecovery(code: string) {
+    if (appRoleRef.current !== "player" || !window.azerothDesktop?.previewCampaignRecovery) throw new Error("Check recovery codes on an updated player installation.");
+    if (liveLinkOperationActive.current) throw new Error("A connection operation is already in progress.");
+    liveLinkOperationActive.current = true;
+    try {
+      return await window.azerothDesktop.previewCampaignRecovery(code);
+    } finally {
+      liveLinkOperationActive.current = false;
+    }
+  }
+
+  async function recoverLiveSharedCharacter(code: string, target: LiveRecoveryTarget, playerName: string) {
+    if (appRoleRef.current !== "player" || !window.azerothDesktop?.recoverCampaignFromCode) throw new Error("Recover this character on an updated player installation.");
+    if (liveLinkOperationActive.current) throw new Error("A connection operation is already in progress.");
+    liveLinkOperationActive.current = true;
+    try {
+      // The token determines the original shared ID. Never upload or relabel a local copy.
+      const result = await window.azerothDesktop.recoverCampaignFromCode(code, target.characterId, target.campaignId, playerName);
+      const identity = await window.azerothDesktop.getLiveSyncStatus();
+      liveSyncStatusRef.current = identity;
+      setLiveSyncStatus(identity);
+      const local = charactersRef.current.find((entry) => entry.id === result.characterId);
+      const normalized = normalizeSyncedCharacter({ ...result.characterState, ...queuedCharacterPatch(result.characterId, "") });
+      const remote = local ? mergeRemoteCharacter(local, normalized) : normalized;
+      const nextCharacters = [remote, ...charactersRef.current.filter((entry) => entry.id !== remote.id)];
+      charactersRef.current = nextCharacters;
+      setCharacters(nextCharacters);
+      setCharacter(remote);
+      const existingLink = syncLinksRef.current.find((entry) => entry.characterId === remote.id && entry.campaignId === result.campaignId);
+      replaceSyncLinks([{
+        characterId: remote.id, campaignId: result.campaignId, campaignName: target.campaignName,
+        role: "player", ownerUserId: identity.userId, revision: result.revision,
+        linkedAt: existingLink?.linkedAt ?? new Date().toISOString(), lastSyncedAt: new Date().toISOString(),
+      }, ...syncLinksRef.current.filter((entry) => entry.characterId !== remote.id)]);
+      await persistCharacter(remote);
+      const campaigns = await window.azerothDesktop.listLiveCampaigns();
+      setLiveCampaigns(campaigns);
+      await selectLiveCampaign(result.campaignId, campaigns);
+      await flushSyncOutbox();
     } finally {
       liveLinkOperationActive.current = false;
     }
@@ -2835,7 +2880,7 @@ export function CharacterManager() {
       </div>}
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-      {showLiveSync && <LiveSyncPanel status={liveSyncStatus} appRole={appRole} characters={characters} links={syncLinks} campaigns={liveCampaigns} activeCampaignId={activeLiveCampaignId} onClose={() => setShowLiveSync(false)} onReconnect={reconnectLiveSync} onRequestDmLink={requestDmMagicLink} onCreateCampaign={createLiveCampaign} onSelectCampaign={(campaignId) => selectLiveCampaign(campaignId)} onCreateInvitation={createLiveInvitation} onRedeemInvitation={redeemLiveInvitation} onUnlinkCharacter={unlinkLiveCharacter} onSignOut={signOutLiveSync} />}
+      {showLiveSync && <LiveSyncPanel status={liveSyncStatus} appRole={appRole} characters={characters} links={syncLinks} campaigns={liveCampaigns} activeCampaignId={activeLiveCampaignId} onClose={() => setShowLiveSync(false)} onReconnect={reconnectLiveSync} onRequestDmLink={requestDmMagicLink} onCreateCampaign={createLiveCampaign} onSelectCampaign={(campaignId) => selectLiveCampaign(campaignId)} onCreateInvitation={createLiveInvitation} onRedeemInvitation={redeemLiveInvitation} onPreviewRecovery={previewLiveRecovery} onRecoverSharedCharacter={recoverLiveSharedCharacter} onUnlinkCharacter={unlinkLiveCharacter} onSignOut={signOutLiveSync} />}
 
       <div className={`drawer-scrim ${showLibrary || showRoster || showCampaigns ? "visible" : ""}`} onClick={() => { setShowLibrary(false); setShowRoster(false); setShowCampaigns(false); }} />
       {showLibrary && <ContentPackWorkshop packs={customPacks} disabledPackIds={disabledPackIds} bundledPackId={bundledPackId} onClose={() => setShowLibrary(false)} onImport={() => fileInput.current?.click()} onSave={saveContentPack} onRemove={removePack} onToggle={toggleContentPack} onExport={exportContentPack} />}

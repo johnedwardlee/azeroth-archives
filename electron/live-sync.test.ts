@@ -17,6 +17,8 @@ const { configured, createLiveSync, normalizeServiceError, sessionSummary } = re
     status: () => { connection: string; authenticated: boolean; userId?: string };
     handleAuthCallback: (url: string) => Promise<unknown>;
     redeemInvitation: (code: string, character: Record<string, unknown>, playerName: string, campaignId?: string) => Promise<unknown>;
+    previewRecovery: (code: string) => Promise<unknown>;
+    recoverFromCode: (code: string, characterId: string, campaignId: string, playerName: string) => Promise<unknown>;
     listCampaigns: () => Promise<Array<{ id: string; name: string; role: string }>>;
   };
   normalizeServiceError: (error: unknown, fallback?: string) => Error;
@@ -138,7 +140,7 @@ describe("saved login and player recovery", () => {
       },
       realtime: { setAuth: async () => undefined },
       removeChannel: async () => undefined,
-      rpc: vi.fn(async (_name: string, _parameters: unknown) => ({ data: [{ campaign_id: "campaign", character_id: "hero", character_state: { id: "hero", currentHp: 7 }, revision: 42 }], error: null })),
+      rpc: vi.fn(async (_name: string, _parameters: unknown): Promise<{ data: Array<Record<string, unknown>>; error: unknown }> => ({ data: [{ campaign_id: "campaign", character_id: "hero", character_state: { id: "hero", currentHp: 7 }, revision: 42 }], error: null })),
       from: vi.fn((_table: string): unknown => undefined),
     };
     const sync = createLiveSync({
@@ -362,6 +364,39 @@ describe("saved login and player recovery", () => {
     await sync.redeemInvitation("join-code", { id: "hero" }, "Player");
     expect(client.rpc).toHaveBeenCalledWith("redeem_campaign_invitation", { p_invitation_code: "join-code", p_character_id: "hero", p_character_state: { id: "hero" }, p_player_name: "Player" });
     expect(client.auth.signInAnonymously).not.toHaveBeenCalled();
+  });
+
+  it("checks a recovery code on a new device without consuming it or sending a local ID", async () => {
+    const { sync, client } = fixture(null);
+    client.rpc.mockResolvedValueOnce({ data: [{ campaign_id: "campaign", campaign_name: "Azeroth", character_id: "original", character_name: "Jaina", player_name: "", expires_at: "2026-10-04" }], error: null });
+    await sync.initialize();
+    await expect(sync.previewRecovery("code")).resolves.toMatchObject({ characterId: "original", characterName: "Jaina", campaignId: "campaign" });
+    expect(client.rpc).toHaveBeenCalledExactlyOnceWith("preview_campaign_recovery", { p_invitation_code: "code" });
+  });
+
+  it("recovers the confirmed server ID without accepting or uploading an imported copy", async () => {
+    const { sync, client } = fixture(null);
+    await sync.initialize();
+    await expect(sync.recoverFromCode("code", "hero", "campaign", "Player")).resolves.toMatchObject({ characterId: "hero", characterState: { id: "hero", currentHp: 7 } });
+    expect(client.rpc).toHaveBeenCalledWith("recover_campaign_character_from_code", { p_invitation_code: "code", p_expected_character_id: "hero", p_expected_campaign_id: "campaign", p_player_name: "Player" });
+    expect(JSON.stringify(client.rpc.mock.calls)).not.toContain("p_character_state");
+  });
+
+  it("requires confirmed IDs and rejects server responses for another sheet", async () => {
+    const { sync, client } = fixture();
+    await sync.initialize();
+    await expect(sync.recoverFromCode("code", "", "campaign", "Player")).rejects.toThrow("confirm its character first");
+    expect(client.rpc).not.toHaveBeenCalled();
+    await expect(sync.recoverFromCode("code", "other", "campaign", "Player")).rejects.toThrow("does not match");
+  });
+
+  it("explains missing code-recovery migrations and mistaken use of recovery codes as new invitations", async () => {
+    const { sync, client } = fixture();
+    await sync.initialize();
+    client.rpc.mockResolvedValueOnce({ data: [], error: { code: "PGRST202", message: "Function not found" } });
+    await expect(sync.previewRecovery("code")).rejects.toThrow("202610010002_code_based_recovery.sql");
+    client.rpc.mockResolvedValueOnce({ data: [], error: { code: "P0001", message: "This recovery code belongs to a different character." } });
+    await expect(sync.redeemInvitation("code", { id: "imported-copy" }, "Player")).rejects.toThrow("Check recovery code");
   });
 
   it("rejects a recovery response for a different campaign or character", async () => {

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.9
+
+- Recover the original shared character using a checked, character-specific DM code even when a local import has a different ID or cached campaign links are missing. Show the server character and campaign for explicit confirmation before consuming the code.
+- Preserve separate local copies and apply portraits/queued edits only to the matching original ID; never upload a local replacement during code-based recovery.
+- Require the code-based recovery migration and show actionable errors if it is missing or a recovery code is used in the new-character linking form.
+
 ## 2.0.8
 
 - Prefill player recovery with the selected sheet's player name, using its character name as a connection label when no player name is saved; preserve the sheet's identity.

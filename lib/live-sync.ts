@@ -221,6 +221,7 @@ export function removeCharacterSyncState(
 }
 
 export function mergeRemoteCharacter(local: CharacterData, remote: CharacterData): CharacterData {
+  if (local.id !== remote.id) throw new Error("A shared character cannot be merged with a different local character ID.");
   return {
     ...local,
     ...sanitizeCharacterForSync(remote),

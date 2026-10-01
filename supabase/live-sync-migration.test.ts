@@ -7,8 +7,28 @@ const rollClear = readFileSync(new URL("./migrations/202608280001_clear_campaign
 const sharedRolls = readFileSync(new URL("./migrations/202608280002_shared_party_rolls.sql", import.meta.url), "utf8");
 const characterUnlink = readFileSync(new URL("./migrations/202608280003_character_unlink.sql", import.meta.url), "utf8");
 const recovery = readFileSync(new URL("./migrations/202610010001_connection_recovery.sql", import.meta.url), "utf8");
+const codeRecovery = readFileSync(new URL("./migrations/202610010002_code_based_recovery.sql", import.meta.url), "utf8");
 
 describe("live-sync migration security contract", () => {
+  it("previews only token-authorized confirmation metadata without consuming or changing anything", () => {
+    const preview = codeRecovery.slice(0, codeRecovery.indexOf("create or replace function public.recover_campaign_character_from_code"));
+    expect(preview).toContain("invitation.token_hash = encode(extensions.digest");
+    expect(preview).toContain("v_invitation.used_at is not null");
+    expect(preview).toContain("v_invitation.expires_at <= now()");
+    expect(preview).toContain("v_invitation.character_id is null");
+    expect(preview).toContain("public.is_campaign_dm");
+    expect(preview).not.toMatch(/\b(update|insert|delete)\b/i);
+    expect(preview).not.toContain("character.state,");
+    expect(codeRecovery).toContain("revoke execute on function public.preview_campaign_recovery(text) from public, anon");
+  });
+
+  it("requires the confirmed IDs and delegates locked token consumption to the existing safe recovery routine", () => {
+    expect(codeRecovery).toContain("p_expected_character_id is null or p_expected_campaign_id is null");
+    expect(codeRecovery).toContain("p_invitation_code, p_expected_character_id, p_expected_campaign_id, p_player_name");
+    expect(codeRecovery).toContain("grant execute on function public.recover_campaign_character_from_code(text, uuid, uuid, text) to authenticated");
+    expect(codeRecovery).toContain("revoke execute on function public.recover_campaign_character_from_code(text, uuid, uuid, text) from public, anon");
+    expect(codeRecovery).not.toContain("p_character_state");
+  });
   it("keeps direct writes behind authenticated RPC functions", () => {
     expect(migration).toContain("revoke all on public.characters from anon, authenticated");
     expect(migration).toContain("revoke execute on function public.apply_character_mutation");
