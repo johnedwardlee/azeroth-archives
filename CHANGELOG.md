@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.8
+
+- Prefill player recovery with the selected sheet's player name, using its character name as a connection label when no player name is saved; preserve the sheet's identity.
+- Select a valid saved character when connection data loads or changes, and explain missing names, incomplete codes, missing linked sheets, and pending operations beside disabled connection buttons.
+
 ## 2.0.7
 
 - Keep campaign connection controls visible in narrow player windows, with a labeled connection/recovery entry in the roster.

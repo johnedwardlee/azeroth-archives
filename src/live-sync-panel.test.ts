@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { campaignOptionLabel, formatInvitationCodeInput, LiveSyncPanel } from "./live-sync-panel";
+import { campaignOptionLabel, formatInvitationCodeInput, LiveSyncPanel, playerConnectionForm } from "./live-sync-panel";
 import type { CharacterData, CharacterSyncLink, LiveCampaign } from "../lib/types";
 
 describe("formatInvitationCodeInput", () => {
@@ -22,6 +22,50 @@ describe("connection recovery controls", () => {
   const character = { id: "hero", name: "Jaina", playerName: "Player", level: 2, className: "Mage" } as CharacterData;
   const link = { characterId: "hero", campaignId: "campaign", campaignName: "Azeroth", role: "player", revision: 3 } as CharacterSyncLink;
   const dmCampaign = { id: "campaign", name: "Azeroth", role: "dm" } as LiveCampaign;
+  const completeCode = "A2E44D-5C0FFE-E1BAD2-22CAFE";
+  function recoveryForm(overrides: Partial<Parameters<typeof playerConnectionForm>[0]> = {}) {
+    return playerConnectionForm({ characters: [character], links: [link], recover: true, characterId: "hero", inviteCode: completeCode, busy: false, ...overrides });
+  }
+
+  it("enables signed-out recovery with a complete code and no saved player name", () => {
+    const namelessPlayer = { ...character, playerName: "" };
+    const result = recoveryForm({ characters: [namelessPlayer] });
+    expect(result).toMatchObject({ characterId: "hero", playerName: "Jaina", requirements: [] });
+    expect(namelessPlayer.playerName).toBe("");
+  });
+
+  it("uses the selected sheet's saved player name rather than another sheet's name", () => {
+    const other = { ...character, id: "other", playerName: "Other player" };
+    const result = recoveryForm({ characters: [other, character], links: [{ ...link, characterId: "other" }, link] });
+    expect(result.playerName).toBe("Player");
+    expect(result.characterId).toBe("hero");
+    expect(result.requirements).toEqual([]);
+  });
+
+  it("selects the existing linked character if data arrives after the panel opens", () => {
+    expect(recoveryForm({ characterId: "" })).toMatchObject({ characterId: "hero", requirements: [] });
+    expect(recoveryForm({ characterId: "deleted" })).toMatchObject({ characterId: "hero", requirements: [] });
+  });
+
+  it("keeps a manually entered name and explains an explicitly blank name", () => {
+    expect(recoveryForm({ playerName: "Chosen label" }).playerName).toBe("Chosen label");
+    expect(recoveryForm({ playerName: " " }).requirements).toEqual(["Enter a player name."]);
+    expect(recoveryForm({ playerName: "a".repeat(121) }).requirements).toEqual(["Player name must be 120 characters or fewer."]);
+  });
+
+  it("explains incomplete codes, missing character links, and pending operations", () => {
+    expect(recoveryForm({ inviteCode: "A2E44D" }).requirements).toEqual(["Enter the complete 24-character recovery code from the DM."]);
+    expect(recoveryForm({ links: [] }).requirements.join(" ")).toContain("No previously linked character is available");
+    expect(recoveryForm({ characters: [] }).characterId).toBe("");
+    expect(recoveryForm({ busy: true }).requirements).toEqual(["A connection operation is in progress. Please wait."]);
+  });
+
+  it("does not silently use the character name for a new player's initial invitation", () => {
+    const result = recoveryForm({ recover: false, links: [], characters: [{ ...character, playerName: "" }] });
+    expect(result.characterId).toBe("hero");
+    expect(result.playerName).toBe("");
+    expect(result.requirements).toEqual(["Enter a player name."]);
+  });
   it("distinguishes same-name campaigns by their IDs without relabeling unique names", () => {
     const original = { ...dmCampaign, id: "fa03dcda-fa2c-4434-a194-296e11802259" };
     const empty = { ...dmCampaign, id: "3ee990a8-f9c8-422b-b616-195be03166b9" };
@@ -48,6 +92,15 @@ describe("connection recovery controls", () => {
     expect(html).not.toContain("Sign in by email");
     expect(html).toContain("Reconnect to your campaign");
     expect(html).toContain("Enter DM recovery code");
+  });
+
+  it("shows real prefilled values and an explanation instead of an unexplained disabled recovery button", () => {
+    const html = render({ characters: [{ ...character, playerName: "" }] });
+    expect(html).toContain('placeholder="Your name" value="Jaina"');
+    expect(html).toContain('aria-describedby="player-link-requirements"');
+    expect(html).toContain("Enter the complete 24-character recovery code from the DM.");
+    expect(html).not.toContain("Enter a player name.");
+    expect(html).toContain("Your character sheet is not renamed.");
   });
 
   it.each(["offline", "error", "connecting"] as const)("exposes reconnect and existing-character recovery while %s with a saved identity", (connection) => {
