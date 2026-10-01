@@ -86,4 +86,14 @@ describe("live-sync user interface contract", () => {
     expect(preload).toContain("playerName, recoveryCampaignId)");
     expect(main).toContain("playerName, recoveryCampaignId)");
   });
+
+  it("uses server campaign membership for cached link roles and recovery-code generation", () => {
+    expect(manager).toContain("const role = campaign.role;");
+    expect(manager).toContain("campaign.role !== appRoleRef.current");
+    expect(manager).toContain("canManageCampaignAsDm(activeLiveCampaignId, appRoleRef.current, liveSyncStatusRef.current, liveCampaigns)");
+    expect(syncPanel).toContain('appRole === "player" && link.role === "player"');
+    expect(syncPanel).toContain("canManageCampaignAsDm(link.campaignId, appRole, status, campaigns)");
+    expect(syncPanel).toContain('scrollIntoView({ behavior: "smooth", block: "start" })');
+    expect(syncPanel).toContain('scrollIntoView({ behavior: "smooth", block: "nearest" })');
+  });
 });

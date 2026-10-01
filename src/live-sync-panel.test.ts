@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { formatInvitationCodeInput, LiveSyncPanel } from "./live-sync-panel";
-import type { CharacterData, CharacterSyncLink } from "../lib/types";
+import type { CharacterData, CharacterSyncLink, LiveCampaign } from "../lib/types";
 
 describe("formatInvitationCodeInput", () => {
   it("accepts typed lowercase invitation characters and inserts separators", () => {
@@ -21,6 +21,7 @@ describe("formatInvitationCodeInput", () => {
 describe("connection recovery controls", () => {
   const character = { id: "hero", name: "Jaina", playerName: "Player", level: 2, className: "Mage" } as CharacterData;
   const link = { characterId: "hero", campaignId: "campaign", campaignName: "Azeroth", role: "player", revision: 3 } as CharacterSyncLink;
+  const dmCampaign = { id: "campaign", name: "Azeroth", role: "dm" } as LiveCampaign;
   function render(overrides: Partial<ComponentProps<typeof LiveSyncPanel>> = {}) {
     return renderToStaticMarkup(createElement(LiveSyncPanel, {
       status: { configured: true, authenticated: false, anonymous: false, connection: "signed-out", message: "Signed out" },
@@ -48,13 +49,36 @@ describe("connection recovery controls", () => {
   });
 
   it("lets an authenticated DM issue character-specific recovery codes in the active campaign", () => {
-    const html = render({ appRole: "dm", activeCampaignId: "campaign", links: [{ ...link, role: "dm" }], status: { configured: true, authenticated: true, anonymous: false, connection: "live", message: "Live" } });
+    const html = render({ appRole: "dm", activeCampaignId: "campaign", campaigns: [dmCampaign], links: [{ ...link, role: "dm" }], status: { configured: true, authenticated: true, anonymous: false, connection: "live", message: "Live" } });
     expect(html).toContain("Generate recovery code");
+  });
+
+  it("shows DM code generation, not player recovery, for the screenshot's stale player-role links", () => {
+    const html = render({ appRole: "dm", activeCampaignId: "campaign", campaigns: [dmCampaign], links: [link], status: { configured: true, authenticated: true, anonymous: false, connection: "live", message: "Live" } });
+    expect(html).toContain("Generate recovery code");
+    expect(html).toContain("DM view");
+    expect(html).not.toContain("Recover connection");
+    expect(html).not.toContain("Open recovery form");
+    expect(html).not.toContain(">Unlink<");
+    expect(html).toContain("The player enters it on their own installation.");
+  });
+
+  it("does not trust DM app mode when the signed-in account only has player membership", () => {
+    const html = render({ appRole: "dm", activeCampaignId: "campaign", campaigns: [{ ...dmCampaign, role: "player" }], status: { configured: true, authenticated: true, anonymous: false, connection: "live", message: "Live" } });
+    expect(html).not.toContain("Generate recovery code");
+    expect(html).not.toContain("Open recovery form");
+  });
+
+  it("explains an anonymous player identity on a DM-mode installation", () => {
+    const html = render({ appRole: "dm", activeCampaignId: "campaign", campaigns: [dmCampaign], status: { configured: true, authenticated: true, anonymous: true, connection: "live", message: "Live" } });
+    expect(html).toContain("This device is signed in as a player.");
+    expect(html).not.toContain("Generate recovery code");
+    expect(html).not.toContain("Open recovery form");
   });
 
   it("does not offer recovery codes for other campaigns or while the DM is signed out", () => {
     const links: CharacterSyncLink[] = [{ ...link, role: "dm" }];
-    expect(render({ appRole: "dm", links, activeCampaignId: "campaign" })).not.toContain("Generate recovery code");
-    expect(render({ appRole: "dm", links, activeCampaignId: "other", status: { configured: true, authenticated: true, anonymous: false, connection: "live", message: "Live" } })).not.toContain("Generate recovery code");
+    expect(render({ appRole: "dm", links, campaigns: [dmCampaign], activeCampaignId: "campaign" })).not.toContain("Generate recovery code");
+    expect(render({ appRole: "dm", links, campaigns: [dmCampaign], activeCampaignId: "other", status: { configured: true, authenticated: true, anonymous: false, connection: "live", message: "Live" } })).not.toContain("Generate recovery code");
   });
 });

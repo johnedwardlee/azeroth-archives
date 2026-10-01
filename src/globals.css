@@ -375,6 +375,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sync-linked-list > .sync-linked-row { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .sync-linked-row > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .sync-linked-row .button { flex: 0 0 auto; }
+.sync-recovery-help { margin: 0 0 8px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .sync-unlink-confirm, .dm-remove-confirm { display: grid; gap: 12px; margin-top: 14px; padding: 14px; border: 1px solid color-mix(in srgb, var(--red) 45%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--red) 5%, white); }
 .sync-unlink-confirm h3, .sync-unlink-confirm p, .dm-remove-confirm p { margin: 3px 0 0; }
 .sync-history-choice { display: flex; align-items: flex-start; gap: 9px; font-size: 11px; }

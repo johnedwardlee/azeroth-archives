@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   acknowledgeSyncEntry,
   campaignIdForIdentity,
+  canManageCampaignAsDm,
   createCharacterMutation,
   createSharedRollEvent,
   dmMutationGuard,
@@ -12,7 +13,7 @@ import {
   sanitizeCharacterForSync,
   sanitizeCharacterPatch,
 } from "./live-sync";
-import type { CharacterData, CharacterSyncLink, LiveCampaign } from "./types";
+import type { CharacterData, CharacterSyncLink, LiveCampaign, LiveSyncStatus } from "./types";
 
 const character = {
   id: "hero-id",
@@ -33,6 +34,25 @@ describe("live sync protocol", () => {
     expect(campaignIdForIdentity([{ id: "original", role: "dm" }] as LiveCampaign[], linked, "player")).toBeUndefined();
     expect(campaignIdForIdentity([{ id: "original", role: "dm" }] as LiveCampaign[], [], "dm")).toBe("original");
     expect(campaignIdForIdentity([{ id: "other", role: "player" }] as LiveCampaign[], linked, "player")).toBeUndefined();
+  });
+
+  it("prefers the cached campaign with verified DM membership even if its local role was mislabeled", () => {
+    const links = [{ characterId: "hero", campaignId: "original", role: "player" }] as CharacterSyncLink[];
+    const campaigns = [{ id: "other", role: "dm" }, { id: "original", role: "dm" }] as LiveCampaign[];
+    expect(campaignIdForIdentity(campaigns, links, "dm")).toBe("original");
+    expect(campaignIdForIdentity([], links, "dm")).toBeUndefined();
+    expect(links[0].role).toBe("player");
+  });
+
+  it("authorizes DM controls by authenticated membership rather than cached link labels", () => {
+    const status = { configured: true, authenticated: true, anonymous: false, connection: "live", message: "Live" } as LiveSyncStatus;
+    const campaigns = [{ id: "campaign", role: "dm" }] as LiveCampaign[];
+    expect(canManageCampaignAsDm("campaign", "dm", status, campaigns)).toBe(true);
+    expect(canManageCampaignAsDm("other", "dm", status, campaigns)).toBe(false);
+    expect(canManageCampaignAsDm("campaign", "player", status, campaigns)).toBe(false);
+    expect(canManageCampaignAsDm("campaign", "dm", { ...status, authenticated: false }, campaigns)).toBe(false);
+    expect(canManageCampaignAsDm("campaign", "dm", { ...status, anonymous: true }, campaigns)).toBe(false);
+    expect(canManageCampaignAsDm("campaign", "dm", status, [{ ...campaigns[0], role: "player" }])).toBe(false);
   });
   it("categorizes single-domain patches and treats mixed patches as other", () => {
     expect(mutationCategoryForPatch({ currentHp: 10, temporaryHp: 2 })).toBe("vitals");

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.5
+
+- Fix DM recovery controls for characters incorrectly cached as player links: use verified campaign membership to generate codes, never show player recovery/unlink buttons on the DM screen, and repair link roles when refreshing.
+- Prevent view-mode changes during an in-flight campaign refresh from relabeling DM links as player connections or opening a subscription for the wrong app role.
+- Distinguish opening a player recovery form from submitting it; scroll the form or newly generated DM code into view and explain player identities found in DM mode.
+
 ## 2.0.4
 
 - Preserve encrypted live-sync logins through empty startup auth events, expired sessions, and network failures; serialize credential writes and retry offline restoration without silently creating a replacement player identity.

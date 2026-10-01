@@ -136,6 +136,8 @@ Campaign initialization reacts to authenticated identity changes, including a DM
 
 DM recovery invitations bind to an existing character. The player's recovery RPC verifies both that character ID and its cached campaign ID, locks the invitation and sheet, transfers ownership, and returns the existing server state without uploading local sheet contents. Codes remain private, single-use, and expiring. When a recovered character moves to a new identity, the previous player membership is revoked only if it owns no other active sheet. Existing portraits, character IDs, queued edits, and shared roll history are preserved. This requires `202610010001_connection_recovery.sql` on the hosted project.
 
+Cached link roles are presentation metadata, not authorization. Campaign refresh writes each link's role from the signed-in account's verified server membership, never from the current app view mode. Initialization prefers the cached campaign when the account has matching membership even if old local role labels are wrong. DM code-generation controls likewise require verified DM membership and are never replaced by player recovery/unlink controls. In-flight view changes cannot open a subscription with stale role information; wrong-account states keep existing cached links and explain how to sign back in.
+
 - Synchronization is opt-in. Existing offline characters and libraries continue to work without Supabase configuration or an internet connection.
 - JSON character backups, full-library backups, DM review exports, and PDFs remain available.
 - Importing a DM review does not automatically link it.

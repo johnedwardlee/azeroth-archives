@@ -2,6 +2,7 @@ import type {
   CharacterData,
   AppRole,
   LiveCampaign,
+  LiveSyncStatus,
   CharacterSyncLink,
   CharacterMutation,
   MutationCategory,
@@ -25,10 +26,16 @@ export type DmMutationGuard = "always" | "edit-toggle" | "confirmation";
 export type LocalRollEvent = Omit<SharedRollEvent, "kind" | "id" | "campaignId" | "characterId" | "actorName" | "createdAt" | "hidden"> & { hidden?: boolean };
 
 export function campaignIdForIdentity(campaigns: LiveCampaign[], links: CharacterSyncLink[], role: AppRole) {
-  const linkedCampaignId = links.find((link) => link.role === role)?.campaignId;
+  const linkedCampaignId = links.find((link) => link.role === role)?.campaignId
+    ?? links.find((link) => campaigns.some((campaign) => campaign.id === link.campaignId && campaign.role === role))?.campaignId;
   return linkedCampaignId
     ? campaigns.find((campaign) => campaign.id === linkedCampaignId && campaign.role === role)?.id
     : campaigns.find((campaign) => campaign.role === role)?.id;
+}
+
+export function canManageCampaignAsDm(campaignId: string, role: AppRole, status: LiveSyncStatus, campaigns: LiveCampaign[]) {
+  return role === "dm" && status.configured && status.authenticated && !status.anonymous
+    && campaigns.some((campaign) => campaign.id === campaignId && campaign.role === "dm");
 }
 
 const mutationDomains: Partial<Record<keyof CharacterData, MutationCategory>> = {
