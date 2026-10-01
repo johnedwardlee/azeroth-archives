@@ -50,7 +50,7 @@ import { assertContentPack, contentPackValidationError } from "../lib/content-va
 import { normalizeCampaignProfile, parseCampaignProfileFile, serializeCampaignProfile } from "../lib/campaign-profile";
 import { evaluateCharacterReadiness } from "../lib/character-readiness";
 import { createDmReviewExport } from "../lib/dm-review";
-import { acknowledgeSyncEntry, createCharacterMutation, createSharedRollEvent, dmMutationGuard, enqueueSyncEntry, mergeRemoteCharacter, removeCharacterSyncState, type DmMutationIntent, type LocalRollEvent } from "../lib/live-sync";
+import { acknowledgeSyncEntry, campaignIdForIdentity, createCharacterMutation, createSharedRollEvent, dmMutationGuard, enqueueSyncEntry, mergeRemoteCharacter, removeCharacterSyncState, type DmMutationIntent, type LocalRollEvent } from "../lib/live-sync";
 import {
   calculateArmorClass,
   calculateEffectiveSpeed,
@@ -723,6 +723,7 @@ export function CharacterManager() {
   const syncLinksRef = useRef(syncLinks);
   const syncOutboxRef = useRef(syncOutbox);
   const liveSyncStatusRef = useRef(liveSyncStatus);
+  const liveLinkOperationActive = useRef(false);
   const syncFlushActive = useRef(false);
   const syncEntriesInFlight = useRef(new Set<string>());
   const deferredSyncTimer = useRef<number | undefined>(undefined);
@@ -951,9 +952,9 @@ export function CharacterManager() {
   }, [storeLoaded, syncLinks, syncOutbox]);
 
   useEffect(() => {
-    if (!storeLoaded || !window.azerothDesktop?.getLiveSyncStatus) return;
+    if (!storeLoaded || !liveSyncStatus.authenticated || !window.azerothDesktop?.getLiveSyncStatus || liveLinkOperationActive.current) return;
     initializeLiveSync().catch((error) => setStatus(error instanceof Error ? error.message : "Live sync could not initialize"));
-  }, [storeLoaded, appRole]);
+  }, [storeLoaded, appRole, liveSyncStatus.authenticated, liveSyncStatus.userId]);
 
   useEffect(() => {
     if (character.id === "draft") return;
@@ -1178,7 +1179,11 @@ export function CharacterManager() {
     const campaigns = await window.azerothDesktop.listLiveCampaigns();
     setLiveCampaigns(campaigns);
     const linkedCampaignId = syncLinksRef.current.find((link) => link.role === (appRole === "dm" ? "dm" : "player"))?.campaignId;
-    const campaignId = linkedCampaignId ?? campaigns.find((campaign) => campaign.role === appRole)?.id;
+    // Never replace cached links with an empty response from a different identity.
+    const campaignId = campaignIdForIdentity(campaigns, syncLinksRef.current, appRole);
+    if (!campaignId && linkedCampaignId) throw new Error(appRole === "player"
+      ? "This device needs a recovery code from the DM to reconnect its existing character."
+      : "Sign in with the original DM email to reconnect the existing campaign.");
     if (campaignId) await selectLiveCampaign(campaignId, campaigns);
     if (syncOutboxRef.current.length) await flushSyncOutbox();
   }
@@ -1193,7 +1198,7 @@ export function CharacterManager() {
     const campaign = knownCampaigns.find((entry) => entry.id === campaignId);
     const normalized = snapshots.flatMap((snapshot) => {
       try {
-        const remote = normalizeSyncedCharacter(snapshot.character);
+        const remote = normalizeSyncedCharacter({ ...snapshot.character, ...queuedCharacterPatch(snapshot.character.id, "") });
         const local = charactersRef.current.find((entry) => entry.id === remote.id);
         return [{ snapshot, character: local ? mergeRemoteCharacter(local, remote) : remote }];
       } catch (error) {
@@ -1257,33 +1262,46 @@ export function CharacterManager() {
     await selectLiveCampaign(campaignId, campaigns);
   }
 
-  async function createLiveInvitation() {
+  async function createLiveInvitation(characterId?: string) {
     if (!window.azerothDesktop || !activeLiveCampaignId) return undefined;
-    return window.azerothDesktop.createCampaignInvitation(activeLiveCampaignId, undefined, 72);
+    if (characterId && !syncLinksRef.current.some((link) => link.characterId === characterId && link.campaignId === activeLiveCampaignId && link.role === "dm")) throw new Error("Choose a character in the active campaign.");
+    return window.azerothDesktop.createCampaignInvitation(activeLiveCampaignId, characterId, 72);
   }
 
-  async function redeemLiveInvitation(code: string, characterId: string, playerName: string) {
+  async function redeemLiveInvitation(code: string, characterId: string, playerName: string, recover = false) {
     if (!window.azerothDesktop) return;
     const local = charactersRef.current.find((entry) => entry.id === characterId);
     if (!local) throw new Error("Choose a saved character to link.");
-    const result = await window.azerothDesktop.redeemCampaignInvitation(code, local, playerName);
-    const campaigns = await window.azerothDesktop.listLiveCampaigns();
-    setLiveCampaigns(campaigns);
-    const remote = mergeRemoteCharacter(local, normalizeSyncedCharacter(result.characterState));
-    setCharacters((entries) => [remote, ...entries.filter((entry) => entry.id !== remote.id)]);
-    setCharacter(remote);
-    replaceSyncLinks([{
-      characterId: remote.id,
-      campaignId: result.campaignId,
-      campaignName: campaigns.find((campaign) => campaign.id === result.campaignId)?.name ?? "Live campaign",
-      role: "player",
-      ownerUserId: liveSyncStatusRef.current.userId,
-      revision: result.revision,
-      linkedAt: new Date().toISOString(),
-      lastSyncedAt: new Date().toISOString(),
-    }, ...syncLinksRef.current.filter((link) => link.characterId !== remote.id)]);
-    await persistCharacter(remote);
-    await selectLiveCampaign(result.campaignId, campaigns);
+    const recoveryLink = recover ? syncLinksRef.current.find((link) => link.characterId === characterId && link.role === "player") : undefined;
+    if (recover && !recoveryLink) throw new Error("Choose a previously linked player character to recover.");
+    liveLinkOperationActive.current = true;
+    try {
+      const result = await window.azerothDesktop.redeemCampaignInvitation(code, local, playerName, recoveryLink?.campaignId);
+      const identity = await window.azerothDesktop.getLiveSyncStatus();
+      liveSyncStatusRef.current = identity;
+      setLiveSyncStatus(identity);
+      const campaigns = await window.azerothDesktop.listLiveCampaigns();
+      setLiveCampaigns(campaigns);
+      // Keep offline edits visible; the durable outbox will replay them after reconnect.
+      const pendingPatch = queuedCharacterPatch(result.characterId, "");
+      const remote = mergeRemoteCharacter(local, normalizeSyncedCharacter({ ...result.characterState, ...pendingPatch }));
+      setCharacters((entries) => [remote, ...entries.filter((entry) => entry.id !== remote.id)]);
+      setCharacter(remote);
+      replaceSyncLinks([{
+        characterId: remote.id,
+        campaignId: result.campaignId,
+        campaignName: campaigns.find((campaign) => campaign.id === result.campaignId)?.name ?? "Live campaign",
+        role: "player",
+        ownerUserId: identity.userId,
+        revision: result.revision,
+        linkedAt: recoveryLink?.linkedAt ?? new Date().toISOString(),
+        lastSyncedAt: new Date().toISOString(),
+      }, ...syncLinksRef.current.filter((link) => link.characterId !== remote.id)]);
+      await persistCharacter(remote);
+      await selectLiveCampaign(result.campaignId, campaigns);
+    } finally {
+      liveLinkOperationActive.current = false;
+    }
   }
 
   async function unlinkLiveCharacter(characterId: string, deleteRollHistory: boolean) {

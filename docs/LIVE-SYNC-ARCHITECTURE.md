@@ -128,6 +128,14 @@ DM installations gain a primary Party tab containing:
 
 ## Backward compatibility
 
+### Login restoration and recovery
+
+The desktop ignores empty `INITIAL_SESSION` events until its separately encrypted login is restored. Authentication events and session refreshes never delete the credential file; only explicit sign-out does. Writes are serialized and atomically renamed so a token rotation cannot race another write or resurrect a signed-out identity. Network failures keep the saved identity and retry restoration after ten seconds, without creating a new anonymous user. An expired or unreadable login stays on disk until the user signs in again, recovers, or explicitly signs out.
+
+Campaign initialization reacts to authenticated identity changes, including a DM magic-link callback, rather than only app startup or role changes. It only refreshes a cached campaign if the signed-in identity has the matching membership and role. Linking/recovery temporarily suppresses automatic initialization so a newly created anonymous identity cannot clear cached links before redemption succeeds. Refreshes overlay durable queued character patches to preserve offline edits until replay acknowledges them.
+
+DM recovery invitations bind to an existing character. The player's recovery RPC verifies both that character ID and its cached campaign ID, locks the invitation and sheet, transfers ownership, and returns the existing server state without uploading local sheet contents. Codes remain private, single-use, and expiring. When a recovered character moves to a new identity, the previous player membership is revoked only if it owns no other active sheet. Existing portraits, character IDs, queued edits, and shared roll history are preserved. This requires `202610010001_connection_recovery.sql` on the hosted project.
+
 - Synchronization is opt-in. Existing offline characters and libraries continue to work without Supabase configuration or an internet connection.
 - JSON character backups, full-library backups, DM review exports, and PDFs remain available.
 - Importing a DM review does not automatically link it.

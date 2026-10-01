@@ -57,7 +57,7 @@ declare global {
       listLiveCampaigns: () => Promise<LiveCampaign[]>;
       createLiveCampaign: (name: string) => Promise<string>;
       createCampaignInvitation: (campaignId: string, characterId?: string, validHours?: number) => Promise<{ invitationId: string; invitationCode: string; expiresAt: string }>;
-      redeemCampaignInvitation: (code: string, character: CharacterData, playerName: string) => Promise<{ campaignId: string; characterId: string; characterState: CharacterData; revision: number }>;
+      redeemCampaignInvitation: (code: string, character: CharacterData, playerName: string, recoveryCampaignId?: string) => Promise<{ campaignId: string; characterId: string; characterState: CharacterData; revision: number }>;
       listCampaignMembers: (campaignId: string) => Promise<LiveCampaignMember[]>;
       listSyncedCharacters: (campaignId: string) => Promise<SyncedCharacterSnapshot[]>;
       applyCharacterMutation: (mutation: CharacterMutation) => Promise<{ characterState: CharacterData; revision: number; updatedAt: string; wasConflict: boolean }>;

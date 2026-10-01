@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.0.4
+
+- Preserve encrypted live-sync logins through empty startup auth events, expired sessions, and network failures; serialize credential writes and retry offline restoration without silently creating a replacement player identity.
+- Automatically reconnect the existing campaign after DM magic-link sign-in; keep cached links when the signed-in account does not have access to their campaign.
+- Add character-specific DM recovery codes and a signed-out player Recover connection workflow that restores the original shared sheet, preserves portraits and queued edits, and leaves shared rolls intact.
+- Require the connection-recovery database migration to validate recovery codes against the selected character and campaign and revoke superseded device membership when it owns no other active sheet.
+
 ## 2.0.3
 
 - Audit every bundled class's level-2 advancement: prompt for Expertise, Metamagic, Fighting Styles, Blessed Warrior/Nature Warrior cantrips, and newly learned or prepared spells; automatically restore missing level-2 features and limited-use resources on existing characters.

@@ -19,11 +19,11 @@ The application code is ready to remain fully offline when no service is configu
 3. Run it once and confirm the transaction succeeds.
 4. Do not expose table write grants or add a service-role key to the app. All writes intentionally pass through the migration's authenticated RPC functions.
 
-The migration creates the campaign, membership, invitation, character, mutation-audit, and roll-event tables; enables row-level security; authorizes private campaign and party-roll Realtime channels; protects hidden DM rolls; and enforces the 30-day/500-roll retention policy. This baseline is consolidated through `v2.0.1`; a new project runs only this file.
+The migration creates the campaign, membership, invitation, character, mutation-audit, and roll-event tables; enables row-level security; authorizes private campaign and party-roll Realtime channels; protects hidden DM rolls; and enforces the 30-day/500-roll retention policy. This baseline is consolidated through `v2.0.1`. After installing it, also apply `supabase/migrations/202610010001_connection_recovery.sql` for the connection-recovery hotfix.
 
 ### Upgrade an existing v2.0 beta project
 
-Do not rerun the consolidated baseline against an existing beta database. Apply only the follow-up files that have not already succeeded, in this order:
+Do not rerun the consolidated baseline against an existing beta database. Apply only the follow-up files that have not already succeeded, in this order. This table covers upgrades through v2.0.1; then apply the connection-recovery hotfix described below:
 
 | Existing database state | Required follow-up migrations |
 | --- | --- |
@@ -34,6 +34,22 @@ Do not rerun the consolidated baseline against an existing beta database. Apply 
 | Created from the consolidated `v2.0.1` baseline | None |
 
 The follow-ups replace functions and policies without deleting campaigns, invitations, characters, accounts, or existing roll history. The shared-roll migration lets players receive visible party rolls while keeping hidden DM rolls protected. The character-unlink migration adds a confirmed archive operation; existing roll history is retained unless the player or DM explicitly chooses to delete it.
+
+### Connection-recovery hotfix (v2.0.4)
+
+Every existing project needs `supabase/migrations/202610010001_connection_recovery.sql` before distributing the recovery-enabled app. Run its complete contents in the Supabase SQL editor. It validates character and campaign scope, preserves the shared sheet, keeps the invitation single-use and time-limited, and revokes the superseded device's membership only when that identity owns no other active character in the campaign. It does not delete sheets or rolls. Older clients can still use ordinary invitations.
+
+To restore a player's lost device login:
+
+1. On the DM installation, open **Live sync**, select the existing campaign, and find the player under **Linked on this device**.
+2. Click **Generate recovery code** for that specific character. Share the code privately with that player; it expires after 72 hours.
+3. On the updated player installation, open **Live sync** and choose **Recover connection**. Select the previously linked character, confirm the player name, and enter the recovery code.
+4. Click **Recover connection**. The original server character is restored to the device, its portrait stays local, and queued offline changes replay when the connection becomes live.
+5. Confirm both sides receive a small resource change and that previous party rolls remain visible.
+
+Do not unlink, duplicate, or create a replacement character as a recovery workaround. A normal new-player invitation cannot be used in the recovery form. A code for a different character or campaign fails before changing ownership or consuming the code.
+
+Hosted checks for this hotfix: restart each app while signed in; start a player offline and reconnect without losing its identity; complete DM magic-link sign-in without a mode switch; recover a test player's expired/missing session; reject wrong-character, wrong-campaign, expired, reused, and ordinary invitation codes; verify queued edits and rolls replay once; verify the old device loses access to the recovered sheet. Local unit tests cover the client behavior and SQL security contracts, but do not replace hosted verification of the migration.
 
 ## 3. Configure GitHub release builds
 

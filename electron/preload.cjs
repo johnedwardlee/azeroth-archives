@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld("azerothDesktop", {
   listLiveCampaigns: () => ipcRenderer.invoke("live-sync:list-campaigns"),
   createLiveCampaign: (name) => ipcRenderer.invoke("live-sync:create-campaign", name),
   createCampaignInvitation: (campaignId, characterId, validHours) => ipcRenderer.invoke("live-sync:create-invitation", campaignId, characterId, validHours),
-  redeemCampaignInvitation: (code, character, playerName) => ipcRenderer.invoke("live-sync:redeem-invitation", code, character, playerName),
+  redeemCampaignInvitation: (code, character, playerName, recoveryCampaignId) => ipcRenderer.invoke("live-sync:redeem-invitation", code, character, playerName, recoveryCampaignId),
   listCampaignMembers: (campaignId) => ipcRenderer.invoke("live-sync:list-members", campaignId),
   listSyncedCharacters: (campaignId) => ipcRenderer.invoke("live-sync:list-characters", campaignId),
   applyCharacterMutation: (mutation) => ipcRenderer.invoke("live-sync:apply-mutation", mutation),

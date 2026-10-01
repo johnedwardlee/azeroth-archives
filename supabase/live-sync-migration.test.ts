@@ -6,6 +6,7 @@ const invitationFix = readFileSync(new URL("./migrations/202608250001_fix_invita
 const rollClear = readFileSync(new URL("./migrations/202608280001_clear_campaign_rolls.sql", import.meta.url), "utf8");
 const sharedRolls = readFileSync(new URL("./migrations/202608280002_shared_party_rolls.sql", import.meta.url), "utf8");
 const characterUnlink = readFileSync(new URL("./migrations/202608280003_character_unlink.sql", import.meta.url), "utf8");
+const recovery = readFileSync(new URL("./migrations/202610010001_connection_recovery.sql", import.meta.url), "utf8");
 
 describe("live-sync migration security contract", () => {
   it("keeps direct writes behind authenticated RPC functions", () => {
@@ -71,5 +72,26 @@ describe("live-sync migration security contract", () => {
       expect(sql).toContain("and existing.unlinked_at is not null");
       expect(sql).toContain("unlinked_at = null");
     }
+  });
+
+  it("binds recovery to the DM-authorized character and campaign before consuming the code", () => {
+    expect(recovery).toContain("v_invitation.character_id <> p_character_id or v_invitation.campaign_id <> p_campaign_id");
+    expect(recovery).toContain("Use a character-specific recovery code from the DM");
+    expect(recovery).toContain("Recovery code has already been used.");
+    expect(recovery).toContain("Recovery code has expired.");
+    expect(recovery).toContain("for update;");
+    expect(recovery).toContain("grant execute on function public.recover_campaign_character(text, uuid, uuid, text) to authenticated");
+    expect(recovery).toContain("revoke execute on function public.recover_campaign_character(text, uuid, uuid, text) from public, anon");
+  });
+
+  it("preserves existing sheets and rolls while revoking a superseded device when safe", () => {
+    const recoveryFunction = recovery.slice(recovery.indexOf("create or replace function public.recover_campaign_character"));
+    expect(recoveryFunction).toContain("p_invitation_code, p_character_id, '{}'::jsonb, p_player_name");
+    expect(recoveryFunction).not.toContain("state =");
+    expect(recovery).not.toContain("delete from");
+    expect(recovery).toContain("member.role = 'player'");
+    expect(recovery).toContain("other.unlinked_at is null");
+    expect(recovery).toContain("set revoked_at = now()");
+    expect(recovery).toContain("Use a player installation to redeem this code, not the campaign DM account.");
   });
 });

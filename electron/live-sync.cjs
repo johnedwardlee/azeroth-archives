@@ -46,6 +46,11 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
   let reconnectAttempts = 0;
   let subscriptionGeneration = 0;
   let subscriptionWasLive = false;
+  let sessionWriteQueue = Promise.resolve();
+  let restoringSession = false;
+  let sessionRestorePending = false;
+  let sessionRestoreTimer;
+  let sessionOperationGeneration = 0;
   let status = {
     configured: available,
     connection: available ? "signed-out" : "unconfigured",
@@ -102,28 +107,67 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
 
   async function persistSession(nextSession) {
     session = nextSession ?? undefined;
-    if (!session) {
-      await removeStoredSession();
-      return;
-    }
-    if (!safeStorage?.isEncryptionAvailable?.()) throw new Error("Windows credential encryption is unavailable; the sync session was not stored.");
-    const encrypted = safeStorage.encryptString(JSON.stringify(session));
-    await fs.mkdir(path.dirname(sessionPath()), { recursive: true });
-    await fs.writeFile(sessionPath(), JSON.stringify({ version: 1, encrypted: encrypted.toString("base64") }), "utf8");
+    const snapshot = session;
+    const write = sessionWriteQueue.then(async () => {
+      if (!snapshot) {
+        await removeStoredSession();
+        return;
+      }
+      if (!safeStorage?.isEncryptionAvailable?.()) throw new Error("Windows credential encryption is unavailable; the sync session was not stored.");
+      const encrypted = safeStorage.encryptString(JSON.stringify(snapshot));
+      await fs.mkdir(path.dirname(sessionPath()), { recursive: true });
+      const temporaryPath = `${sessionPath()}.tmp`;
+      await fs.writeFile(temporaryPath, JSON.stringify({ version: 1, encrypted: encrypted.toString("base64") }), "utf8");
+      await fs.rename(temporaryPath, sessionPath());
+    });
+    sessionWriteQueue = write.catch(() => undefined);
+    return write;
+  }
+
+  function cancelSessionRestore() {
+    if (sessionRestoreTimer) clearTimeout(sessionRestoreTimer);
+    sessionRestoreTimer = undefined;
+    sessionRestorePending = false;
   }
 
   async function restoreSession() {
+    const generation = sessionOperationGeneration;
+    restoringSession = true;
     try {
       const stored = JSON.parse(await fs.readFile(sessionPath(), "utf8"));
-      if (stored?.version !== 1 || typeof stored.encrypted !== "string" || !safeStorage?.isEncryptionAvailable?.()) return;
+      if (stored?.version !== 1 || typeof stored.encrypted !== "string") throw new Error("The saved login could not be read. Sign in again or recover the player connection.");
+      if (!safeStorage?.isEncryptionAvailable?.()) throw new Error("Windows credential encryption is unavailable. The saved login has been kept.");
       const decrypted = safeStorage.decryptString(Buffer.from(stored.encrypted, "base64"));
       const parsed = JSON.parse(decrypted);
+      if (generation !== sessionOperationGeneration) return;
       const result = await client.auth.setSession({ access_token: parsed.access_token, refresh_token: parsed.refresh_token });
-      if (result.error) throw normalizeServiceError(result.error, "The saved live-sync session could not be restored.");
-      session = result.data.session ?? undefined;
+      if (generation !== sessionOperationGeneration) return;
+      if (result.error) throw result.error;
+      if (!result.data.session) throw new Error("The saved login has expired. Sign in again or recover the player connection.");
+      cancelSessionRestore();
+      await persistSession(result.data.session);
+      if (generation === sessionOperationGeneration && status.connection !== "live") publishStatus({ connection: "connecting", message: "Live-sync identity restored." });
     } catch (error) {
-      if (error?.code !== "ENOENT") await removeStoredSession().catch(() => undefined);
+      if (generation !== sessionOperationGeneration) return;
       session = undefined;
+      if (error?.code === "ENOENT") return;
+      // A startup error must never erase the only credentials for an anonymous player.
+      const retryable = error?.name === "AuthRetryableFetchError" || error instanceof TypeError
+        || error?.status === 0 || error?.status === 408 || error?.status === 429 || error?.status >= 500
+        || /network|fetch|timeout|timed out|ECONN|ENOTFOUND/i.test(error?.message ?? "");
+      sessionRestorePending = retryable;
+      publishStatus({ connection: retryable ? "offline" : "signed-out", message: retryable
+        ? "The saved login could not reach the service. It has been kept; retrying automatically."
+        : normalizeServiceError(error, "Sign in again or ask the DM for a recovery code.").message });
+      if (retryable && !sessionRestoreTimer) {
+        sessionRestoreTimer = setTimeout(() => {
+          sessionRestoreTimer = undefined;
+          restoreSession().catch(() => undefined);
+        }, 10_000);
+        sessionRestoreTimer.unref?.();
+      }
+    } finally {
+      restoringSession = false;
     }
   }
 
@@ -133,9 +177,15 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false, flowType: "implicit" },
       realtime: { params: { eventsPerSecond: 20 } },
     });
-    client.auth.onAuthStateChange((_event, nextSession) => {
+    client.auth.onAuthStateChange((event, nextSession) => {
+      // The client starts empty before our encrypted session is restored.
+      if (!nextSession && (event === "INITIAL_SESSION" || restoringSession)) return;
       session = nextSession ?? undefined;
-      persistSession(nextSession).catch(() => publishStatus({ connection: "error", message: "The live-sync session could not be stored securely." }));
+      // Only an explicit signOut() deletes credentials. Failed refreshes keep them.
+      if (nextSession) {
+        cancelSessionRestore();
+        persistSession(nextSession).catch(() => publishStatus({ connection: "error", message: "The live-sync session could not be stored securely." }));
+      }
       if (nextSession?.access_token) {
         client.realtime.setAuth(nextSession.access_token).catch(() => {
           publishStatus({ connection: "offline", message: "Live-sync authorization changed; reconnecting automatically." });
@@ -146,7 +196,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
       publishStatus({ connection, message: connection === "live" ? status.message : nextSession ? "Live-sync identity restored." : "Signed out of live sync." });
     });
     await restoreSession();
-    return publishStatus({ connection: session ? "connecting" : "signed-out", message: session ? "Live-sync identity restored." : "Sign in or link a character to begin live sync." });
+    return status;
   }
 
   async function requestDmMagicLink(email) {
@@ -168,18 +218,25 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     const accessToken = params.get("access_token");
     const refreshToken = params.get("refresh_token");
     if (!accessToken || !refreshToken) throw new Error("The magic link did not include a complete session.");
+    sessionOperationGeneration += 1;
+    cancelSessionRestore();
     const result = await sync.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
     if (result.error) throw normalizeServiceError(result.error, "The DM sign-in session could not be completed.");
+    if (!result.data.session) throw new Error("The DM sign-in did not return a complete session. Request a new magic link.");
+    cancelSessionRestore();
     await persistSession(result.data.session);
-    return publishStatus({ connection: "connecting", message: "DM sign-in complete." });
+    return status.connection === "live" ? status : publishStatus({ connection: "connecting", message: "DM sign-in complete." });
   }
 
   async function ensureAnonymousPlayer() {
     const sync = requireClient();
     if (session?.user?.is_anonymous) return session;
     if (session?.user) throw new Error("Sign out of the DM live-sync account before linking a player character on this installation.");
+    if (restoringSession || sessionRestorePending) throw new Error("The saved player login is reconnecting. Wait for it to finish before recovering or linking a character.");
+    sessionOperationGeneration += 1;
     const result = await sync.auth.signInAnonymously();
     if (result.error) throw normalizeServiceError(result.error, "The player device identity could not be created.");
+    if (!result.data.session) throw new Error("The player device identity could not be created. Try again.");
     await persistSession(result.data.session);
     publishStatus({ connection: "connecting", message: "Player device identity created." });
     return result.data.session;
@@ -187,6 +244,8 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
 
   async function signOut() {
     const sync = requireClient();
+    sessionOperationGeneration += 1;
+    cancelSessionRestore();
     desiredSubscription = undefined;
     subscriptionWasLive = false;
     subscriptionGeneration += 1;
@@ -240,10 +299,15 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     return invitation ? { invitationId: invitation.invitation_id, invitationCode: invitation.invitation_code, expiresAt: invitation.expires_at } : undefined;
   }
 
-  async function redeemInvitation(code, character, playerName) {
+  async function redeemInvitation(code, character, playerName, recoveryCampaignId) {
     const sync = requireClient();
     await ensureAnonymousPlayer();
-    const result = await sync.rpc("redeem_campaign_invitation", {
+    const result = recoveryCampaignId ? await sync.rpc("recover_campaign_character", {
+      p_invitation_code: code,
+      p_character_id: character.id,
+      p_campaign_id: recoveryCampaignId,
+      p_player_name: playerName,
+    }) : await sync.rpc("redeem_campaign_invitation", {
       p_invitation_code: code,
       p_character_id: character.id,
       p_character_state: character,
@@ -251,7 +315,9 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     });
     if (result.error) throw normalizeServiceError(result.error, "The campaign invitation could not be redeemed.");
     const redeemed = Array.isArray(result.data) ? result.data[0] : result.data;
-    return redeemed ? { campaignId: redeemed.campaign_id, characterId: redeemed.character_id, characterState: redeemed.character_state, revision: Number(redeemed.revision) } : undefined;
+    if (!redeemed) throw new Error("The service did not return a character. Reconnect to the campaign and try again.");
+    if (redeemed.character_id !== character.id || (recoveryCampaignId && redeemed.campaign_id !== recoveryCampaignId)) throw new Error("The code does not match the selected character and campaign.");
+    return { campaignId: redeemed.campaign_id, characterId: redeemed.character_id, characterState: redeemed.character_state, revision: Number(redeemed.revision) };
   }
 
   async function listMembers(campaignId) {

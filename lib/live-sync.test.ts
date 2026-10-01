@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   acknowledgeSyncEntry,
+  campaignIdForIdentity,
   createCharacterMutation,
   createSharedRollEvent,
   dmMutationGuard,
@@ -11,7 +12,7 @@ import {
   sanitizeCharacterForSync,
   sanitizeCharacterPatch,
 } from "./live-sync";
-import type { CharacterData } from "./types";
+import type { CharacterData, CharacterSyncLink, LiveCampaign } from "./types";
 
 const character = {
   id: "hero-id",
@@ -24,6 +25,15 @@ const character = {
 } as CharacterData;
 
 describe("live sync protocol", () => {
+  it("restores only campaigns accessible to the signed-in identity and current role", () => {
+    const linked = [{ characterId: "hero", campaignId: "original", role: "player" }] as CharacterSyncLink[];
+    const campaigns = [{ id: "other", role: "player" }, { id: "original", role: "player" }] as LiveCampaign[];
+    expect(campaignIdForIdentity(campaigns, linked, "player")).toBe("original");
+    expect(campaignIdForIdentity([], linked, "player")).toBeUndefined();
+    expect(campaignIdForIdentity([{ id: "original", role: "dm" }] as LiveCampaign[], linked, "player")).toBeUndefined();
+    expect(campaignIdForIdentity([{ id: "original", role: "dm" }] as LiveCampaign[], [], "dm")).toBe("original");
+    expect(campaignIdForIdentity([{ id: "other", role: "player" }] as LiveCampaign[], linked, "player")).toBeUndefined();
+  });
   it("categorizes single-domain patches and treats mixed patches as other", () => {
     expect(mutationCategoryForPatch({ currentHp: 10, temporaryHp: 2 })).toBe("vitals");
     expect(mutationCategoryForPatch({ spellSlots: {} })).toBe("resource");

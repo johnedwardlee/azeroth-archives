@@ -75,4 +75,15 @@ describe("live-sync user interface contract", () => {
     expect(preload).toContain('ipcRenderer.invoke("live-sync:unlink-character"');
     expect(main).toContain('ipcMain.handle("live-sync:unlink-character"');
   });
+
+  it("initializes campaigns after sign-in, guards recovery races, and preserves queued edits", () => {
+    expect(manager).toContain("[storeLoaded, appRole, liveSyncStatus.authenticated, liveSyncStatus.userId]");
+    expect(manager).toContain("liveLinkOperationActive.current");
+    expect(manager).toContain("campaignIdForIdentity(campaigns, syncLinksRef.current, appRole)");
+    expect(manager).toContain('queuedCharacterPatch(snapshot.character.id, "")');
+    expect(manager).toContain("recoveryLink?.campaignId");
+    expect(syncPanel).toContain("Generate recovery code");
+    expect(preload).toContain("playerName, recoveryCampaignId)");
+    expect(main).toContain("playerName, recoveryCampaignId)");
+  });
 });
