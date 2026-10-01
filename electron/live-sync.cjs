@@ -260,8 +260,9 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
 
   async function listCampaigns() {
     const sync = requireClient();
-    requireSession();
-    const memberships = await sync.from("campaign_members").select("campaign_id, role, joined_at").is("revoked_at", null);
+    const current = requireSession();
+    // RLS lets a DM read the whole party. Only their own row defines their role.
+    const memberships = await sync.from("campaign_members").select("campaign_id, role, joined_at").eq("user_id", current.user.id).is("revoked_at", null);
     if (memberships.error) throw normalizeServiceError(memberships.error, "Campaign memberships could not be loaded.");
     const ids = (memberships.data ?? []).map((entry) => entry.campaign_id);
     if (!ids.length) return [];

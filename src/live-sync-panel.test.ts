@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { formatInvitationCodeInput, LiveSyncPanel } from "./live-sync-panel";
+import { campaignOptionLabel, formatInvitationCodeInput, LiveSyncPanel } from "./live-sync-panel";
 import type { CharacterData, CharacterSyncLink, LiveCampaign } from "../lib/types";
 
 describe("formatInvitationCodeInput", () => {
@@ -22,6 +22,13 @@ describe("connection recovery controls", () => {
   const character = { id: "hero", name: "Jaina", playerName: "Player", level: 2, className: "Mage" } as CharacterData;
   const link = { characterId: "hero", campaignId: "campaign", campaignName: "Azeroth", role: "player", revision: 3 } as CharacterSyncLink;
   const dmCampaign = { id: "campaign", name: "Azeroth", role: "dm" } as LiveCampaign;
+  it("distinguishes same-name campaigns by their IDs without relabeling unique names", () => {
+    const original = { ...dmCampaign, id: "fa03dcda-fa2c-4434-a194-296e11802259" };
+    const empty = { ...dmCampaign, id: "3ee990a8-f9c8-422b-b616-195be03166b9" };
+    expect(campaignOptionLabel(original, [original, empty])).toBe("Azeroth · fa03dcda");
+    expect(campaignOptionLabel(empty, [original, empty])).toBe("Azeroth · 3ee990a8");
+    expect(campaignOptionLabel(original, [original])).toBe("Azeroth");
+  });
   function render(overrides: Partial<ComponentProps<typeof LiveSyncPanel>> = {}) {
     return renderToStaticMarkup(createElement(LiveSyncPanel, {
       status: { configured: true, authenticated: false, anonymous: false, connection: "signed-out", message: "Signed out" },

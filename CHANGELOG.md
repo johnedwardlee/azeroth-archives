@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.6
+
+- Fix populated campaigns disappearing from the DM selector: filter campaign membership lookups to the signed-in user, so player rows visible to the DM cannot overwrite the DM's own role.
+- Distinguish campaigns with identical names using a short campaign ID in the selector.
+
 ## 2.0.5
 
 - Fix DM recovery controls for characters incorrectly cached as player links: use verified campaign membership to generate codes, never show player recovery/unlink buttons on the DM screen, and repair link roles when refreshing.

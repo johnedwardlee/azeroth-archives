@@ -16,6 +16,7 @@ const { configured, createLiveSync, normalizeServiceError, sessionSummary } = re
     status: () => { connection: string; authenticated: boolean; userId?: string };
     handleAuthCallback: (url: string) => Promise<unknown>;
     redeemInvitation: (code: string, character: Record<string, unknown>, playerName: string, campaignId?: string) => Promise<unknown>;
+    listCampaigns: () => Promise<Array<{ id: string; name: string; role: string }>>;
   };
   normalizeServiceError: (error: unknown, fallback?: string) => Error;
   sessionSummary: (session: unknown) => { authenticated: boolean; anonymous: boolean; userId?: string; email?: string };
@@ -116,7 +117,7 @@ describe("saved login and player recovery", () => {
   const fixtures: Array<{ directory: string; sync: ReturnType<typeof createLiveSync> }> = [];
   const playerSession = { access_token: "test-access", refresh_token: "test-refresh", user: { id: "player", is_anonymous: true } };
 
-  function fixture(storedSession: unknown = playerSession) {
+  function fixture(storedSession: unknown = playerSession, restoredSession = playerSession) {
     const directory = mkdtempSync(join(tmpdir(), "azeroth-session-test-"));
     const sessionFile = join(directory, "azeroth-archives-sync-session.json");
     if (storedSession) writeFileSync(sessionFile, JSON.stringify({ version: 1, encrypted: Buffer.from(JSON.stringify(storedSession)).toString("base64") }));
@@ -125,8 +126,8 @@ describe("saved login and player recovery", () => {
       auth: {
         onAuthStateChange: (callback: typeof notify) => { notify = callback; callback("INITIAL_SESSION", null); },
         setSession: vi.fn(async () => {
-          notify("SIGNED_IN", playerSession);
-          return { data: { session: playerSession }, error: null as unknown };
+          notify("SIGNED_IN", restoredSession);
+          return { data: { session: restoredSession }, error: null as unknown };
         }),
         signInAnonymously: vi.fn(async () => {
           notify("SIGNED_IN", playerSession);
@@ -137,6 +138,7 @@ describe("saved login and player recovery", () => {
       realtime: { setAuth: async () => undefined },
       removeChannel: async () => undefined,
       rpc: vi.fn(async (_name: string, _parameters: unknown) => ({ data: [{ campaign_id: "campaign", character_id: "hero", character_state: { id: "hero", currentHp: 7 }, revision: 42 }], error: null })),
+      from: vi.fn((_table: string): unknown => undefined),
     };
     const sync = createLiveSync({
       getUserDataPath: () => directory,
@@ -163,6 +165,58 @@ describe("saved login and player recovery", () => {
     notify("INITIAL_SESSION", null);
     expect(sync.status()).toMatchObject({ authenticated: true, userId: "player" });
     expect(existsSync(sessionFile)).toBe(true);
+  });
+
+  it("uses the DM's own membership even when RLS exposes all four player rows", async () => {
+    const dmSession = { ...playerSession, user: { id: "dm", is_anonymous: false } };
+    const { sync, client } = fixture(dmSession, dmSession);
+    const visibleMemberships = [
+      { campaign_id: "original", user_id: "dm", role: "dm", revoked_at: null },
+      { campaign_id: "empty-duplicate", user_id: "dm", role: "dm", revoked_at: null },
+      ...[1, 2, 3, 4].map((index) => ({ campaign_id: "original", user_id: `player-${index}`, role: "player", revoked_at: null })),
+      { campaign_id: "revoked", user_id: "dm", role: "dm", revoked_at: "2026-10-01" },
+    ];
+    const membershipQuery = {
+      select: vi.fn(() => membershipQuery),
+      eq: vi.fn((_column: string, _value: string) => membershipQuery),
+      is: vi.fn(async () => {
+        const userId = membershipQuery.eq.mock.calls.at(-1)?.[1];
+        return { data: visibleMemberships.filter((row) => (!userId || row.user_id === userId) && !row.revoked_at), error: null };
+      }),
+    };
+    const campaignQuery = {
+      select: vi.fn(() => campaignQuery),
+      in: vi.fn(async (_column: string, ids: string[]) => ({
+        data: ids.map((id) => ({ id, name: "Warcraft: Last Days of Peace" })), error: null,
+      })),
+    };
+    client.from.mockImplementation((table) => table === "campaign_members" ? membershipQuery : campaignQuery);
+    await sync.initialize();
+    const campaigns = await sync.listCampaigns();
+    expect(membershipQuery.eq).toHaveBeenCalledWith("user_id", "dm");
+    expect(membershipQuery.is).toHaveBeenCalledWith("revoked_at", null);
+    expect(campaignQuery.in).toHaveBeenCalledWith("id", ["original", "empty-duplicate"]);
+    expect(campaigns).toEqual([
+      expect.objectContaining({ id: "original", role: "dm" }),
+      expect.objectContaining({ id: "empty-duplicate", role: "dm" }),
+    ]);
+  });
+
+  it("does not let other memberships grant a player DM access", async () => {
+    const { sync, client } = fixture();
+    const membershipQuery = {
+      select: vi.fn(() => membershipQuery),
+      eq: vi.fn((_column: string, _value: string) => membershipQuery),
+      is: vi.fn(async () => ({ data: [{ campaign_id: "original", role: "player" }], error: null })),
+    };
+    const campaignQuery = {
+      select: vi.fn(() => campaignQuery),
+      in: vi.fn(async () => ({ data: [{ id: "original", name: "Azeroth" }], error: null })),
+    };
+    client.from.mockImplementation((table) => table === "campaign_members" ? membershipQuery : campaignQuery);
+    await sync.initialize();
+    expect(await sync.listCampaigns()).toEqual([expect.objectContaining({ id: "original", role: "player" })]);
+    expect(membershipQuery.eq).toHaveBeenCalledWith("user_id", "player");
   });
 
   it("keeps credentials through offline startup and retries without creating another player", async () => {

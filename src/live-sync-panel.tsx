@@ -29,6 +29,12 @@ export function formatInvitationCodeInput(value: string) {
     ?.join("-") ?? "";
 }
 
+export function campaignOptionLabel(campaign: LiveCampaign, campaigns: LiveCampaign[]) {
+  return campaigns.filter((entry) => entry.name === campaign.name).length > 1
+    ? `${campaign.name} · ${campaign.id.slice(0, 8)}`
+    : campaign.name;
+}
+
 export function LiveSyncPanel({ status, appRole, characters, links, campaigns, activeCampaignId, onClose, onRequestDmLink, onCreateCampaign, onSelectCampaign, onCreateInvitation, onRedeemInvitation, onUnlinkCharacter, onSignOut }: Props) {
   const [email, setEmail] = useState("");
   const [campaignName, setCampaignName] = useState("");
@@ -101,7 +107,7 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
 
       {status.configured && appRole === "dm" && status.authenticated && !status.anonymous && <>
         <section className="sync-form"><div><span className="eyebrow">DM campaigns</span><h3>Campaign connection</h3></div>
-          {campaigns.length > 0 && <label><span>Active live campaign</span><select value={activeCampaignId ?? ""} onChange={(event) => run(() => onSelectCampaign(event.target.value), "Live campaign selected.")}><option value="">Choose a campaign</option>{campaigns.filter((campaign) => campaign.role === "dm").map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select></label>}
+          {campaigns.length > 0 && <label><span>Active live campaign</span><select value={activeCampaignId ?? ""} onChange={(event) => run(() => onSelectCampaign(event.target.value), "Live campaign selected.")}><option value="">Choose a campaign</option>{campaigns.filter((campaign) => campaign.role === "dm").map((campaign) => <option key={campaign.id} value={campaign.id}>{campaignOptionLabel(campaign, campaigns)}</option>)}</select></label>}
           <div className="sync-inline-form"><input value={campaignName} onChange={(event) => setCampaignName(event.target.value)} placeholder="New campaign name" /><button className="button button-outline" disabled={busy || !campaignName.trim()} onClick={() => run(async () => { await onCreateCampaign(campaignName); setCampaignName(""); }, "Campaign created.")}><Plus size={14} />Create</button></div>
         </section>
         {activeCampaignId && <section className="sync-form"><div><span className="eyebrow">Player invitation</span><h3>Generate a single-use code</h3><p>The code expires after 72 hours and links one player character.</p></div>
