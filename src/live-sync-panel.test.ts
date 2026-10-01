@@ -33,7 +33,7 @@ describe("connection recovery controls", () => {
     return renderToStaticMarkup(createElement(LiveSyncPanel, {
       status: { configured: true, authenticated: false, anonymous: false, connection: "signed-out", message: "Signed out" },
       appRole: "player", characters: [character], links: [link], campaigns: [],
-      onClose: () => undefined, onRequestDmLink: async () => undefined, onCreateCampaign: async () => undefined,
+      onClose: () => undefined, onReconnect: async () => undefined, onRequestDmLink: async () => undefined, onCreateCampaign: async () => undefined,
       onSelectCampaign: async () => undefined, onCreateInvitation: async () => undefined, onRedeemInvitation: async () => undefined,
       onUnlinkCharacter: async () => undefined, onSignOut: async () => undefined, ...overrides,
     }));
@@ -46,6 +46,24 @@ describe("connection recovery controls", () => {
     expect(html).toContain('<option value="hero" selected="">Jaina');
     expect(html).toContain("without uploading a replacement");
     expect(html).not.toContain("Sign in by email");
+    expect(html).toContain("Reconnect to your campaign");
+    expect(html).toContain("Enter DM recovery code");
+  });
+
+  it.each(["offline", "error", "connecting"] as const)("exposes reconnect and existing-character recovery while %s with a saved identity", (connection) => {
+    const html = render({ status: { configured: true, authenticated: true, anonymous: true, connection, message: "Connection unavailable" } });
+    expect(html).toContain(">Reconnect</button>");
+    expect(html).toContain("Enter DM recovery code");
+    expect(html).toContain("Previously linked character");
+    expect(html).toContain('<option value="hero" selected="">Jaina');
+    expect(html).toContain("Your local sheet, character links, and queued changes are kept.");
+  });
+
+  it("keeps reconnect and recovery access available even when the player is live", () => {
+    const html = render({ status: { configured: true, authenticated: true, anonymous: true, connection: "live", message: "Live" } });
+    expect(html).toContain(">Reconnect</button>");
+    expect(html).toContain("Enter DM recovery code");
+    expect(html).toContain("Open recovery form");
   });
 
   it("keeps new-player invitation linking available without showing recovery by default", () => {

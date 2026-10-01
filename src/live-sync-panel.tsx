@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { Cloud, Copy, Link2, LogOut, Mail, Plus, Radio, Unlink, X } from "lucide-react";
+import { Cloud, Copy, Link2, LogOut, Mail, Plus, Radio, RefreshCw, Unlink, X } from "lucide-react";
 import type { AppRole, CharacterData, CharacterSyncLink, LiveCampaign, LiveSyncStatus } from "../lib/types";
 import { canManageCampaignAsDm } from "../lib/live-sync";
 
@@ -11,6 +11,7 @@ type Props = {
   campaigns: LiveCampaign[];
   activeCampaignId?: string;
   onClose: () => void;
+  onReconnect: () => Promise<void>;
   onRequestDmLink: (email: string) => Promise<void>;
   onCreateCampaign: (name: string) => Promise<void>;
   onSelectCampaign: (campaignId: string) => Promise<void>;
@@ -35,14 +36,14 @@ export function campaignOptionLabel(campaign: LiveCampaign, campaigns: LiveCampa
     : campaign.name;
 }
 
-export function LiveSyncPanel({ status, appRole, characters, links, campaigns, activeCampaignId, onClose, onRequestDmLink, onCreateCampaign, onSelectCampaign, onCreateInvitation, onRedeemInvitation, onUnlinkCharacter, onSignOut }: Props) {
+export function LiveSyncPanel({ status, appRole, characters, links, campaigns, activeCampaignId, onClose, onReconnect, onRequestDmLink, onCreateCampaign, onSelectCampaign, onCreateInvitation, onRedeemInvitation, onUnlinkCharacter, onSignOut }: Props) {
   const [email, setEmail] = useState("");
   const [campaignName, setCampaignName] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [playerName, setPlayerName] = useState(characters.find((entry) => links.some((link) => link.characterId === entry.id && link.role === "player"))?.playerName ?? "");
   const [characterId, setCharacterId] = useState(characters.find((entry) => !links.some((link) => link.characterId === entry.id))?.id ?? "");
   const playerLinks = links.filter((link) => link.role === "player");
-  const [recoverConnection, setRecoverConnection] = useState(appRole === "player" && playerLinks.length > 0 && !status.authenticated);
+  const [recoverConnection, setRecoverConnection] = useState(appRole === "player" && playerLinks.length > 0 && status.connection !== "live");
   const [recoveryCharacterId, setRecoveryCharacterId] = useState(playerLinks[0]?.characterId ?? "");
   const [generatedInvite, setGeneratedInvite] = useState<{ invitationCode: string; expiresAt: string }>();
   const [generatedForCharacterId, setGeneratedForCharacterId] = useState<string>();
@@ -94,6 +95,9 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
     <section className="sync-panel" role="dialog" aria-modal="true" aria-labelledby="sync-panel-title">
       <div className="sync-panel-heading"><div><span className="eyebrow">Private campaign connection</span><h2 id="sync-panel-title">Live sync</h2><p>Characters remain available locally while linked updates are shared with the campaign DM.</p></div><button className="icon-button" aria-label="Close live sync" onClick={onClose}><X size={18} /></button></div>
       <div className={`sync-connection sync-${status.connection}`}><span><Radio size={16} /></span><div><strong>{status.connection.replace("-", " ")}</strong><small>{status.message}</small></div></div>
+      {feedback && <p className="sync-feedback" role="status">{feedback}</p>}
+
+      {status.configured && <section className="sync-form" aria-label="Reconnect campaign"><div><span className="eyebrow">Connection tools</span><h3>Reconnect to your campaign</h3><p>Retry the saved login and refresh the live connection. Your local sheet, character links, and queued changes are kept. No invitation code is needed if the saved login still works.</p></div><button type="button" className="button button-primary" disabled={busy} onClick={() => run(onReconnect, "Campaign reconnected. Live updates are active.")}><RefreshCw size={15} />{busy ? "Working…" : "Reconnect"}</button>{appRole === "player" && playerLinks.length > 0 && <button type="button" className="button button-outline" disabled={busy} onClick={() => openPlayerRecovery()}>Enter DM recovery code</button>}</section>}
 
       {!status.configured && <div className="sync-setup-note"><Cloud size={20} /><div><strong>This build is not connected to a campaign service.</strong><p>Add the Supabase project URL and publishable key to the release configuration before distributing the v2.0 beta.</p></div></div>}
 
@@ -134,7 +138,6 @@ export function LiveSyncPanel({ status, appRole, characters, links, campaigns, a
       })}</section>}
       {generatedInvite && appRole === "dm" && <section className="sync-form" ref={generatedCodeRef}><h3>{generatedForCharacterId ? `Recovery code for ${characters.find((entry) => entry.id === generatedForCharacterId)?.name ?? "character"}` : "Player invitation"}</h3>{generatedForCharacterId && <p>This single-use code transfers this existing character’s connection to the player’s device. Keep it private. It does not replace the sheet or erase shared rolls.</p>}<div className="invite-code"><strong>{generatedInvite.invitationCode}</strong><button aria-label="Copy invitation code" onClick={() => navigator.clipboard.writeText(generatedInvite.invitationCode)}><Copy size={14} /></button><small>Expires {new Date(generatedInvite.expiresAt).toLocaleString()}</small></div></section>}
       {unlinkTarget && <section className="sync-unlink-confirm" aria-label="Confirm character unlink"><div><span className="eyebrow">Unlink character</span><h3>{characters.find((entry) => entry.id === unlinkTarget.characterId)?.name ?? "This character"}</h3><p>The character will leave <strong>{unlinkTarget.campaignName}</strong>, but its complete local sheet will stay on this device. The DM will no longer receive changes.</p></div><label className="sync-history-choice"><input type="checkbox" checked={deleteRollHistory} onChange={(event) => setDeleteRollHistory(event.target.checked)} /><span><strong>Delete shared roll history</strong><small>Otherwise this character’s previous shared rolls remain in the campaign history.</small></span></label><div className="sync-confirm-actions"><button className="button button-quiet" disabled={busy} onClick={() => setUnlinkTarget(undefined)}>Cancel</button><button className="button button-danger" disabled={busy} onClick={() => run(async () => { await onUnlinkCharacter(unlinkTarget.characterId, deleteRollHistory); setUnlinkTarget(undefined); }, "Character unlinked. The local sheet was kept.")}><Unlink size={14} />Confirm unlink</button></div></section>}
-      {feedback && <p className="sync-feedback" role="status">{feedback}</p>}
       {status.authenticated && appRole === "dm" && <button className="button button-quiet sync-signout" disabled={busy} onClick={() => run(onSignOut, "Signed out.")}><LogOut size={14} />Sign out of live sync</button>}
     </section>
   </div>;

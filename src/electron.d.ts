@@ -52,6 +52,7 @@ declare global {
       installUpdate: () => Promise<void>;
       onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
       getLiveSyncStatus: () => Promise<LiveSyncStatus>;
+      reconnectLiveSync: () => Promise<LiveSyncStatus>;
       requestDmMagicLink: (email: string) => Promise<LiveSyncStatus>;
       signOutLiveSync: () => Promise<LiveSyncStatus>;
       listLiveCampaigns: () => Promise<LiveCampaign[]>;

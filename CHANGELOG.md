@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.7
+
+- Keep campaign connection controls visible in narrow player windows, with a labeled connection/recovery entry in the roster.
+- Add a Reconnect button that retries the saved encrypted login and rebuilds the live campaign connection without signing out, creating a replacement identity, unlinking sheets, or discarding queued changes.
+- Make DM recovery-code entry prominent for disconnected players, and keep connection feedback near the top of the panel.
+
 ## 2.0.6
 
 - Fix populated campaigns disappearing from the DM selector: filter campaign membership lookups to the signed-in user, so player rows visible to the DM cannot overwrite the DM's own role.

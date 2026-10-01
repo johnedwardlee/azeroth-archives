@@ -48,6 +48,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
   let subscriptionWasLive = false;
   let sessionWriteQueue = Promise.resolve();
   let restoringSession = false;
+  let connectionRetryActive = false;
   let sessionRestorePending = false;
   let sessionRestoreTimer;
   let sessionOperationGeneration = 0;
@@ -150,7 +151,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     } catch (error) {
       if (generation !== sessionOperationGeneration) return;
       session = undefined;
-      if (error?.code === "ENOENT") return;
+      if (error?.code === "ENOENT") return publishStatus({ connection: "signed-out", message: "No saved live-sync login. Players can link a character or enter a DM recovery code; DMs can sign in by email." });
       // A startup error must never erase the only credentials for an anonymous player.
       const retryable = error?.name === "AuthRetryableFetchError" || error instanceof TypeError
         || error?.status === 0 || error?.status === 408 || error?.status === 429 || error?.status >= 500
@@ -206,6 +207,24 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     const result = await sync.auth.signInWithOtp({ email: normalized, options: { emailRedirectTo: config.authRedirectUrl, shouldCreateUser: true } });
     if (result.error) throw normalizeServiceError(result.error, "The DM sign-in link could not be requested.");
     return publishStatus({ connection: "signed-out", message: `Magic link sent to ${normalized}.` });
+  }
+
+  async function retryConnection() {
+    requireClient();
+    if (restoringSession || connectionRetryActive) throw new Error("The saved login is already reconnecting. Try again in a moment.");
+    connectionRetryActive = true;
+    try {
+      // Retry the same encrypted identity, never sign out or create a replacement player.
+      if (!session?.user) {
+        cancelSessionRestore();
+        await sessionWriteQueue;
+        await restoreSession();
+      }
+      if (!session?.user) return status;
+      return publishStatus({ connection: "connecting", message: "Saved login ready; reconnecting the campaign." });
+    } finally {
+      connectionRetryActive = false;
+    }
   }
 
   async function handleAuthCallback(callbackUrl) {
@@ -534,6 +553,7 @@ function createLiveSync({ getUserDataPath, safeStorage, config, onEvent = () => 
     sessionPath,
     initialize,
     status: () => status,
+    retryConnection,
     requestDmMagicLink,
     handleAuthCallback,
     ensureAnonymousPlayer,

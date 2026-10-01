@@ -96,4 +96,17 @@ describe("live-sync user interface contract", () => {
     expect(syncPanel).toContain('scrollIntoView({ behavior: "smooth", block: "start" })');
     expect(syncPanel).toContain('scrollIntoView({ behavior: "smooth", block: "nearest" })');
   });
+
+  it("wires manual reconnect through the desktop bridge and keeps narrow-window access", () => {
+    const styles = readFileSync(new URL("./globals.css", import.meta.url), "utf8");
+    expect(preload).toContain('ipcRenderer.invoke("live-sync:reconnect")');
+    expect(main).toContain('ipcMain.handle("live-sync:reconnect", () => liveSync.retryConnection())');
+    expect(manager).toContain("onReconnect={reconnectLiveSync}");
+    expect(manager).toContain("await window.azerothDesktop.reconnectLiveSync()");
+    expect(manager).toContain("await initializeLiveSync();");
+    expect(manager).toContain('aria-label="Open campaign connection and recovery"');
+    expect(manager).toContain('className="button button-outline roster-connection-button"');
+    expect(styles).toContain(".topbar-actions .live-sync-button { display: inline-flex;");
+    expect(styles.indexOf(".topbar-actions .live-sync-button { display: inline-flex;")).toBeGreaterThan(styles.indexOf(".topbar-actions .button-quiet, .topbar-actions .button-outline"));
+  });
 });

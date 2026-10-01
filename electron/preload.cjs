@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("azerothDesktop", {
     return () => ipcRenderer.removeListener("updates:status", listener);
   },
   getLiveSyncStatus: () => ipcRenderer.invoke("live-sync:status"),
+  reconnectLiveSync: () => ipcRenderer.invoke("live-sync:reconnect"),
   requestDmMagicLink: (email) => ipcRenderer.invoke("live-sync:request-dm-link", email),
   signOutLiveSync: () => ipcRenderer.invoke("live-sync:sign-out"),
   listLiveCampaigns: () => ipcRenderer.invoke("live-sync:list-campaigns"),

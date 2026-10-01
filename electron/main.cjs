@@ -41,6 +41,7 @@ ipcMain.handle("storage:save-campaign-state", (_event, campaignState) => storage
 ipcMain.handle("storage:save-sync-state", (_event, syncState) => storage.saveSyncState(syncState));
 ipcMain.handle("storage:replace", (_event, replacement) => storage.replaceStore(replacement));
 ipcMain.handle("live-sync:status", () => liveSync.status());
+ipcMain.handle("live-sync:reconnect", () => liveSync.retryConnection());
 ipcMain.handle("live-sync:request-dm-link", (_event, email) => liveSync.requestDmMagicLink(email));
 ipcMain.handle("live-sync:sign-out", () => liveSync.signOut());
 ipcMain.handle("live-sync:list-campaigns", () => liveSync.listCampaigns());

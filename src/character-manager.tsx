@@ -1191,6 +1191,25 @@ export function CharacterManager() {
     if (syncOutboxRef.current.length) await flushSyncOutbox();
   }
 
+  async function reconnectLiveSync() {
+    if (!window.azerothDesktop?.reconnectLiveSync) throw new Error("Reconnect is available in the desktop app. Install the latest release to use it.");
+    if (liveLinkOperationActive.current) throw new Error("A connection operation is already in progress. Try again in a moment.");
+    liveLinkOperationActive.current = true;
+    try {
+      const nextStatus = await window.azerothDesktop.reconnectLiveSync();
+      liveSyncStatusRef.current = nextStatus;
+      setLiveSyncStatus(nextStatus);
+      if (!nextStatus.authenticated) throw new Error(nextStatus.message);
+      await initializeLiveSync();
+      if (liveSyncStatusRef.current.connection !== "live") throw new Error(appRoleRef.current === "player"
+        ? "No active player campaign was found. Enter your DM's invitation or recovery code below. Your local sheet has been kept."
+        : "Select your existing campaign, or sign in with the original DM email.");
+      setStatus("Live campaign reconnected");
+    } finally {
+      liveLinkOperationActive.current = false;
+    }
+  }
+
   async function refreshLiveCampaign(campaignId: string, knownCampaigns = liveCampaigns) {
     if (!window.azerothDesktop) return;
     const campaign = knownCampaigns.find((entry) => entry.id === campaignId);
@@ -1253,7 +1272,9 @@ export function CharacterManager() {
     await refreshLiveCampaign(campaignId, knownCampaigns);
     if (campaign.role !== appRoleRef.current) return;
     const playerCharacterId = campaign.role === "player" ? syncLinksRef.current.find((link) => link.campaignId === campaignId && link.role === "player")?.characterId : undefined;
-    await window.azerothDesktop.subscribeLiveCampaign(campaignId, { role: campaign.role, displayName: campaign.role === "dm" ? "Dungeon Master" : characterRef.current.playerName || "Player" }, playerCharacterId);
+    const connectedStatus = await window.azerothDesktop.subscribeLiveCampaign(campaignId, { role: campaign.role, displayName: campaign.role === "dm" ? "Dungeon Master" : characterRef.current.playerName || "Player" }, playerCharacterId);
+    liveSyncStatusRef.current = connectedStatus;
+    setLiveSyncStatus(connectedStatus);
     if (campaign.role === "dm") setTab("party");
   }
 
@@ -2586,7 +2607,7 @@ export function CharacterManager() {
           <span>Offline Warcraft 5E character manager</span>
         </div>
         <div className="topbar-actions">
-          <button className={`button button-quiet live-sync-button sync-${liveSyncStatus.connection}`} onClick={() => setShowLiveSync(true)}><Cloud size={16} /><span>Live sync</span>{syncOutbox.length > 0 && <b>{syncOutbox.length}</b>}</button>
+          <button className={`button button-quiet live-sync-button sync-${liveSyncStatus.connection}`} aria-label="Open campaign connection and recovery" title="Campaign connection and recovery" onClick={() => setShowLiveSync(true)}><Cloud size={16} /><span>{liveSyncStatus.connection === "live" ? "Live sync" : syncLinks.length ? "Reconnect" : "Connect campaign"}</span>{syncOutbox.length > 0 && <b>{syncOutbox.length}</b>}</button>
           <button className="button button-quiet" onClick={() => setShowCampaigns(true)}><Flag size={16} /><span>Campaigns</span>{activeCampaignProfile && <b>1</b>}</button>
           <button className="button button-quiet" onClick={() => setShowLibrary(true)}><LibraryBig size={16} /><span>Content library</span><b>{content.length}</b></button>
           <button className="button button-outline" onClick={exportPdf}><Download size={16} /><span>Export PDF</span></button>
@@ -2599,6 +2620,7 @@ export function CharacterManager() {
         <div className="roster-heading"><div><span className="eyebrow">Your party</span><h2>Characters</h2></div><button className="icon-button mobile-only" onClick={() => setShowRoster(false)} aria-label="Close roster"><X size={18} /></button></div>
         <button className="button button-create" onClick={() => { setCharacter(createCampaignDraft()); setTab("character"); setShowRoster(false); setStatus("New character draft"); }}><Plus size={17} />Create character</button>
         <label className="search-field"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a character" /></label>
+        <button className="button button-outline roster-connection-button" onClick={() => { setShowRoster(false); setShowLiveSync(true); }}><Cloud size={16} />{liveSyncStatus.connection === "live" ? "Campaign connection" : syncLinks.length ? "Reconnect to campaign" : "Connect to campaign"}</button>
         <div className="character-list">
           {visibleCharacters.map((item, index) => (
             <div key={item.id} className={`character-row ${item.id === character.id ? "active" : ""}`}>
@@ -2813,7 +2835,7 @@ export function CharacterManager() {
       </div>}
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-      {showLiveSync && <LiveSyncPanel status={liveSyncStatus} appRole={appRole} characters={characters} links={syncLinks} campaigns={liveCampaigns} activeCampaignId={activeLiveCampaignId} onClose={() => setShowLiveSync(false)} onRequestDmLink={requestDmMagicLink} onCreateCampaign={createLiveCampaign} onSelectCampaign={(campaignId) => selectLiveCampaign(campaignId)} onCreateInvitation={createLiveInvitation} onRedeemInvitation={redeemLiveInvitation} onUnlinkCharacter={unlinkLiveCharacter} onSignOut={signOutLiveSync} />}
+      {showLiveSync && <LiveSyncPanel status={liveSyncStatus} appRole={appRole} characters={characters} links={syncLinks} campaigns={liveCampaigns} activeCampaignId={activeLiveCampaignId} onClose={() => setShowLiveSync(false)} onReconnect={reconnectLiveSync} onRequestDmLink={requestDmMagicLink} onCreateCampaign={createLiveCampaign} onSelectCampaign={(campaignId) => selectLiveCampaign(campaignId)} onCreateInvitation={createLiveInvitation} onRedeemInvitation={redeemLiveInvitation} onUnlinkCharacter={unlinkLiveCharacter} onSignOut={signOutLiveSync} />}
 
       <div className={`drawer-scrim ${showLibrary || showRoster || showCampaigns ? "visible" : ""}`} onClick={() => { setShowLibrary(false); setShowRoster(false); setShowCampaigns(false); }} />
       {showLibrary && <ContentPackWorkshop packs={customPacks} disabledPackIds={disabledPackIds} bundledPackId={bundledPackId} onClose={() => setShowLibrary(false)} onImport={() => fileInput.current?.click()} onSave={saveContentPack} onRemove={removePack} onToggle={toggleContentPack} onExport={exportContentPack} />}

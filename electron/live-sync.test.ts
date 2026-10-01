@@ -9,6 +9,7 @@ const { configured, createLiveSync, normalizeServiceError, sessionSummary } = re
   configured: (config: unknown) => boolean;
   createLiveSync: (options: Record<string, unknown>) => {
     initialize: () => Promise<unknown>;
+    retryConnection: () => Promise<unknown>;
     ensureAnonymousPlayer: () => Promise<unknown>;
     subscribe: (campaignId: string, presence: { role: "player"; displayName: string }, characterId: string) => Promise<unknown>;
     unsubscribe: () => Promise<unknown>;
@@ -241,6 +242,66 @@ describe("saved login and player recovery", () => {
     expect(existsSync(sessionFile)).toBe(true);
     await sync.signOut();
     expect(existsSync(sessionFile)).toBe(false);
+  });
+
+  it("manually retries an offline login immediately using the original identity", async () => {
+    vi.useFakeTimers();
+    const { sync, client, sessionFile } = fixture();
+    client.auth.setSession.mockResolvedValueOnce({ data: { session: playerSession }, error: { name: "AuthRetryableFetchError", message: "Failed to fetch", status: 0 } });
+    await sync.initialize();
+    expect(sync.status()).toMatchObject({ connection: "offline", authenticated: false });
+    await expect(sync.retryConnection()).resolves.toMatchObject({ authenticated: true, userId: "player", connection: "connecting" });
+    expect(client.auth.setSession).toHaveBeenCalledTimes(2);
+    expect(client.auth.signOut).not.toHaveBeenCalled();
+    expect(client.auth.signInAnonymously).not.toHaveBeenCalled();
+    expect(existsSync(sessionFile)).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(client.auth.setSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an authenticated identity when manually reconnecting", async () => {
+    const { sync, client } = fixture();
+    await sync.initialize();
+    await expect(sync.retryConnection()).resolves.toMatchObject({ authenticated: true, userId: "player" });
+    expect(client.auth.setSession).toHaveBeenCalledOnce();
+    expect(client.auth.signOut).not.toHaveBeenCalled();
+    expect(client.auth.signInAnonymously).not.toHaveBeenCalled();
+  });
+
+  it("directs a player with missing credentials to recovery without creating a new identity", async () => {
+    const { sync, client } = fixture(null);
+    await sync.initialize();
+    await expect(sync.retryConnection()).resolves.toMatchObject({ authenticated: false, connection: "signed-out", message: expect.stringContaining("DM recovery code") });
+    expect(client.auth.signInAnonymously).not.toHaveBeenCalled();
+    expect(client.auth.signOut).not.toHaveBeenCalled();
+  });
+
+  it("keeps expired credentials and reports a failed manual retry", async () => {
+    const { sync, client, sessionFile } = fixture();
+    client.auth.setSession.mockResolvedValue({ data: { session: playerSession }, error: { status: 400, message: "Refresh token expired" } });
+    await sync.initialize();
+    await expect(sync.retryConnection()).resolves.toMatchObject({ authenticated: false, message: "Refresh token expired" });
+    expect(existsSync(sessionFile)).toBe(true);
+    expect(client.auth.signInAnonymously).not.toHaveBeenCalled();
+  });
+
+  it("rejects a second manual retry while saved credentials are restoring", async () => {
+    const { sync, client } = fixture();
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    client.auth.setSession.mockImplementationOnce(async () => {
+      await pending;
+      return { data: { session: playerSession }, error: null };
+    });
+    const initialize = sync.initialize();
+    await vi.waitFor(() => expect(client.auth.setSession).toHaveBeenCalledOnce());
+    try {
+      await expect(sync.retryConnection()).rejects.toThrow("already reconnecting");
+      expect(client.auth.signInAnonymously).not.toHaveBeenCalled();
+    } finally {
+      finish();
+      await initialize;
+    }
   });
 
   it("does not erase the saved file on an unsolicited signed-out event", async () => {

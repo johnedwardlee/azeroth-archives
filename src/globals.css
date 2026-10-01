@@ -332,10 +332,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 
 .live-sync-button { position: relative; }
+.roster-connection-button { flex: 0 0 auto; margin: 0 0 12px; }
+@media (max-width: 720px) {
+  .topbar-actions .live-sync-button { display: inline-flex; padding: 0 10px; }
+}
 .live-sync-button b { min-width: 18px; height: 18px; display: inline-grid; place-items: center; margin-left: 2px; border-radius: 999px; color: white; background: var(--gold); font-size: 9px; }
-.live-sync-button.sync-connected svg { color: #5f9b78; }
+.live-sync-button.sync-live svg { color: #5f9b78; }
 .live-sync-button.sync-reconnecting svg, .live-sync-button.sync-connecting svg { color: var(--gold); }
-.live-sync-button.sync-error svg { color: var(--red); }
+.live-sync-button.sync-error svg, .live-sync-button.sync-offline svg, .live-sync-button.sync-signed-out svg { color: var(--red); }
 
 .sync-panel-scrim { position: fixed; z-index: 90; inset: 0; display: flex; justify-content: flex-end; background: rgba(10, 19, 15, .64); backdrop-filter: blur(4px); }
 .sync-panel { width: min(520px, 100vw); height: 100%; padding: 30px; overflow-y: auto; border-left: 1px solid rgba(213, 184, 112, .5); background: var(--paper); box-shadow: -24px 0 70px rgba(8, 16, 12, .35); }
@@ -347,8 +351,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sync-connection div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .sync-connection strong { color: var(--forest-800); font-size: 10px; letter-spacing: .06em; text-transform: capitalize; }
 .sync-connection small { color: var(--muted); font-size: 10px; }
-.sync-connection.sync-connected { border-color: #b9d2c2; background: #edf4ef; }
-.sync-connection.sync-connected > span { color: #397457; }
+.sync-connection.sync-live { border-color: #b9d2c2; background: #edf4ef; }
+.sync-connection.sync-live > span { color: #397457; }
 .sync-connection.sync-error { border-color: #ddb6b0; background: #f8ece9; }
 .sync-connection.sync-error > span { color: var(--red); }
 .sync-setup-note { display: flex; gap: 12px; margin: 16px 0; padding: 15px; border-left: 3px solid var(--gold); border-radius: 7px; color: #6b5128; background: #f7edd9; }
@@ -383,7 +387,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sync-history-choice span { display: grid; gap: 2px; }
 .sync-history-choice small { color: var(--muted); }
 .sync-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.sync-feedback { margin: 14px 0; padding: 10px 12px; border-radius: 7px; color: var(--forest-700); background: var(--forest-100); font-size: 10px; line-height: 1.45; }
+.sync-feedback { position: sticky; top: 0; z-index: 1; margin: 14px 0; padding: 10px 12px; border-radius: 7px; color: var(--forest-700); background: var(--forest-100); font-size: 10px; line-height: 1.45; }
 .sync-signout { margin-top: 12px; }
 
 .encounter-roll-toolbar { justify-content: flex-start; }
